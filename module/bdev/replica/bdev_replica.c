@@ -69,6 +69,8 @@ static TAILQ_HEAD(, replica_bdev_module) g_replica_modules = TAILQ_HEAD_INITIALI
 
 /* Function declarations */
 static void	replica_bdev_examine(struct spdk_bdev *bdev);
+static int	replica_bdev_start(struct replica_bdev *bdev);
+static void	replica_bdev_stop(struct replica_bdev *bdev);
 static int	replica_bdev_init(void);
 static void	replica_bdev_deconfigure(struct replica_bdev *replica_bdev,
 				      replica_bdev_destruct_cb cb_fn, void *cb_arg);
@@ -384,6 +386,7 @@ _replica_bdev_submit_rw_request(void *_replica_io)
 static void
 replica_bdev_submit_rw_request(struct replica_bdev_io *replica_io)
 {
+	struct spdk_bdev_io		*bdev_io = spdk_bdev_io_from_ctx(replica_io);
 	struct replica_bdev		*replica_bdev;
 	int				ret;
 	uint8_t				i;
@@ -401,15 +404,15 @@ replica_bdev_submit_rw_request(struct replica_bdev_io *replica_io)
 		base_info = &replica_bdev->base_bdev_info[i];
 		base_ch = replica_io->replica_ch->base_channel[i];
 
-		if (replica_io->type == SPDK_BDEV_IO_TYPE_READ) {
+		if (bdev_io->type == SPDK_BDEV_IO_TYPE_READ) {
 			ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
-							replica_io->u.bdev.iovs, replica_io->u.bdev.iovcnt,
-							pd_lba, pd_blocks, replica_base_bdev_rw_complete,
+							bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
+							bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, replica_base_bdev_rw_complete,
 							replica_io);
-		} else if (replica_io->type == SPDK_BDEV_IO_TYPE_WRITE) {
+		} else if (bdev_io->type == SPDK_BDEV_IO_TYPE_WRITE) {
 			ret = spdk_bdev_writev_blocks(base_info->desc, base_ch,
-							replica_io->u.bdev.iovs, replica_io->u.bdev.iovcnt,
-							pd_lba, pd_blocks, replica_base_bdev_rw_complete,
+							bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
+							bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, replica_base_bdev_rw_complete,
 							replica_io);
 		} else {
 			SPDK_ERRLOG("Recvd not supported io type %u\n", replica_io->type);
@@ -539,6 +542,7 @@ _replica_bdev_submit_null_payload_request(void *_replica_io)
 static void
 replica_bdev_submit_null_payload_request(struct replica_bdev_io *replica_io)
 {
+	struct spdk_bdev_io		*bdev_io = spdk_bdev_io_from_ctx(replica_io);
 	struct replica_bdev		*replica_bdev;
 	int				ret;
 	uint8_t				i;
@@ -556,16 +560,16 @@ replica_bdev_submit_null_payload_request(struct replica_bdev_io *replica_io)
 		base_info = &replica_bdev->base_bdev_info[i];
 		base_ch = replica_io->replica_ch->base_channel[i];
 
-		switch (replica_io->type) {
+		switch (bdev_io->type) {
 		case SPDK_BDEV_IO_TYPE_UNMAP:
 			ret = spdk_bdev_unmap_blocks(base_info->desc, base_ch,
-						     replica_io->u.bdev.offset_blocks, replica_io->u.bdev.num_blocks,
+						     bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks,
 						     replica_base_bdev_null_payload_complete, replica_io);
 			break;
 
 		case SPDK_BDEV_IO_TYPE_FLUSH:
 			ret = spdk_bdev_flush_blocks(base_info->desc, base_ch,
-						     replica_io->u.bdev.offset_blocks, replica_io->u.bdev.num_blocks
+						     bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks,
 						     replica_base_bdev_null_payload_complete, replica_io);
 			break;
 
