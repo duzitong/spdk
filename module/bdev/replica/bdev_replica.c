@@ -415,7 +415,7 @@ replica_bdev_submit_rw_request(struct replica_bdev_io *replica_io)
 							bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, replica_base_bdev_rw_complete,
 							replica_io);
 		} else {
-			SPDK_ERRLOG("Recvd not supported io type %u\n", replica_io->type);
+			SPDK_ERRLOG("Recvd not supported io type %u\n", bdev_io->type);
 			assert(0);
 		}
 
@@ -683,13 +683,6 @@ inline static bool
 _replica_bdev_io_type_supported(struct replica_bdev *replica_bdev, enum spdk_bdev_io_type io_type)
 {
 	struct replica_base_bdev_info *base_info;
-
-	if (io_type == SPDK_BDEV_IO_TYPE_FLUSH ||
-	    io_type == SPDK_BDEV_IO_TYPE_UNMAP) {
-		if (replica_bdev_submit_null_payload_request == NULL) {
-			return false;
-		}
-	}
 
 	REPLICA_FOR_EACH_BASE_BDEV(replica_bdev, base_info) {
 		if (base_info->bdev == NULL) {
@@ -1598,8 +1591,7 @@ replica_bdev_start(struct replica_bdev *replica_bdev)
 	 */
 	SPDK_DEBUGLOG(bdev_replica0, "min blockcount %" PRIu64 ",  numbasedev %u, strip size shift %u\n",
 		      min_blockcnt, replica_bdev->num_base_bdevs, replica_bdev->strip_size_shift);
-	replica_bdev->bdev.blockcnt = ((min_blockcnt >> replica_bdev->strip_size_shift) <<
-				    replica_bdev->strip_size_shift)  * replica_bdev->num_base_bdevs;
+	replica_bdev->bdev.blockcnt = min_blockcnt;
 
 	return 0;
 }
