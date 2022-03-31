@@ -265,9 +265,7 @@ replica_bdev_destruct(void *ctxt)
 
 	if (g_shutdown_started) {
 		TAILQ_REMOVE(&g_replica_bdev_configured_list, replica_bdev, state_link);
-		if (replica_bdev->module->stop != NULL) {
-			replica_bdev->module->stop(replica_bdev);
-		}
+		replica_bdev_stop(replica_bdev);
 		replica_bdev->state = REPLICA_BDEV_STATE_OFFLINE;
 		TAILQ_INSERT_TAIL(&g_replica_bdev_offline_list, replica_bdev, state_link);
 	}
@@ -349,6 +347,92 @@ replica_bdev_queue_io_wait(struct replica_bdev_io *replica_io, struct spdk_bdev 
 	spdk_bdev_queue_io_wait(bdev, ch, &replica_io->waitq_entry);
 }
 
+// TODO -
+static void
+replica_base_bdev_rw_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
+{
+	struct replica_bdev_io *replica_io = cb_arg;
+
+	spdk_bdev_free_io(bdev_io);
+
+	replica_bdev_io_complete_part(replica_io, 1, success ?
+				   SPDK_BDEV_IO_STATUS_SUCCESS :
+				   SPDK_BDEV_IO_STATUS_FAILED);
+}
+
+static void
+replica_bdev_submit_rw_request(struct replica_bdev_io *replica_io);
+
+static void
+_replica_bdev_submit_rw_request(void *_replica_io)
+{
+	struct replica_bdev_io *replica_io = _replica_io;
+
+	replica_bdev_submit_rw_request(replica_io);
+}
+
+/*
+ * brief:
+ * replica_bdev_submit_rw_request function submits rw requests
+ * to member disks; it will submit as many as possible unless a rw fails with -ENOMEM, in
+ * which case it will queue it for later submission
+ * params:
+ * replica_io
+ * returns:
+ * none
+ */
+static void
+replica_bdev_submit_rw_request(struct replica_bdev_io *replica_io)
+{
+	struct replica_bdev		*replica_bdev;
+	int				ret;
+	uint8_t				i;
+	struct replica_base_bdev_info	*base_info;
+	struct spdk_io_channel		*base_ch;
+
+	replica_bdev = replica_io->replica_bdev;
+
+	if (replica_io->base_bdev_io_remaining == 0) {
+		replica_io->base_bdev_io_remaining = replica_bdev->num_base_bdevs;
+	}
+
+	while (replica_io->base_bdev_io_submitted < replica_bdev->num_base_bdevs) {
+		i = replica_io->base_bdev_io_submitted;
+		base_info = &replica_bdev->base_bdev_info[i];
+		base_ch = replica_io->replica_ch->base_channel[i];
+
+		if (replica_io->type == SPDK_BDEV_IO_TYPE_READ) {
+			ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
+							replica_io->u.bdev.iovs, replica_io->u.bdev.iovcnt,
+							pd_lba, pd_blocks, replica_base_bdev_rw_complete,
+							replica_io);
+		} else if (replica_io->type == SPDK_BDEV_IO_TYPE_WRITE) {
+			ret = spdk_bdev_writev_blocks(base_info->desc, base_ch,
+							replica_io->u.bdev.iovs, replica_io->u.bdev.iovcnt,
+							pd_lba, pd_blocks, replica_base_bdev_rw_complete,
+							replica_io);
+		} else {
+			SPDK_ERRLOG("Recvd not supported io type %u\n", replica_io->type);
+			assert(0);
+		}
+
+		if (ret == 0) {
+			replica_io->base_bdev_io_submitted++;
+		} else if (ret == -ENOMEM) {
+			replica_bdev_queue_io_wait(replica_io, base_info->bdev, base_ch,
+						_replica_bdev_submit_rw_request);
+			return;
+		} else {
+			SPDK_ERRLOG("bdev io submit error not due to ENOMEM, it should not happen\n");
+			assert(false);
+			replica_bdev_io_complete(replica_io, SPDK_BDEV_IO_STATUS_FAILED);
+			return;
+		}
+	}
+}
+
+// TODO - end
+
 static void
 replica_base_bdev_reset_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
@@ -418,6 +502,95 @@ replica_bdev_submit_reset_request(struct replica_bdev_io *replica_io)
 	}
 }
 
+// TODO - start
+static void
+replica_base_bdev_null_payload_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
+{
+	struct replica_bdev_io *replica_io = cb_arg;
+
+	spdk_bdev_free_io(bdev_io);
+
+	replica_bdev_io_complete_part(replica_io, 1, success ?
+				   SPDK_BDEV_IO_STATUS_SUCCESS :
+				   SPDK_BDEV_IO_STATUS_FAILED);
+}
+
+static void
+replica_bdev_submit_null_payload_request(struct replica_bdev_io *replica_io);
+
+static void
+_replica_bdev_submit_null_payload_request(void *_replica_io)
+{
+	struct replica_bdev_io *replica_io = _replica_io;
+
+	replica_bdev_submit_null_payload_request(replica_io);
+}
+
+/*
+ * brief:
+ * replica_bdev_submit_reset_request function submits reset requests
+ * to member disks; it will submit as many as possible unless a reset fails with -ENOMEM, in
+ * which case it will queue it for later submission
+ * params:
+ * replica_io
+ * returns:
+ * none
+ */
+static void
+replica_bdev_submit_null_payload_request(struct replica_bdev_io *replica_io)
+{
+	struct replica_bdev		*replica_bdev;
+	int				ret;
+	uint8_t				i;
+	struct replica_base_bdev_info	*base_info;
+	struct spdk_io_channel		*base_ch;
+
+	replica_bdev = replica_io->replica_bdev;
+
+	if (replica_io->base_bdev_io_remaining == 0) {
+		replica_io->base_bdev_io_remaining = replica_bdev->num_base_bdevs;
+	}
+
+	while (replica_io->base_bdev_io_submitted < replica_bdev->num_base_bdevs) {
+		i = replica_io->base_bdev_io_submitted;
+		base_info = &replica_bdev->base_bdev_info[i];
+		base_ch = replica_io->replica_ch->base_channel[i];
+
+		switch (replica_io->type) {
+		case SPDK_BDEV_IO_TYPE_UNMAP:
+			ret = spdk_bdev_unmap_blocks(base_info->desc, base_ch,
+						     replica_io->u.bdev.offset_blocks, replica_io->u.bdev.num_blocks,
+						     replica_base_bdev_null_payload_complete, replica_io);
+			break;
+
+		case SPDK_BDEV_IO_TYPE_FLUSH:
+			ret = spdk_bdev_flush_blocks(base_info->desc, base_ch,
+						     replica_io->u.bdev.offset_blocks, replica_io->u.bdev.num_blocks
+						     replica_base_bdev_null_payload_complete, replica_io);
+			break;
+
+		default:
+			SPDK_ERRLOG("submit request, invalid io type with null payload %u\n", bdev_io->type);
+			assert(false);
+			ret = -EIO;
+		}
+		
+		if (ret == 0) {
+			replica_io->base_bdev_io_submitted++;
+		} else if (ret == -ENOMEM) {
+			replica_bdev_queue_io_wait(replica_io, base_info->bdev, base_ch,
+						_replica_bdev_submit_null_payload_request);
+			return;
+		} else {
+			SPDK_ERRLOG("bdev io submit error not due to ENOMEM, it should not happen\n");
+			assert(false);
+			replica_bdev_io_complete(replica_io, SPDK_BDEV_IO_STATUS_FAILED);
+			return;
+		}
+	}
+}
+// TODO - end
+
 /*
  * brief:
  * Callback function to spdk_bdev_io_get_buf.
@@ -439,7 +612,7 @@ replica_bdev_get_buf_cb(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_io
 		return;
 	}
 
-	replica_io->replica_bdev->module->submit_rw_request(replica_io);
+	replica_bdev_submit_rw_request(replica_io);
 }
 
 /*
@@ -470,7 +643,7 @@ replica_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bde
 				     bdev_io->u.bdev.num_blocks * bdev_io->bdev->blocklen);
 		break;
 	case SPDK_BDEV_IO_TYPE_WRITE:
-		replica_io->replica_bdev->module->submit_rw_request(replica_io);
+		replica_bdev_submit_rw_request(replica_io);
 		break;
 
 	case SPDK_BDEV_IO_TYPE_RESET:
@@ -479,7 +652,7 @@ replica_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bde
 
 	case SPDK_BDEV_IO_TYPE_FLUSH:
 	case SPDK_BDEV_IO_TYPE_UNMAP:
-		replica_io->replica_bdev->module->submit_null_payload_request(replica_io);
+		replica_bdev_submit_null_payload_request(replica_io);
 		break;
 
 	default:
@@ -509,7 +682,7 @@ _replica_bdev_io_type_supported(struct replica_bdev *replica_bdev, enum spdk_bde
 
 	if (io_type == SPDK_BDEV_IO_TYPE_FLUSH ||
 	    io_type == SPDK_BDEV_IO_TYPE_UNMAP) {
-		if (replica_bdev->module->submit_null_payload_request == NULL) {
+		if (replica_bdev_submit_null_payload_request == NULL) {
 			return false;
 		}
 	}
@@ -1087,7 +1260,7 @@ replica_bdev_configure(struct replica_bdev *replica_bdev)
 	replica_bdev_gen = &replica_bdev->bdev;
 	replica_bdev_gen->blocklen = blocklen;
 
-	rc = replica_bdev->module->start(replica_bdev);
+	rc = replica_bdev_start(replica_bdev);
 	if (rc != 0) {
 		SPDK_ERRLOG("replica module startup callback failed\n");
 		return rc;
@@ -1102,9 +1275,7 @@ replica_bdev_configure(struct replica_bdev *replica_bdev)
 	rc = spdk_bdev_register(replica_bdev_gen);
 	if (rc != 0) {
 		SPDK_ERRLOG("Unable to register replica bdev and stay at configuring state\n");
-		if (replica_bdev->module->stop != NULL) {
-			replica_bdev->module->stop(replica_bdev);
-		}
+		replica_bdev_stop(replica_bdev);
 		spdk_io_device_unregister(replica_bdev, NULL);
 		replica_bdev->state = REPLICA_BDEV_STATE_CONFIGURING;
 		return rc;
@@ -1143,9 +1314,7 @@ replica_bdev_deconfigure(struct replica_bdev *replica_bdev, replica_bdev_destruc
 
 	assert(replica_bdev->num_base_bdevs == replica_bdev->num_base_bdevs_discovered);
 	TAILQ_REMOVE(&g_replica_bdev_configured_list, replica_bdev, state_link);
-	if (replica_bdev->module->stop != NULL) {
-		replica_bdev->module->stop(replica_bdev);
-	}
+	replica_bdev_stop(replica_bdev);
 	replica_bdev->state = REPLICA_BDEV_STATE_OFFLINE;
 	assert(replica_bdev->num_base_bdevs_discovered);
 	TAILQ_INSERT_TAIL(&g_replica_bdev_offline_list, replica_bdev, state_link);
@@ -1405,6 +1574,36 @@ replica_bdev_add_base_devices(struct replica_bdev_config *replica_cfg)
 	}
 
 	return rc;
+}
+
+static int
+replica_bdev_start(struct replica_bdev *replica_bdev)
+{
+	uint64_t min_blockcnt = UINT64_MAX;
+	struct replica_base_bdev_info *base_info;
+
+	REPLICA_FOR_EACH_BASE_BDEV(replica_bdev, base_info) {
+		/* Calculate minimum block count from all base bdevs */
+		min_blockcnt = spdk_min(min_blockcnt, base_info->bdev->blockcnt);
+	}
+
+	/*
+	 * Take the minimum block count based approach where total block count
+	 * of replica bdev is the number of base bdev times the minimum block count
+	 * of any base bdev.
+	 */
+	SPDK_DEBUGLOG(bdev_replica0, "min blockcount %" PRIu64 ",  numbasedev %u, strip size shift %u\n",
+		      min_blockcnt, replica_bdev->num_base_bdevs, replica_bdev->strip_size_shift);
+	replica_bdev->bdev.blockcnt = ((min_blockcnt >> replica_bdev->strip_size_shift) <<
+				    replica_bdev->strip_size_shift)  * replica_bdev->num_base_bdevs;
+
+	return 0;
+}
+
+static void
+replica_bdev_stop(struct replica_bdev *replica_bdev)
+{
+	// flush?
 }
 
 /*
