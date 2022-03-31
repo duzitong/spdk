@@ -43,6 +43,7 @@
 #include "spdk/thread.h"
 #include "spdk/util.h"
 #include "spdk/bdev_module.h"
+#include "spdk/likely.h"
 
 #include "spdk/log.h"
 
@@ -431,8 +432,10 @@ _reduce_rw_blocks_cb(void *arg)
 {
 	struct comp_bdev_io *io_ctx = arg;
 
-	if (io_ctx->status == 0) {
+	if (spdk_likely(io_ctx->status == 0)) {
 		spdk_bdev_io_complete(io_ctx->orig_io, SPDK_BDEV_IO_STATUS_SUCCESS);
+	} else if (io_ctx->status == -ENOMEM) {
+		vbdev_compress_queue_io(spdk_bdev_io_from_ctx(io_ctx));
 	} else {
 		SPDK_ERRLOG("status %d on operation from reduce API\n", io_ctx->status);
 		spdk_bdev_io_complete(io_ctx->orig_io, SPDK_BDEV_IO_STATUS_FAILED);
@@ -459,7 +462,7 @@ reduce_rw_blocks_cb(void *arg, int reduce_errno)
 	spdk_thread_exec_msg(orig_thread, _reduce_rw_blocks_cb, io_ctx);
 }
 
-static uint64_t
+static int
 _setup_compress_mbuf(struct rte_mbuf **mbufs, int *mbuf_total, uint64_t *total_length,
 		     struct iovec *iovs, int iovcnt, void *reduce_cb_arg)
 {
@@ -540,7 +543,6 @@ _compress_operation(struct spdk_reduce_backing_dev *backing_dev, struct iovec *s
 	uint64_t total_length = 0;
 	int rc = 0;
 	struct vbdev_comp_op *op_to_queue;
-	int i;
 	int src_mbuf_total = src_iovcnt;
 	int dst_mbuf_total = dst_iovcnt;
 	bool device_error = false;
@@ -555,6 +557,7 @@ _compress_operation(struct spdk_reduce_backing_dev *backing_dev, struct iovec *s
 	comp_op = rte_comp_op_alloc(g_comp_op_mp);
 	if (!comp_op) {
 		SPDK_ERRLOG("trying to get a comp op!\n");
+		rc = -ENOMEM;
 		goto error_get_op;
 	}
 
@@ -562,23 +565,37 @@ _compress_operation(struct spdk_reduce_backing_dev *backing_dev, struct iovec *s
 	rc = rte_pktmbuf_alloc_bulk(g_mbuf_mp, (struct rte_mbuf **)&src_mbufs[0], src_iovcnt);
 	if (rc) {
 		SPDK_ERRLOG("ERROR trying to get src_mbufs!\n");
+		rc = -ENOMEM;
 		goto error_get_src;
 	}
+	assert(src_mbufs[0]);
 
 	rc = rte_pktmbuf_alloc_bulk(g_mbuf_mp, (struct rte_mbuf **)&dst_mbufs[0], dst_iovcnt);
 	if (rc) {
 		SPDK_ERRLOG("ERROR trying to get dst_mbufs!\n");
+		rc = -ENOMEM;
 		goto error_get_dst;
 	}
+	assert(dst_mbufs[0]);
 
-	/* There is a 1:1 mapping between a bdev_io and a compression operation, but
-	 * all compression PMDs that SPDK uses support chaining so build our mbuf chain
-	 * and associate with our single comp_op.
+	/* There is a 1:1 mapping between a bdev_io and a compression operation
+	 * Some PMDs that SPDK uses don't support chaining, but reduce library should
+	 * provide correct buffers
+	 * Build our mbuf chain and associate it with our single comp_op.
 	 */
-
-	rc = _setup_compress_mbuf(&src_mbufs[0], &src_mbuf_total, &total_length,
+	rc = _setup_compress_mbuf(src_mbufs, &src_mbuf_total, &total_length,
 				  src_iovs, src_iovcnt, reduce_cb_arg);
 	if (rc < 0) {
+		goto error_src_dst;
+	}
+	if (!comp_bdev->backing_dev.sgl_in && src_mbufs[0]->next != NULL) {
+		if (src_iovcnt == 1) {
+			SPDK_ERRLOG("Src buffer crosses 2MB boundary but driver %s doesn't support SGL input\n",
+				    comp_bdev->drv_name);
+		} else {
+			SPDK_ERRLOG("Driver %s doesn't support SGL input\n", comp_bdev->drv_name);
+		}
+		rc = -EINVAL;
 		goto error_src_dst;
 	}
 
@@ -586,10 +603,19 @@ _compress_operation(struct spdk_reduce_backing_dev *backing_dev, struct iovec *s
 	comp_op->src.offset = 0;
 	comp_op->src.length = total_length;
 
-	/* setup dst mbufs, for the current test being used with this code there's only one vector */
-	rc = _setup_compress_mbuf(&dst_mbufs[0], &dst_mbuf_total, NULL,
+	rc = _setup_compress_mbuf(dst_mbufs, &dst_mbuf_total, NULL,
 				  dst_iovs, dst_iovcnt, reduce_cb_arg);
 	if (rc < 0) {
+		goto error_src_dst;
+	}
+	if (!comp_bdev->backing_dev.sgl_out && dst_mbufs[0]->next != NULL) {
+		if (dst_iovcnt == 1) {
+			SPDK_ERRLOG("Dst buffer crosses 2MB boundary but driver %s doesn't support SGL output\n",
+				    comp_bdev->drv_name);
+		} else {
+			SPDK_ERRLOG("Driver %s doesn't support SGL output\n", comp_bdev->drv_name);
+		}
+		rc = -EINVAL;
 		goto error_src_dst;
 	}
 
@@ -612,26 +638,17 @@ _compress_operation(struct spdk_reduce_backing_dev *backing_dev, struct iovec *s
 	if (rc == 1) {
 		return 0;
 	} else if (comp_op->status == RTE_COMP_OP_STATUS_NOT_PROCESSED) {
-		/* we free mbufs differently depending on whether they were chained or not */
-		rte_pktmbuf_free(comp_op->m_src);
-		rte_pktmbuf_free(comp_op->m_dst);
-		goto error_enqueue;
+		rc = -EAGAIN;
 	} else {
 		device_error = true;
-		goto error_src_dst;
 	}
 
 	/* Error cleanup paths. */
 error_src_dst:
-	for (i = 0; i < dst_mbuf_total; i++) {
-		rte_pktmbuf_free((struct rte_mbuf *)&dst_mbufs[i]);
-	}
+	rte_pktmbuf_free_bulk(dst_mbufs, dst_iovcnt);
 error_get_dst:
-	for (i = 0; i < src_mbuf_total; i++) {
-		rte_pktmbuf_free((struct rte_mbuf *)&src_mbufs[i]);
-	}
+	rte_pktmbuf_free_bulk(src_mbufs, src_iovcnt);
 error_get_src:
-error_enqueue:
 	rte_comp_op_free(comp_op);
 error_get_op:
 
@@ -641,6 +658,9 @@ error_get_op:
 		 */
 		SPDK_ERRLOG("Compression API returned 0x%x\n", comp_op->status);
 		return -EINVAL;
+	}
+	if (rc != -ENOMEM && rc != -EAGAIN) {
+		return rc;
 	}
 
 	op_to_queue = calloc(1, sizeof(struct vbdev_comp_op));
@@ -766,6 +786,12 @@ comp_read_get_buf_cb(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_io, b
 	struct vbdev_compress *comp_bdev = SPDK_CONTAINEROF(bdev_io->bdev, struct vbdev_compress,
 					   comp_bdev);
 
+	if (spdk_unlikely(!success)) {
+		SPDK_ERRLOG("Failed to get data buffer\n");
+		reduce_rw_blocks_cb(bdev_io, -ENOMEM);
+		return;
+	}
+
 	spdk_reduce_vol_readv(comp_bdev->vol, bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
 			      bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks,
 			      reduce_rw_blocks_cb, bdev_io);
@@ -793,7 +819,6 @@ _comp_bdev_io_submit(void *arg)
 	struct vbdev_compress *comp_bdev = SPDK_CONTAINEROF(bdev_io->bdev, struct vbdev_compress,
 					   comp_bdev);
 	struct spdk_thread *orig_thread;
-	int rc = 0;
 
 	switch (bdev_io->type) {
 	case SPDK_BDEV_IO_TYPE_READ:
@@ -805,35 +830,22 @@ _comp_bdev_io_submit(void *arg)
 				       bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks,
 				       reduce_rw_blocks_cb, bdev_io);
 		return;
-	/* TODO in future patch in the series */
+	/* TODO support RESET in future patch in the series */
 	case SPDK_BDEV_IO_TYPE_RESET:
-		break;
 	case SPDK_BDEV_IO_TYPE_WRITE_ZEROES:
 	case SPDK_BDEV_IO_TYPE_UNMAP:
 	case SPDK_BDEV_IO_TYPE_FLUSH:
 	default:
 		SPDK_ERRLOG("Unknown I/O type %d\n", bdev_io->type);
-		rc = -EINVAL;
-	}
+		io_ctx->status = -ENOTSUP;
 
-	if (rc) {
-		if (rc == -ENOMEM) {
-			SPDK_ERRLOG("No memory, start to queue io for compress.\n");
-			io_ctx->ch = ch;
-			vbdev_compress_queue_io(bdev_io);
-			return;
+		/* Complete this on the orig IO thread. */
+		orig_thread = spdk_io_channel_get_thread(ch);
+		if (orig_thread != spdk_get_thread()) {
+			spdk_thread_send_msg(orig_thread, _complete_other_io, io_ctx);
 		} else {
-			SPDK_ERRLOG("on bdev_io submission!\n");
-			io_ctx->status = rc;
+			_complete_other_io(io_ctx);
 		}
-	}
-
-	/* Complete this on the orig IO thread. */
-	orig_thread = spdk_io_channel_get_thread(ch);
-	if (orig_thread != spdk_get_thread()) {
-		spdk_thread_send_msg(orig_thread, _complete_other_io, io_ctx);
-	} else {
-		_complete_other_io(io_ctx);
 	}
 }
 
