@@ -389,7 +389,6 @@ replica_bdev_submit_read_request(struct replica_bdev_io *replica_io)
 	struct spdk_bdev_io		*bdev_io = spdk_bdev_io_from_ctx(replica_io);
 	struct replica_bdev		*replica_bdev;
 	int				ret;
-	uint8_t				i;
 	struct replica_base_bdev_info	*base_info;
 	struct spdk_io_channel		*base_ch;
 
