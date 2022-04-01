@@ -363,20 +363,20 @@ replica_base_bdev_rw_complete(struct spdk_bdev_io *bdev_io, bool success, void *
 }
 
 static void
-replica_bdev_submit_rw_request(struct replica_bdev_io *replica_io);
+replica_bdev_submit_read_request(struct replica_bdev_io *replica_io);
 
 static void
-_replica_bdev_submit_rw_request(void *_replica_io)
+_replica_bdev_submit_read_request(void *_replica_io)
 {
 	struct replica_bdev_io *replica_io = _replica_io;
 
-	replica_bdev_submit_rw_request(replica_io);
+	replica_bdev_submit_read_request(replica_io);
 }
 
 /*
  * brief:
- * replica_bdev_submit_rw_request function submits rw requests
- * to member disks; it will submit as many as possible unless a rw fails with -ENOMEM, in
+ * replica_bdev_submit_read_request function submits read requests
+ * to the first disk; it will submit as many as possible unless a read fails with -ENOMEM, in
  * which case it will queue it for later submission
  * params:
  * replica_io
@@ -384,7 +384,66 @@ _replica_bdev_submit_rw_request(void *_replica_io)
  * none
  */
 static void
-replica_bdev_submit_rw_request(struct replica_bdev_io *replica_io)
+replica_bdev_submit_read_request(struct replica_bdev_io *replica_io)
+{
+	struct spdk_bdev_io		*bdev_io = spdk_bdev_io_from_ctx(replica_io);
+	struct replica_bdev		*replica_bdev;
+	int				ret;
+	uint8_t				i;
+	struct replica_base_bdev_info	*base_info;
+	struct spdk_io_channel		*base_ch;
+
+	replica_bdev = replica_io->replica_bdev;
+
+	if (replica_io->base_bdev_io_remaining == 0) {
+		replica_io->base_bdev_io_remaining = 1;
+	}
+
+	base_info = &replica_bdev->base_bdev_info[0];
+	base_ch = replica_io->replica_ch->base_channel[0];
+
+	ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
+					bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
+					bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, replica_base_bdev_rw_complete,
+					replica_io);
+
+	if (ret != 0) {
+			if (ret == -ENOMEM) {
+			replica_bdev_queue_io_wait(replica_io, base_info->bdev, base_ch,
+						_replica_bdev_submit_read_request);
+			return;
+		} else {
+			SPDK_ERRLOG("bdev io submit error not due to ENOMEM, it should not happen\n");
+			assert(false);
+			replica_bdev_io_complete(replica_io, SPDK_BDEV_IO_STATUS_FAILED);
+			return;
+		}
+	}
+}
+
+static void
+replica_bdev_submit_write_request(struct replica_bdev_io *replica_io);
+
+static void
+_replica_bdev_submit_write_request(void *_replica_io)
+{
+	struct replica_bdev_io *replica_io = _replica_io;
+
+	replica_bdev_submit_write_request(replica_io);
+}
+
+/*
+ * brief:
+ * replica_bdev_submit_write_request function submits write requests
+ * to member disks; it will submit as many as possible unless a write fails with -ENOMEM, in
+ * which case it will queue it for later submission
+ * params:
+ * replica_io
+ * returns:
+ * none
+ */
+static void
+replica_bdev_submit_write_request(struct replica_bdev_io *replica_io)
 {
 	struct spdk_bdev_io		*bdev_io = spdk_bdev_io_from_ctx(replica_io);
 	struct replica_bdev		*replica_bdev;
@@ -404,26 +463,16 @@ replica_bdev_submit_rw_request(struct replica_bdev_io *replica_io)
 		base_info = &replica_bdev->base_bdev_info[i];
 		base_ch = replica_io->replica_ch->base_channel[i];
 
-		if (bdev_io->type == SPDK_BDEV_IO_TYPE_READ) {
-			ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
-							bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
-							bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, replica_base_bdev_rw_complete,
-							replica_io);
-		} else if (bdev_io->type == SPDK_BDEV_IO_TYPE_WRITE) {
-			ret = spdk_bdev_writev_blocks(base_info->desc, base_ch,
-							bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
-							bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, replica_base_bdev_rw_complete,
-							replica_io);
-		} else {
-			SPDK_ERRLOG("Recvd not supported io type %u\n", bdev_io->type);
-			assert(0);
-		}
+		ret = spdk_bdev_writev_blocks(base_info->desc, base_ch,
+						bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
+						bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, replica_base_bdev_rw_complete,
+						replica_io);
 
 		if (ret == 0) {
 			replica_io->base_bdev_io_submitted++;
 		} else if (ret == -ENOMEM) {
 			replica_bdev_queue_io_wait(replica_io, base_info->bdev, base_ch,
-						_replica_bdev_submit_rw_request);
+						_replica_bdev_submit_write_request);
 			return;
 		} else {
 			SPDK_ERRLOG("bdev io submit error not due to ENOMEM, it should not happen\n");
@@ -616,7 +665,7 @@ replica_bdev_get_buf_cb(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_io
 		return;
 	}
 
-	replica_bdev_submit_rw_request(replica_io);
+	replica_bdev_submit_read_request(replica_io);
 }
 
 /*
@@ -647,7 +696,7 @@ replica_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bde
 				     bdev_io->u.bdev.num_blocks * bdev_io->bdev->blocklen);
 		break;
 	case SPDK_BDEV_IO_TYPE_WRITE:
-		replica_bdev_submit_rw_request(replica_io);
+		replica_bdev_submit_write_request(replica_io);
 		break;
 
 	case SPDK_BDEV_IO_TYPE_RESET:
