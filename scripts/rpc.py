@@ -1937,7 +1937,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     p.set_defaults(func=bdev_raid_delete)
 
     # replica
-        def bdev_replica_get_bdevs(args):
+    def bdev_replica_get_bdevs(args):
         print_array(rpc.bdev.bdev_replica_get_bdevs(args.client,
                                                  category=args.category))
 
