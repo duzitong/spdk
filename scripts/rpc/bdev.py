@@ -364,6 +364,46 @@ def bdev_raid_delete(client, name):
     params = {'name': name}
     return client.call('bdev_raid_delete', params)
 
+def bdev_replica_get_bdevs(client, category):
+    """Get list of replica bdevs based on category
+
+    Args:
+        category: any one of all or online or configuring or offline
+
+    Returns:
+        List of replica bdev names
+    """
+    params = {'category': category}
+    return client.call('bdev_replica_get_bdevs', params)
+
+
+def bdev_replica_create(client, name, base_bdevs):
+    """Create replica bdev.
+
+    Args:
+        name: user defined replica bdev name
+        base_bdevs: Space separated names of Nvme bdevs in double quotes, like "Nvme0n1 Nvme1n1 Nvme2n1"
+
+    Returns:
+        None
+    """
+    params = {'name': name, 'base_bdevs': base_bdevs}
+
+    return client.call('bdev_replica_create', params)
+
+
+def bdev_replica_delete(client, name):
+    """Delete replica bdev
+
+    Args:
+        name: replica bdev name
+
+    Returns:
+        None
+    """
+    params = {'name': name}
+    return client.call('bdev_replica_delete', params)
+
 
 @deprecated_alias('construct_aio_bdev')
 def bdev_aio_create(client, filename, name, block_size=None):
