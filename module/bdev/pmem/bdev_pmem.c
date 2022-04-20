@@ -230,6 +230,7 @@ bdev_pmem_submit_request(struct spdk_io_channel *channel, struct spdk_bdev_io *b
 				      bdev_io->u.bdev.num_blocks,
 				      bdev_io->bdev->blocklen);
 		break;
+	case SPDK_BDEV_IO_TYPE_FLUSH:
 	case SPDK_BDEV_IO_TYPE_RESET:
 		spdk_bdev_io_complete(bdev_io, SPDK_BDEV_IO_STATUS_SUCCESS);
 		break;
@@ -247,6 +248,7 @@ bdev_pmem_io_type_supported(void *ctx, enum spdk_bdev_io_type io_type)
 	case SPDK_BDEV_IO_TYPE_RESET:
 	case SPDK_BDEV_IO_TYPE_UNMAP:
 	case SPDK_BDEV_IO_TYPE_WRITE_ZEROES:
+	case SPDK_BDEV_IO_TYPE_FLUSH:
 		return true;
 	default:
 		return false;
@@ -390,14 +392,14 @@ create_pmem_disk(const char *pmem_file, const char *name, struct spdk_bdev **bde
 }
 
 void
-delete_pmem_disk(struct spdk_bdev *bdev, spdk_delete_pmem_complete cb_fn, void *cb_arg)
+delete_pmem_disk(const char *name, spdk_delete_pmem_complete cb_fn, void *cb_arg)
 {
-	if (!bdev || bdev->module != &pmem_if) {
-		cb_fn(cb_arg, -ENODEV);
-		return;
-	}
+	int rc;
 
-	spdk_bdev_unregister(bdev, cb_fn, cb_arg);
+	rc = spdk_bdev_unregister_by_name(name, &pmem_if, cb_fn, cb_arg);
+	if (rc != 0) {
+		cb_fn(cb_arg, rc);
+	}
 }
 
 static int

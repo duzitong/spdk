@@ -103,6 +103,8 @@ export SPDK_TEST_NVMF
 export SPDK_TEST_VFIOUSER
 : ${SPDK_TEST_VFIOUSER_QEMU=0}
 export SPDK_TEST_VFIOUSER_QEMU
+: ${SPDK_TEST_FUZZER=0}
+export SPDK_TEST_FUZZER
 : ${SPDK_TEST_NVMF_TRANSPORT="rdma"}
 export SPDK_TEST_NVMF_TRANSPORT
 : ${SPDK_TEST_RBD=0}
@@ -169,7 +171,7 @@ export PCI_BLOCK_SYNC_ON_RESET=yes
 
 # Export PYTHONPATH with addition of RPC framework. New scripts can be created
 # specific use cases for tests.
-export PYTHONPATH=$PYTHONPATH:$rootdir/scripts
+export PYTHONPATH=$PYTHONPATH:$rootdir/python
 
 # Don't create Python .pyc files. When running with sudo these will be
 # created with root ownership and can cause problems when cleaning the repository.
@@ -716,7 +718,7 @@ function waitforlisten() {
 	xtrace_disable
 	local ret=0
 	local i
-	for ((i = 40; i != 0; i--)); do
+	for ((i = 100; i != 0; i--)); do
 		# if the process is no longer running, then exit the script
 		#  since it means the application crashed
 		if ! kill -s 0 $1; then
@@ -773,21 +775,15 @@ function waitfornbd() {
 
 function waitforbdev() {
 	local bdev_name=$1
+	local bdev_timeout=$2
 	local i
+	[[ -z $bdev_timeout ]] && bdev_timeout=2000 # ms
 
 	$rpc_py bdev_wait_for_examine
 
-	for ((i = 1; i <= 20; i++)); do
-		if $rpc_py bdev_get_bdevs | jq -r '.[] .name' | grep -qw $bdev_name; then
-			return 0
-		fi
-
-		if $rpc_py bdev_get_bdevs | jq -r '.[] .aliases' | grep -qw $bdev_name; then
-			return 0
-		fi
-
-		sleep 0.1
-	done
+	if $rpc_py bdev_get_bdevs -b $bdev_name -t $bdev_timeout; then
+		return 0
+	fi
 
 	return 1
 }
@@ -1126,6 +1122,7 @@ function fio_config_gen() {
 	local config_file=$1
 	local workload=$2
 	local bdev_type=$3
+	local env_context=$4
 	local fio_dir=$CONFIG_FIO_SOURCE_DIR
 
 	if [ -e "$config_file" ]; then
@@ -1137,11 +1134,16 @@ function fio_config_gen() {
 		workload=randrw
 	fi
 
+	if [ -n "$env_context" ]; then
+		env_context="env_context=$env_context"
+	fi
+
 	touch $1
 
 	cat > $1 << EOL
 [global]
 thread=1
+$env_context
 group_reporting=1
 direct=1
 norandommap=1

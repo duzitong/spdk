@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 
-from rpc.client import print_dict, print_json, JSONRPCException
-from rpc.helpers import deprecated_aliases
-
 import logging
 import argparse
 import importlib
-import rpc
+import os
 import sys
 import shlex
 import json
@@ -15,6 +12,12 @@ try:
     from shlex import quote
 except ImportError:
     from pipes import quote
+
+sys.path.append(os.path.dirname(__file__) + '/../python')
+
+import spdk.rpc as rpc  # noqa
+from spdk.rpc.client import print_dict, print_json, JSONRPCException  # noqa
+from spdk.rpc.helpers import deprecated_aliases  # noqa
 
 
 def print_array(a):
@@ -340,6 +343,23 @@ if __name__ == "__main__":
     p.add_argument('name', help='Name of OCF bdev')
     p.add_argument('mode', help='OCF cache mode', choices=['wb', 'wt', 'pt', 'wa', 'wi', 'wo'])
     p.set_defaults(func=bdev_ocf_set_cache_mode)
+
+    def bdev_ocf_set_seqcutoff(args):
+        rpc.bdev.bdev_ocf_set_seqcutoff(args.client,
+                                        name=args.name,
+                                        policy=args.policy,
+                                        threshold=args.threshold,
+                                        promotion_count=args.promotion_count)
+    p = subparsers.add_parser('bdev_ocf_set_seqcutoff',
+                              help='Set sequential cutoff parameters on all cores for the given OCF cache device')
+    p.add_argument('name', help='Name of OCF cache bdev')
+    p.add_argument('-t', '--threshold', type=int,
+                   help='Activation threshold [KiB]')
+    p.add_argument('-c', '--promotion-count', type=int,
+                   help='Promotion request count')
+    p.add_argument('-p', '--policy', choices=['always', 'full', 'never'], required=True,
+                   help='Sequential cutoff policy')
+    p.set_defaults(func=bdev_ocf_set_seqcutoff)
 
     def bdev_malloc_create(args):
         num_blocks = (args.total_size * 1024 * 1024) // args.block_size
@@ -694,6 +714,7 @@ if __name__ == "__main__":
                                            adrfam=args.adrfam,
                                            trsvcid=args.trsvcid,
                                            hostnqn=args.hostnqn,
+                                           wait_for_attach=args.wait_for_attach,
                                            ctrlr_loss_timeout_sec=args.ctrlr_loss_timeout_sec,
                                            reconnect_delay_sec=args.reconnect_delay_sec,
                                            fast_io_fail_timeout_sec=args.fast_io_fail_timeout_sec)
@@ -709,6 +730,8 @@ if __name__ == "__main__":
     p.add_argument('-s', '--trsvcid',
                    help='NVMe-oF target trsvcid: e.g., a port number')
     p.add_argument('-q', '--hostnqn', help='NVMe-oF host subnqn')
+    p.add_argument('-w', '--wait-for-attach', action='store_true',
+                   help='Do not complete RPC until all discovered NVM subsystems are attached')
     p.add_argument('-l', '--ctrlr-loss-timeout-sec',
                    help="""Time to wait until ctrlr is reconnected before deleting ctrlr.
                    -1 means infinite reconnect retries. 0 means no reconnect retry.
@@ -1924,7 +1947,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                               help='Create new raid bdev')
     p.add_argument('-n', '--name', help='raid bdev name', required=True)
     p.add_argument('-z', '--strip-size-kb', help='strip size in KB', type=int)
-    p.add_argument('-r', '--raid-level', help='raid level, only raid level 0 is supported', required=True)
+    p.add_argument('-r', '--raid-level', help='raid level, raid0 and a special level concat are supported', required=True)
     p.add_argument('-b', '--base-bdevs', help='base bdevs name, whitespace separated list in quotes', required=True)
     p.set_defaults(func=bdev_raid_create)
 

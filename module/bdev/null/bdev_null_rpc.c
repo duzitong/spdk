@@ -171,7 +171,11 @@ rpc_bdev_null_delete_cb(void *cb_arg, int bdeverrno)
 {
 	struct spdk_jsonrpc_request *request = cb_arg;
 
-	spdk_jsonrpc_send_bool_response(request, bdeverrno == 0);
+	if (bdeverrno == 0) {
+		spdk_jsonrpc_send_bool_response(request, true);
+	} else {
+		spdk_jsonrpc_send_error_response(request, bdeverrno, spdk_strerror(-bdeverrno));
+	}
 }
 
 static void
@@ -179,7 +183,6 @@ rpc_bdev_null_delete(struct spdk_jsonrpc_request *request,
 		     const struct spdk_json_val *params)
 {
 	struct rpc_delete_null req = {NULL};
-	struct spdk_bdev *bdev;
 
 	if (spdk_json_decode_object(params, rpc_delete_null_decoders,
 				    SPDK_COUNTOF(rpc_delete_null_decoders),
@@ -189,13 +192,7 @@ rpc_bdev_null_delete(struct spdk_jsonrpc_request *request,
 		goto cleanup;
 	}
 
-	bdev = spdk_bdev_get_by_name(req.name);
-	if (bdev == NULL) {
-		spdk_jsonrpc_send_error_response(request, -ENODEV, spdk_strerror(ENODEV));
-		goto cleanup;
-	}
-
-	bdev_null_delete(bdev, rpc_bdev_null_delete_cb, request);
+	bdev_null_delete(req.name, rpc_bdev_null_delete_cb, request);
 
 	free_rpc_delete_null(&req);
 
@@ -228,7 +225,6 @@ spdk_rpc_bdev_null_resize(struct spdk_jsonrpc_request *request,
 			  const struct spdk_json_val *params)
 {
 	struct rpc_bdev_null_resize req = {};
-	struct spdk_bdev *bdev;
 	int rc;
 
 	if (spdk_json_decode_object(params, rpc_bdev_null_resize_decoders,
@@ -239,13 +235,7 @@ spdk_rpc_bdev_null_resize(struct spdk_jsonrpc_request *request,
 		goto cleanup;
 	}
 
-	bdev = spdk_bdev_get_by_name(req.name);
-	if (bdev == NULL) {
-		spdk_jsonrpc_send_error_response(request, -ENODEV, spdk_strerror(ENODEV));
-		goto cleanup;
-	}
-
-	rc = bdev_null_resize(bdev, req.new_size);
+	rc = bdev_null_resize(req.name, req.new_size);
 	if (rc) {
 		spdk_jsonrpc_send_error_response(request, rc, spdk_strerror(-rc));
 		goto cleanup;

@@ -17,10 +17,12 @@ from collections import OrderedDict
 
 import paramiko
 import pandas as pd
-
-import rpc
-import rpc.client
 from common import *
+
+sys.path.append(os.path.dirname(__file__) + '/../../../python')
+
+import spdk.rpc as rpc  # noqa
+import spdk.rpc.client as rpc_client  # noqa
 
 
 class Server:
@@ -60,7 +62,8 @@ class Server:
     def log_print(self, msg):
         print("[%s] %s" % (self.name, msg), flush=True)
 
-    def get_uncommented_lines(self, lines):
+    @staticmethod
+    def get_uncommented_lines(lines):
         return [line for line in lines if line and not line.startswith('#')]
 
     def get_nic_name_by_ip(self, ip):
@@ -90,6 +93,7 @@ class Server:
 
         self.local_nic_info = extract_network_elements(pci_info)
 
+    # pylint: disable=R0201
     def exec_cmd(self, cmd, stderr_redirect=False, change_dir=None):
         return ""
 
@@ -332,7 +336,7 @@ class Server:
 
 class Target(Server):
     def __init__(self, name, general_config, target_config):
-        super(Target, self).__init__(name, general_config, target_config)
+        super().__init__(name, general_config, target_config)
 
         # Defaults
         self.enable_sar = False
@@ -406,13 +410,14 @@ class Target(Server):
     def zip_spdk_sources(self, spdk_dir, dest_file):
         self.log_print("Zipping SPDK source directory")
         fh = zipfile.ZipFile(dest_file, "w", zipfile.ZIP_DEFLATED)
-        for root, directories, files in os.walk(spdk_dir, followlinks=True):
+        for root, _directories, files in os.walk(spdk_dir, followlinks=True):
             for file in files:
                 fh.write(os.path.relpath(os.path.join(root, file)))
         fh.close()
         self.log_print("Done zipping")
 
-    def read_json_stats(self, file):
+    @staticmethod
+    def read_json_stats(file):
         with open(file, "r") as json_data:
             data = json.load(json_data)
             job_pos = 0  # job_post = 0 because using aggregated results
@@ -540,8 +545,8 @@ class Target(Server):
                         stats = self.read_json_stats(os.path.join(results_dir, r))
                         separate_stats.append(stats)
                         self.log_print(stats)
-                    except JSONDecodeError as e:
-                        self.log_print("ERROR: Failed to parse %s results! Results might be incomplete!")
+                    except JSONDecodeError:
+                        self.log_print("ERROR: Failed to parse %s results! Results might be incomplete!" % r)
 
                 init_results = [sum(x) for x in zip(*separate_stats)]
                 init_results = [x / len(separate_stats) for x in init_results]
@@ -665,7 +670,7 @@ class Target(Server):
 
 class Initiator(Server):
     def __init__(self, name, general_config, initiator_config):
-        super(Initiator, self).__init__(name, general_config, initiator_config)
+        super().__init__(name, general_config, initiator_config)
 
         # Required fields
         self.ip = initiator_config["ip"]
@@ -947,7 +952,7 @@ registerfiles=1
 
 class KernelTarget(Target):
     def __init__(self, name, general_config, target_config):
-        super(KernelTarget, self).__init__(name, general_config, target_config)
+        super().__init__(name, general_config, target_config)
         # Defaults
         self.nvmet_bin = "nvmetcli"
 
@@ -971,7 +976,7 @@ class KernelTarget(Target):
 
         # Add remaining drives
         for i, disk in enumerate(nvme_list[disks_per_ip * len(address_list):]):
-            disks_chunks[i].append(disk)
+            disk_chunks[i].append(disk)
 
         subsys_no = 1
         port_no = 0
@@ -1015,7 +1020,6 @@ class KernelTarget(Target):
 
         with open("kernel.conf", "w") as fh:
             fh.write(json.dumps(nvmet_cfg, indent=2))
-        pass
 
     def tgt_start(self):
         self.log_print("Configuring kernel NVMeOF Target")
@@ -1042,7 +1046,7 @@ class KernelTarget(Target):
 
 class SPDKTarget(Target):
     def __init__(self, name, general_config, target_config):
-        super(SPDKTarget, self).__init__(name, general_config, target_config)
+        super().__init__(name, general_config, target_config)
 
         # Required fields
         self.core_mask = target_config["core_mask"]
@@ -1073,7 +1077,8 @@ class SPDKTarget(Target):
         self.log_print("====IDXD settings:====")
         self.log_print("IDXD enabled: %s" % (self.enable_idxd))
 
-    def get_num_cores(self, core_mask):
+    @staticmethod
+    def get_num_cores(core_mask):
         if "0x" in core_mask:
             return bin(int(core_mask, 16)).count("1")
         else:
@@ -1101,7 +1106,7 @@ class SPDKTarget(Target):
                                        dif_insert_or_strip=self.dif_insert_strip,
                                        sock_priority=self.adq_priority)
         self.log_print("SPDK NVMeOF transport layer:")
-        rpc.client.print_dict(rpc.nvmf.nvmf_get_transports(self.client))
+        rpc_client.print_dict(rpc.nvmf.nvmf_get_transports(self.client))
 
         if self.null_block:
             self.spdk_tgt_add_nullblock(self.null_block)
@@ -1124,7 +1129,7 @@ class SPDKTarget(Target):
             rpc.bdev.bdev_null_create(self.client, 102400, block_size + md_size, "Nvme{}n1".format(i),
                                       dif_type=self.null_block_dif_type, md_size=md_size)
         self.log_print("SPDK Bdevs configuration:")
-        rpc.client.print_dict(rpc.bdev.bdev_get_bdevs(self.client))
+        rpc_client.print_dict(rpc.bdev.bdev_get_bdevs(self.client))
 
     def spdk_tgt_add_nvme_conf(self, req_num_disks=None):
         self.log_print("Adding NVMe bdevs to config via RPC")
@@ -1143,7 +1148,7 @@ class SPDKTarget(Target):
             rpc.bdev.bdev_nvme_attach_controller(self.client, name="Nvme%s" % i, trtype="PCIe", traddr=bdf)
 
         self.log_print("SPDK Bdevs configuration:")
-        rpc.client.print_dict(rpc.bdev.bdev_get_bdevs(self.client))
+        rpc_client.print_dict(rpc.bdev.bdev_get_bdevs(self.client))
 
     def spdk_tgt_add_subsystem_conf(self, ips=None, req_num_disks=None):
         self.log_print("Adding subsystems to config")
@@ -1182,7 +1187,7 @@ class SPDKTarget(Target):
 
                 self.subsystem_info_list.append([port, nqn, ip])
         self.log_print("SPDK NVMeOF subsystem configuration:")
-        rpc.client.print_dict(rpc.nvmf.nvmf_get_subsystems(self.client))
+        rpc_client.print_dict(rpc.nvmf.nvmf_get_subsystems(self.client))
 
     def bpf_start(self):
         self.log_print("Starting BPF Trace scripts: %s" % self.bpf_scripts)
@@ -1216,13 +1221,13 @@ class SPDKTarget(Target):
             if os.path.exists("/var/tmp/spdk.sock"):
                 break
             time.sleep(1)
-        self.client = rpc.client.JSONRPCClient("/var/tmp/spdk.sock")
+        self.client = rpc_client.JSONRPCClient("/var/tmp/spdk.sock")
 
         if self.enable_zcopy:
             rpc.sock.sock_impl_set_options(self.client, impl_name="posix",
                                            enable_zerocopy_send_server=True)
             self.log_print("Target socket options:")
-            rpc.client.print_dict(rpc.sock.sock_impl_get_options(self.client, impl_name="posix"))
+            rpc_client.print_dict(rpc.sock.sock_impl_get_options(self.client, impl_name="posix"))
 
         if self.enable_adq:
             rpc.sock.sock_impl_set_options(self.client, impl_name="posix", enable_placement_id=1)
@@ -1259,7 +1264,7 @@ class SPDKTarget(Target):
 
 class KernelInitiator(Initiator):
     def __init__(self, name, general_config, initiator_config):
-        super(KernelInitiator, self).__init__(name, general_config, initiator_config)
+        super().__init__(name, general_config, initiator_config)
 
         # Defaults
         self.extra_params = ""
@@ -1345,7 +1350,7 @@ class KernelInitiator(Initiator):
 
 class SPDKInitiator(Initiator):
     def __init__(self, name, general_config, initiator_config):
-        super(SPDKInitiator, self).__init__(name, general_config, initiator_config)
+        super().__init__(name, general_config, initiator_config)
 
         if "skip_spdk_install" not in general_config or general_config["skip_spdk_install"] is False:
             self.install_spdk()
@@ -1463,7 +1468,6 @@ if __name__ == "__main__":
                 target_obj = SPDKTarget(k, data["general"], v)
             elif data[k]["mode"] == "kernel":
                 target_obj = KernelTarget(k, data["general"], v)
-                pass
         elif "initiator" in k:
             if data[k]["mode"] == "spdk":
                 init_obj = SPDKInitiator(k, data["general"], v)

@@ -141,6 +141,10 @@ function linux_bind_driver() {
 
 	pci_dev_echo "$bdf" "$old_driver_name -> $driver_name"
 
+	if [[ $driver_name == "none" ]]; then
+		return 0
+	fi
+
 	echo "$ven_dev_id" > "/sys/bus/pci/drivers/$driver_name/new_id" 2> /dev/null || true
 	echo "$bdf" > "/sys/bus/pci/drivers/$driver_name/bind" 2> /dev/null || true
 
@@ -198,20 +202,42 @@ function get_block_dev_from_bdf() {
 	done
 }
 
-function get_mounted_part_dev_from_bdf_block() {
+function get_used_bdf_block_devs() {
 	local bdf=$1
-	local blocks block dev mount
+	local blocks block blockp dev mount holder
+	local used
 
 	hash lsblk || return 1
 	blocks=($(get_block_dev_from_bdf "$bdf"))
 
 	for block in "${blocks[@]}"; do
+		# Check if the device is hold by some other, regardless if it's mounted
+		# or not.
+		for holder in "/sys/class/block/$block"*/holders/*; do
+			[[ -e $holder ]] || continue
+			blockp=${holder%/holders*} blockp=${blockp##*/}
+			if [[ -e $holder/slaves/$blockp ]]; then
+				used+=("holder@$blockp:${holder##*/}")
+			fi
+		done
 		while read -r dev mount; do
 			if [[ -e $mount ]]; then
-				echo "$block:$dev"
+				used+=("mount@$block:$dev")
 			fi
 		done < <(lsblk -l -n -o NAME,MOUNTPOINT "/dev/$block")
+		if ((${#used[@]} == 0)); then
+			# Make sure we check if there's any valid data present on the target device
+			# regardless if it's being actively used or not. This is mainly done to make
+			# sure we don't miss more complex setups like ZFS pools, etc.
+			if block_in_use "$block" > /dev/null; then
+				used+=("data@$block")
+			fi
+		fi
 	done
+
+	if ((${#used[@]} > 0)); then
+		printf '%s\n' "${used[@]}"
+	fi
 }
 
 function collect_devices() {
@@ -240,7 +266,7 @@ function collect_devices() {
 					in_use=1
 				fi
 				if [[ $dev_type == nvme || $dev_type == virtio ]]; then
-					if ! verify_bdf_mounts "$bdf"; then
+					if ! verify_bdf_block_devs "$bdf"; then
 						in_use=1
 					fi
 				fi
@@ -248,6 +274,17 @@ function collect_devices() {
 					if [[ $PCI_ALLOWED != *"$bdf"* ]]; then
 						pci_dev_echo "$bdf" "Skipping not allowed VMD controller at $bdf"
 						in_use=1
+					elif [[ " ${drivers_d[*]} " =~ "nvme" ]]; then
+						if [[ "${DRIVER_OVERRIDE}" != "none" ]]; then
+							if [ "$mode" == "config" ]; then
+								cat <<- MESSAGE
+									Binding new driver to VMD device. If there are NVMe SSDs behind the VMD endpoint
+									which are attached to the kernel NVMe driver,the binding process may go faster
+									if you first run this script with DRIVER_OVERRIDE="none" to unbind only the
+									NVMe SSDs, and then run again to unbind the VMD devices."
+								MESSAGE
+							fi
+						fi
 					fi
 				fi
 			fi
@@ -280,14 +317,14 @@ function collect_driver() {
 	echo "$driver"
 }
 
-function verify_bdf_mounts() {
+function verify_bdf_block_devs() {
 	local bdf=$1
 	local blknames
-	blknames=($(get_mounted_part_dev_from_bdf_block "$bdf")) || return 1
+	blknames=($(get_used_bdf_block_devs "$bdf")) || return 1
 
 	if ((${#blknames[@]} > 0)); then
 		local IFS=","
-		pci_dev_echo "$bdf" "Active mountpoints on ${blknames[*]}, so not binding PCI dev"
+		pci_dev_echo "$bdf" "Active devices: ${blknames[*]}, so not binding PCI dev"
 		return 1
 	fi
 }
@@ -305,7 +342,9 @@ function configure_linux_pci() {
 		fi
 	fi
 
-	if [[ -n "${DRIVER_OVERRIDE}" ]]; then
+	if [[ "${DRIVER_OVERRIDE}" == "none" ]]; then
+		driver_name=none
+	elif [[ -n "${DRIVER_OVERRIDE}" ]]; then
 		driver_path="$DRIVER_OVERRIDE"
 		driver_name="${DRIVER_OVERRIDE##*/}"
 		# modprobe and the sysfs don't use the .ko suffix.
@@ -337,10 +376,12 @@ function configure_linux_pci() {
 	fi
 
 	# modprobe assumes the directory of the module. If the user passes in a path, we should use insmod
-	if [[ -n "$driver_path" ]]; then
-		insmod $driver_path || true
-	else
-		modprobe $driver_name
+	if [[ $driver_name != "none" ]]; then
+		if [[ -n "$driver_path" ]]; then
+			insmod $driver_path || true
+		else
+			modprobe $driver_name
+		fi
 	fi
 
 	for bdf in "${!all_devices_d[@]}"; do

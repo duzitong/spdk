@@ -1048,6 +1048,8 @@ nvmf_tcp_qpair_init_mem_resource(struct spdk_nvmf_tcp_qpair *tqpair)
 		tcp_req->req.rsp = (union nvmf_c2h_msg *)&tcp_req->rsp;
 		tcp_req->req.cmd = (union nvmf_h2c_msg *)&tcp_req->cmd;
 
+		tcp_req->req.stripped_data = NULL;
+
 		/* Initialize request state to FREE */
 		tcp_req->state = TCP_REQUEST_STATE_FREE;
 		TAILQ_INSERT_TAIL(&tqpair->tcp_req_free_queue, tcp_req, state_link);
@@ -1288,17 +1290,10 @@ static struct spdk_nvmf_transport_poll_group *
 nvmf_tcp_get_optimal_poll_group(struct spdk_nvmf_qpair *qpair)
 {
 	struct spdk_nvmf_tcp_transport *ttransport;
-	struct spdk_nvmf_transport_poll_group *result;
 	struct spdk_nvmf_tcp_poll_group **pg;
 	struct spdk_nvmf_tcp_qpair *tqpair;
-	struct spdk_sock_group *group = NULL;
+	struct spdk_sock_group *group = NULL, *hint = NULL;
 	int rc;
-
-	tqpair = SPDK_CONTAINEROF(qpair, struct spdk_nvmf_tcp_qpair, qpair);
-	rc = spdk_sock_get_optimal_sock_group(tqpair->sock, &group);
-	if (!rc && group != NULL) {
-		return spdk_sock_group_get_ctx(group);
-	}
 
 	ttransport = SPDK_CONTAINEROF(qpair->transport, struct spdk_nvmf_tcp_transport, transport);
 
@@ -1311,16 +1306,27 @@ nvmf_tcp_get_optimal_poll_group(struct spdk_nvmf_qpair *qpair)
 
 	pg = &ttransport->next_pg;
 	assert(*pg != NULL);
+	hint = (*pg)->sock_group;
 
-	result = &(*pg)->group;
+	tqpair = SPDK_CONTAINEROF(qpair, struct spdk_nvmf_tcp_qpair, qpair);
+	rc = spdk_sock_get_optimal_sock_group(tqpair->sock, &group, hint);
+	if (rc != 0) {
+		pthread_mutex_unlock(&ttransport->lock);
+		return NULL;
+	} else if (group != NULL) {
+		/* Optimal poll group was found */
+		pthread_mutex_unlock(&ttransport->lock);
+		return spdk_sock_group_get_ctx(group);
+	}
 
+	/* The hint was used for optimal poll group, advance next_pg. */
 	*pg = TAILQ_NEXT(*pg, link);
 	if (*pg == NULL) {
 		*pg = TAILQ_FIRST(&ttransport->poll_groups);
 	}
 
 	pthread_mutex_unlock(&ttransport->lock);
-	return result;
+	return spdk_sock_group_get_ctx(hint);
 }
 
 static void

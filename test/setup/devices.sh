@@ -50,16 +50,20 @@ verify() {
 
 	local found=0
 
-	: > "$test_file"
+	if [[ -n $test_file ]]; then
+		: > "$test_file"
+	fi
 
 	local pci status
 	while read -r pci _ _ status; do
 		if [[ $pci == "$dev" && \
-			$status == *"Active mountpoints on $mounts"* ]]; then
+			$status == *"Active devices: "*"$mounts"* ]]; then
 			found=1
 		fi
 	done < <(PCI_ALLOWED="$dev" setup output config)
 	((found == 1))
+
+	[[ -n $mount_point ]] || return 0
 
 	# Does the mount still exist?
 	mountpoint -q "$mount_point"
@@ -112,6 +116,12 @@ nvme_mount() {
 		"$nvme_mount" \
 		"$nvme_dummy_test_file"
 
+	# umount the nvme device and verify again - device should not be touched
+	# when a valid fs is still present.
+	umount "$nvme_mount"
+
+	verify "${blocks_to_pci["$nvme_disk"]}" "data@$nvme_disk" "" ""
+
 	# All done, final cleanup
 	cleanup_nvme
 }
@@ -159,6 +169,13 @@ dm_mount() {
 		"$pv:$dm_name" \
 		"$dm_mount" \
 		"$dm_dummy_test_file"
+
+	# umount the dm device and verify again - device should not be
+	# touched when it's actively being hold, regardless if it's mounted
+	# or not.
+	umount "$dm_mount"
+
+	verify "${blocks_to_pci["$pv"]}" "holder@$pv0:$dm,holder@$pv1:$dm" "" ""
 
 	# All done, start tiding up
 	cleanup_dm

@@ -45,6 +45,37 @@
 
 DEFINE_STUB(spdk_notify_send, uint64_t, (const char *type, const char *ctx), 0);
 DEFINE_STUB(spdk_notify_type_register, struct spdk_notify_type *, (const char *type), NULL);
+DEFINE_STUB(spdk_memory_domain_get_dma_device_id, const char *, (struct spdk_memory_domain *domain),
+	    "test_domain");
+DEFINE_STUB(spdk_memory_domain_get_dma_device_type, enum spdk_dma_device_type,
+	    (struct spdk_memory_domain *domain), 0);
+
+static bool g_memory_domain_pull_data_called;
+static bool g_memory_domain_push_data_called;
+
+DEFINE_RETURN_MOCK(spdk_memory_domain_pull_data, int);
+int
+spdk_memory_domain_pull_data(struct spdk_memory_domain *src_domain, void *src_domain_ctx,
+			     struct iovec *src_iov, uint32_t src_iov_cnt, struct iovec *dst_iov, uint32_t dst_iov_cnt,
+			     spdk_memory_domain_data_cpl_cb cpl_cb, void *cpl_cb_arg)
+{
+	g_memory_domain_pull_data_called = true;
+	HANDLE_RETURN_MOCK(spdk_memory_domain_pull_data);
+	cpl_cb(cpl_cb_arg, 0);
+	return 0;
+}
+
+DEFINE_RETURN_MOCK(spdk_memory_domain_push_data, int);
+int
+spdk_memory_domain_push_data(struct spdk_memory_domain *dst_domain, void *dst_domain_ctx,
+			     struct iovec *dst_iov, uint32_t dst_iovcnt, struct iovec *src_iov, uint32_t src_iovcnt,
+			     spdk_memory_domain_data_cpl_cb cpl_cb, void *cpl_cb_arg)
+{
+	g_memory_domain_push_data_called = true;
+	HANDLE_RETURN_MOCK(spdk_memory_domain_push_data);
+	cpl_cb(cpl_cb_arg, 0);
+	return 0;
+}
 
 int g_status;
 int g_count;
@@ -238,8 +269,8 @@ stub_submit_request(struct spdk_io_channel *_ch, struct spdk_bdev_io *bdev_io)
 
 	if (expected_io->md_buf != NULL) {
 		CU_ASSERT(expected_io->md_buf == bdev_io->u.bdev.md_buf);
-		if (bdev_io->internal.ext_opts) {
-			CU_ASSERT(expected_io->md_buf == bdev_io->internal.ext_opts->metadata);
+		if (bdev_io->u.bdev.ext_opts) {
+			CU_ASSERT(expected_io->md_buf == bdev_io->u.bdev.ext_opts->metadata);
 		}
 	}
 
@@ -4900,7 +4931,8 @@ bdev_writev_readv_ext(void)
 	struct spdk_bdev *bdev;
 	struct spdk_bdev_desc *desc = NULL;
 	struct spdk_io_channel *io_ch;
-	struct iovec iov = { .iov_base = (void *)0xbaaddead, .iov_len = 0x1000 };
+	char io_buf[512];
+	struct iovec iov = { .iov_base = io_buf, .iov_len = 512 };
 	struct ut_expected_io *expected_io;
 	struct spdk_bdev_ext_io_opts ext_io_opts = {
 		.metadata = (void *)0xFF000000,
@@ -4921,6 +4953,7 @@ bdev_writev_readv_ext(void)
 	io_ch = spdk_bdev_get_io_channel(desc);
 	CU_ASSERT(io_ch != NULL);
 
+	/* Test 1, Simple test */
 	g_io_done = false;
 	expected_io = ut_alloc_expected_io(SPDK_BDEV_IO_TYPE_READ, 32, 14, 1);
 	expected_io->md_buf = ext_io_opts.metadata;
@@ -4951,7 +4984,7 @@ bdev_writev_readv_ext(void)
 	stub_complete_io(1);
 	CU_ASSERT(g_io_done == true);
 
-	/* Test invalid ext_opts size */
+	/* Test 2, invalid ext_opts size */
 	ext_io_opts.size = 0;
 	rc = spdk_bdev_readv_blocks_ext(desc, io_ch, &iov, 1, 32, 14, io_done, NULL, &ext_io_opts);
 	CU_ASSERT(rc != 0);
@@ -4964,7 +4997,7 @@ bdev_writev_readv_ext(void)
 	rc = spdk_bdev_writev_blocks_ext(desc, io_ch, &iov, 1, 32, 14, io_done, NULL, &ext_io_opts);
 	CU_ASSERT(rc != 0);
 
-	/* Check that IO request with ext_opts and metadata is split correctly
+	/* Test 3, Check that IO request with ext_opts and metadata is split correctly
 	 * Offset 14, length 8, payload 0xF000
 	 *  Child - Offset 14, length 2, payload 0xF000
 	 *  Child - Offset 16, length 6, payload 0xF000 + 2 * 512
@@ -5079,6 +5112,40 @@ bdev_writev_readv_ext(void)
 	CU_ASSERT(g_io_done == true);
 	CU_ASSERT(g_bdev_ut_channel->outstanding_io_count == 0);
 
+	/* Test 4, Verify data pull/push
+	 * bdev doens't support memory domains, so buffers from bdev memory pool will be used */
+	ext_io_opts.memory_domain = (struct spdk_memory_domain *)0xdeadbeef;
+
+	g_io_done = false;
+	expected_io = ut_alloc_expected_io(SPDK_BDEV_IO_TYPE_READ, 32, 14, 1);
+	ut_expected_io_set_iov(expected_io, 0, iov.iov_base, iov.iov_len);
+	expected_io->ext_io_opts = &ext_io_opts;
+	TAILQ_INSERT_TAIL(&g_bdev_ut_channel->expected_io, expected_io, link);
+
+	rc = spdk_bdev_readv_blocks_ext(desc, io_ch, &iov, 1, 32, 14, io_done, NULL, &ext_io_opts);
+
+	CU_ASSERT(rc == 0);
+	CU_ASSERT(g_io_done == false);
+	CU_ASSERT(g_bdev_ut_channel->outstanding_io_count == 1);
+	stub_complete_io(1);
+	CU_ASSERT(g_memory_domain_push_data_called == true);
+	CU_ASSERT(g_io_done == true);
+
+	g_io_done = false;
+	expected_io = ut_alloc_expected_io(SPDK_BDEV_IO_TYPE_WRITE, 32, 14, 1);
+	ut_expected_io_set_iov(expected_io, 0, iov.iov_base, iov.iov_len);
+	expected_io->ext_io_opts = &ext_io_opts;
+	TAILQ_INSERT_TAIL(&g_bdev_ut_channel->expected_io, expected_io, link);
+
+	rc = spdk_bdev_writev_blocks_ext(desc, io_ch, &iov, 1, 32, 14, io_done, NULL, &ext_io_opts);
+
+	CU_ASSERT(rc == 0);
+	CU_ASSERT(g_memory_domain_pull_data_called == true);
+	CU_ASSERT(g_io_done == false);
+	CU_ASSERT(g_bdev_ut_channel->outstanding_io_count == 1);
+	stub_complete_io(1);
+	CU_ASSERT(g_io_done == true);
+
 	spdk_put_io_channel(io_ch);
 	spdk_bdev_close(desc);
 	free_bdev(bdev);
@@ -5153,6 +5220,100 @@ bdev_register_uuid_alias(void)
 	poll_threads();
 }
 
+static void
+bdev_unregister_by_name(void)
+{
+	struct spdk_bdev *bdev;
+	int rc;
+
+	bdev = allocate_bdev("bdev");
+
+	g_event_type1 = 0xFF;
+	g_unregister_arg = NULL;
+	g_unregister_rc = -1;
+
+	rc = spdk_bdev_unregister_by_name("bdev1", &bdev_ut_if, bdev_unregister_cb, (void *)0x12345678);
+	CU_ASSERT(rc == -ENODEV);
+
+	rc = spdk_bdev_unregister_by_name("bdev", &vbdev_ut_if, bdev_unregister_cb, (void *)0x12345678);
+	CU_ASSERT(rc == -ENODEV);
+
+	rc = spdk_bdev_unregister_by_name("bdev", &bdev_ut_if, bdev_unregister_cb, (void *)0x12345678);
+	CU_ASSERT(rc == 0);
+
+	/* Check that unregister callback is delayed */
+	CU_ASSERT(g_unregister_arg == NULL);
+	CU_ASSERT(g_unregister_rc == -1);
+
+	poll_threads();
+
+	/* Event callback shall not be issued because device was closed */
+	CU_ASSERT(g_event_type1 == 0xFF);
+	/* Unregister callback is issued */
+	CU_ASSERT(g_unregister_arg == (void *)0x12345678);
+	CU_ASSERT(g_unregister_rc == 0);
+
+	free_bdev(bdev);
+}
+
+static int
+count_bdevs(void *ctx, struct spdk_bdev *bdev)
+{
+	int *count = ctx;
+
+	(*count)++;
+
+	return 0;
+}
+
+static void
+for_each_bdev_test(void)
+{
+	struct spdk_bdev *bdev[8];
+	int rc, count;
+
+	bdev[0] = allocate_bdev("bdev0");
+
+	bdev[1] = allocate_bdev("bdev1");
+	rc = spdk_bdev_module_claim_bdev(bdev[1], NULL, &bdev_ut_if);
+	CU_ASSERT(rc == 0);
+
+	bdev[2] = allocate_bdev("bdev2");
+
+	bdev[3] = allocate_bdev("bdev3");
+	rc = spdk_bdev_module_claim_bdev(bdev[3], NULL, &bdev_ut_if);
+	CU_ASSERT(rc == 0);
+
+	bdev[4] = allocate_bdev("bdev4");
+
+	bdev[5] = allocate_bdev("bdev5");
+	rc = spdk_bdev_module_claim_bdev(bdev[5], NULL, &bdev_ut_if);
+	CU_ASSERT(rc == 0);
+
+	bdev[6] = allocate_bdev("bdev6");
+
+	bdev[7] = allocate_bdev("bdev7");
+
+	count = 0;
+	rc = spdk_for_each_bdev(&count, count_bdevs);
+	CU_ASSERT(rc == 0);
+	CU_ASSERT(count == 8);
+
+	count = 0;
+	rc = spdk_for_each_bdev_leaf(&count, count_bdevs);
+	CU_ASSERT(rc == 0);
+	CU_ASSERT(count == 5);
+
+	free_bdev(bdev[0]);
+	free_bdev(bdev[1]);
+	free_bdev(bdev[2]);
+	free_bdev(bdev[3]);
+	free_bdev(bdev[4]);
+	free_bdev(bdev[5]);
+	free_bdev(bdev[6]);
+	free_bdev(bdev[7]);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -5202,6 +5363,8 @@ main(int argc, char **argv)
 	CU_ADD_TEST(suite, bdev_get_memory_domains);
 	CU_ADD_TEST(suite, bdev_writev_readv_ext);
 	CU_ADD_TEST(suite, bdev_register_uuid_alias);
+	CU_ADD_TEST(suite, bdev_unregister_by_name);
+	CU_ADD_TEST(suite, for_each_bdev_test);
 
 	allocate_cores(1);
 	allocate_threads(1);

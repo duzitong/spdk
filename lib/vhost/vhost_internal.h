@@ -45,8 +45,6 @@
 #include "spdk/rpc.h"
 #include "spdk/config.h"
 
-extern bool g_packed_ring_recovery;
-
 #define SPDK_VHOST_MAX_VQUEUES	256
 #define SPDK_VHOST_MAX_VQ_SIZE	1024
 
@@ -174,18 +172,10 @@ struct spdk_vhost_session {
 	TAILQ_ENTRY(spdk_vhost_session) tailq;
 };
 
-struct spdk_vhost_dev {
-	char *name;
-	char *path;
+struct spdk_vhost_user_dev {
+	struct spdk_vhost_dev *vdev;
 
-	struct spdk_thread *thread;
-	bool registered;
-
-	uint64_t virtio_features;
-	uint64_t disabled_features;
-	uint64_t protocol_features;
-
-	const struct spdk_vhost_dev_backend *backend;
+	const struct spdk_vhost_user_dev_backend *user_backend;
 
 	/* Saved original values used to setup coalescing to avoid integer
 	 * rounding issues during save/load config.
@@ -204,6 +194,24 @@ struct spdk_vhost_dev {
 
 	/* Number of pending asynchronous operations */
 	uint32_t pending_async_op_num;
+};
+
+struct spdk_vhost_dev {
+	char *name;
+	char *path;
+
+	struct spdk_thread *thread;
+	bool registered;
+
+	uint64_t virtio_features;
+	uint64_t disabled_features;
+	uint64_t protocol_features;
+	bool packed_ring_recovery;
+
+	const struct spdk_vhost_dev_backend *backend;
+
+	/* Context passed from transport */
+	void *ctxt;
 
 	TAILQ_ENTRY(spdk_vhost_dev) tailq;
 };
@@ -227,7 +235,7 @@ typedef int (*spdk_vhost_session_fn)(struct spdk_vhost_dev *vdev,
  */
 typedef void (*spdk_vhost_dev_fn)(struct spdk_vhost_dev *vdev, void *arg);
 
-struct spdk_vhost_dev_backend {
+struct spdk_vhost_user_dev_backend {
 	/**
 	 * Size of additional per-session context data
 	 * allocated whenever a new client connects.
@@ -236,7 +244,9 @@ struct spdk_vhost_dev_backend {
 
 	int (*start_session)(struct spdk_vhost_session *vsession);
 	int (*stop_session)(struct spdk_vhost_session *vsession);
+};
 
+struct spdk_vhost_dev_backend {
 	int (*vhost_get_config)(struct spdk_vhost_dev *vdev, uint8_t *config, uint32_t len);
 	int (*vhost_set_config)(struct spdk_vhost_dev *vdev, uint8_t *config,
 				uint32_t offset, uint32_t size, uint32_t flags);
@@ -405,7 +415,8 @@ vhost_dev_has_feature(struct spdk_vhost_session *vsession, unsigned feature_id)
 }
 
 int vhost_dev_register(struct spdk_vhost_dev *vdev, const char *name, const char *mask_str,
-		       const struct spdk_vhost_dev_backend *backend);
+		       const struct spdk_vhost_dev_backend *backend,
+		       const struct spdk_vhost_user_dev_backend *user_backend);
 int vhost_dev_unregister(struct spdk_vhost_dev *vdev);
 
 void vhost_dump_info_json(struct spdk_vhost_dev *vdev, struct spdk_json_write_ctx *w);
@@ -498,14 +509,17 @@ int vhost_get_negotiated_features(int vid, uint64_t *negotiated_features);
 
 int remove_vhost_controller(struct spdk_vhost_dev *vdev);
 
+struct spdk_io_channel *vhost_blk_get_io_channel(struct spdk_vhost_dev *vdev);
+void vhost_blk_put_io_channel(struct spdk_io_channel *ch);
+
 /* Function calls from vhost.c to rte_vhost_user.c,
  * shall removed once virtio transport abstraction is complete. */
-int vhost_user_session_set_coalescing(struct spdk_vhost_dev *vdev,
+int vhost_user_session_set_coalescing(struct spdk_vhost_dev *dev,
 				      struct spdk_vhost_session *vsession, void *ctx);
-int vhost_user_dev_set_coalescing(struct spdk_vhost_dev *vdev, uint32_t delay_base_us,
+int vhost_user_dev_set_coalescing(struct spdk_vhost_user_dev *user_dev, uint32_t delay_base_us,
 				  uint32_t iops_threshold);
 int vhost_user_dev_register(struct spdk_vhost_dev *vdev, const char *name,
-			    struct spdk_cpuset *cpumask, const struct spdk_vhost_dev_backend *backend);
+			    struct spdk_cpuset *cpumask, const struct spdk_vhost_user_dev_backend *user_backend);
 int vhost_user_dev_unregister(struct spdk_vhost_dev *vdev);
 int vhost_user_init(void);
 typedef void (*vhost_fini_cb)(void *ctx);

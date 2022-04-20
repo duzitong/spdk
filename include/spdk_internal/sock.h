@@ -114,7 +114,8 @@ struct spdk_net_impl {
 	bool (*is_ipv4)(struct spdk_sock *sock);
 	bool (*is_connected)(struct spdk_sock *sock);
 
-	struct spdk_sock_group_impl *(*group_impl_get_optimal)(struct spdk_sock *sock);
+	struct spdk_sock_group_impl *(*group_impl_get_optimal)(struct spdk_sock *sock,
+			struct spdk_sock_group_impl *hint);
 	struct spdk_sock_group_impl *(*group_impl_create)(void);
 	int (*group_impl_add_sock)(struct spdk_sock_group_impl *group, struct spdk_sock *sock);
 	int (*group_impl_remove_sock)(struct spdk_sock_group_impl *group, struct spdk_sock *sock);
@@ -139,17 +140,25 @@ static void __attribute__((constructor)) net_impl_register_##name(void) \
 static inline void
 spdk_sock_request_queue(struct spdk_sock *sock, struct spdk_sock_request *req)
 {
+	assert(req->internal.curr_list == NULL);
 	TAILQ_INSERT_TAIL(&sock->queued_reqs, req, internal.link);
+#ifdef DEBUG
+	req->internal.curr_list = &sock->queued_reqs;
+#endif
 	sock->queued_iovcnt += req->iovcnt;
 }
 
 static inline void
 spdk_sock_request_pend(struct spdk_sock *sock, struct spdk_sock_request *req)
 {
+	assert(req->internal.curr_list == &sock->queued_reqs);
 	TAILQ_REMOVE(&sock->queued_reqs, req, internal.link);
 	assert(sock->queued_iovcnt >= req->iovcnt);
 	sock->queued_iovcnt -= req->iovcnt;
 	TAILQ_INSERT_TAIL(&sock->pending_reqs, req, internal.link);
+#ifdef DEBUG
+	req->internal.curr_list = &sock->pending_reqs;
+#endif
 }
 
 static inline int
@@ -158,7 +167,11 @@ spdk_sock_request_put(struct spdk_sock *sock, struct spdk_sock_request *req, int
 	bool closed;
 	int rc = 0;
 
+	assert(req->internal.curr_list == &sock->pending_reqs);
 	TAILQ_REMOVE(&sock->pending_reqs, req, internal.link);
+#ifdef DEBUG
+	req->internal.curr_list = NULL;
+#endif
 
 	req->internal.offset = 0;
 
@@ -189,7 +202,11 @@ spdk_sock_abort_requests(struct spdk_sock *sock)
 
 	req = TAILQ_FIRST(&sock->pending_reqs);
 	while (req) {
+		assert(req->internal.curr_list == &sock->pending_reqs);
 		TAILQ_REMOVE(&sock->pending_reqs, req, internal.link);
+#ifdef DEBUG
+		req->internal.curr_list = NULL;
+#endif
 
 		req->cb_fn(req->cb_arg, -ECANCELED);
 
@@ -198,7 +215,11 @@ spdk_sock_abort_requests(struct spdk_sock *sock)
 
 	req = TAILQ_FIRST(&sock->queued_reqs);
 	while (req) {
+		assert(req->internal.curr_list == &sock->queued_reqs);
 		TAILQ_REMOVE(&sock->queued_reqs, req, internal.link);
+#ifdef DEBUG
+		req->internal.curr_list = NULL;
+#endif
 
 		assert(sock->queued_iovcnt >= req->iovcnt);
 		sock->queued_iovcnt -= req->iovcnt;
@@ -323,7 +344,7 @@ void spdk_sock_map_release(struct spdk_sock_map *map, int placement_id);
  * Look up the group for the given placement_id.
  */
 int spdk_sock_map_lookup(struct spdk_sock_map *map, int placement_id,
-			 struct spdk_sock_group_impl **group_impl);
+			 struct spdk_sock_group_impl **group_impl, struct spdk_sock_group_impl *hint);
 
 /**
  * Find a placement id with no associated group

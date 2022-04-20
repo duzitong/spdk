@@ -488,10 +488,6 @@ function install_ice() {
 		fi < "$rootdir/test/common/config/pkgdep/patches/ice/0001-undef-skb-frag-off.patch"
 	fi
 
-	if ge "$(< /proc/sys/kernel/osrelease)" 5.15.0; then
-		patch --dir="$GIT_REPOS/ice-$ICE_VERSION" -p1
-	fi < "$rootdir/test/common/config/pkgdep/patches/ice/0001-devlink.patch"
-
 	(
 		cd "$GIT_REPOS/ice-$ICE_VERSION/src"
 		sudo make -j"$(nproc)" install
@@ -559,9 +555,9 @@ function install_sources() {
 
 GIT_VERSION=2.25.1
 IRDMA_VERSION=1.7.72
-ICE_VERSION=1.7.16
+ICE_VERSION=1.8.3
 VFIO_QEMU_BRANCH=${VFIO_QEMU_BRANCH:-vfio-user-v0.93}
-VANILLA_QEMU_BRANCH=${VANILLA_QEMU_BRANCH:-v6.0.0}
+VANILLA_QEMU_BRANCH=${VANILLA_QEMU_BRANCH:-v6.2.0}
 
 : ${GIT_REPO_SPDK=https://github.com/spdk/spdk.git}
 export GIT_REPO_SPDK

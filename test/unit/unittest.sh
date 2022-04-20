@@ -16,6 +16,7 @@ function unittest_bdev() {
 	$valgrind $testdir/lib/bdev/bdev.c/bdev_ut
 	$valgrind $testdir/lib/bdev/nvme/bdev_nvme.c/bdev_nvme_ut
 	$valgrind $testdir/lib/bdev/raid/bdev_raid.c/bdev_raid_ut
+	$valgrind $testdir/lib/bdev/raid/concat.c/concat_ut
 	$valgrind $testdir/lib/bdev/bdev_zone.c/bdev_zone_ut
 	$valgrind $testdir/lib/bdev/gpt/gpt.c/gpt_ut
 	$valgrind $testdir/lib/bdev/part.c/part_ut
@@ -136,6 +137,11 @@ function unittest_init() {
 	$valgrind $testdir/lib/init/subsystem.c/subsystem_ut
 }
 
+if [ $SPDK_RUN_VALGRIND -eq 1 ] && [ $SPDK_RUN_ASAN -eq 1 ]; then
+	echo "ERR: Tests cannot be run if both SPDK_RUN_VALGRIND and SPDK_RUN_ASAN options are selected simultaneously"
+	exit 1
+fi
+
 # if ASAN is enabled, use it.  If not use valgrind if installed but allow
 # the env variable to override the default shown below.
 if [ -z ${valgrind+x} ]; then
@@ -143,6 +149,14 @@ if [ -z ${valgrind+x} ]; then
 		valgrind='valgrind --leak-check=full --error-exitcode=2'
 	else
 		valgrind=''
+	fi
+fi
+if [ $SPDK_RUN_VALGRIND -eq 1 ]; then
+	if [ -n "$valgrind" ]; then
+		run_test "valgrind" echo "Using valgrind for unit tests"
+	else
+		echo "ERR: SPDK_RUN_VALGRIND option is enabled but valgrind is not available"
+		exit 1
 	fi
 fi
 

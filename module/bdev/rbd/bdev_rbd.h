@@ -59,20 +59,20 @@ int bdev_rbd_create(struct spdk_bdev **bdev, const char *name, const char *user_
 /**
  * Delete rbd bdev.
  *
- * \param bdev Pointer to rbd bdev.
+ * \param name Name of rbd bdev.
  * \param cb_fn Function to call after deletion.
  * \param cb_arg Argument to pass to cb_fn.
  */
-void bdev_rbd_delete(struct spdk_bdev *bdev, spdk_delete_rbd_complete cb_fn,
+void bdev_rbd_delete(const char *name, spdk_delete_rbd_complete cb_fn,
 		     void *cb_arg);
 
 /**
  * Resize rbd bdev.
  *
- * \param bdev Pointer to rbd bdev.
+ * \param bdev Name of rbd bdev.
  * \param new_size_in_mb The new size in MiB for this bdev.
  */
-int bdev_rbd_resize(struct spdk_bdev *bdev, const uint64_t new_size_in_mb);
+int bdev_rbd_resize(const char *name, const uint64_t new_size_in_mb);
 
 /**
  * Create a Rados cluster.

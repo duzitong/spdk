@@ -272,6 +272,7 @@ struct nvmf_vfio_user_sq {
 	enum nvmf_vfio_user_sq_state		sq_state;
 
 	uint32_t				head;
+	volatile uint32_t			*dbl_tailp;
 
 	/* multiple SQs can be mapped to the same CQ */
 	uint16_t				cqid;
@@ -307,6 +308,8 @@ struct nvmf_vfio_user_cq {
 	enum nvmf_vfio_user_cq_state		cq_state;
 
 	uint32_t				tail;
+	volatile uint32_t			*dbl_headp;
+
 	bool					phase;
 
 	uint16_t				iv;
@@ -432,19 +435,17 @@ sq_headp(struct nvmf_vfio_user_sq *sq)
 }
 
 static inline volatile uint32_t *
-sq_dbl_tailp(struct nvmf_vfio_user_ctrlr *ctrlr, struct nvmf_vfio_user_sq *sq)
+sq_dbl_tailp(struct nvmf_vfio_user_sq *sq)
 {
-	assert(ctrlr != NULL);
 	assert(sq != NULL);
-	return &ctrlr->bar0_doorbells[queue_index(sq->qid, false)];
+	return sq->dbl_tailp;
 }
 
 static inline volatile uint32_t *
-cq_dbl_headp(struct nvmf_vfio_user_ctrlr *ctrlr, struct nvmf_vfio_user_cq *cq)
+cq_dbl_headp(struct nvmf_vfio_user_cq *cq)
 {
-	assert(ctrlr != NULL);
 	assert(cq != NULL);
-	return &ctrlr->bar0_doorbells[queue_index(cq->qid, true)];
+	return cq->dbl_headp;
 }
 
 static inline volatile uint32_t *
@@ -482,11 +483,10 @@ cq_tail_advance(struct nvmf_vfio_user_cq *cq)
 }
 
 static inline bool
-cq_is_full(struct nvmf_vfio_user_ctrlr *ctrlr, struct nvmf_vfio_user_cq *cq)
+cq_is_full(struct nvmf_vfio_user_cq *cq)
 {
 	uint32_t qindex;
 
-	assert(ctrlr != NULL);
 	assert(cq != NULL);
 
 	qindex = *cq_tailp(cq) + 1;
@@ -494,7 +494,33 @@ cq_is_full(struct nvmf_vfio_user_ctrlr *ctrlr, struct nvmf_vfio_user_cq *cq)
 		qindex = 0;
 	}
 
-	return qindex == *cq_dbl_headp(ctrlr, cq);
+	return qindex == *cq_dbl_headp(cq);
+}
+
+static bool
+io_q_exists(struct nvmf_vfio_user_ctrlr *vu_ctrlr, const uint16_t qid, const bool is_cq)
+{
+	assert(vu_ctrlr != NULL);
+
+	if (qid == 0 || qid >= NVMF_VFIO_USER_MAX_QPAIRS_PER_CTRLR) {
+		return false;
+	}
+
+	if (is_cq) {
+		if (vu_ctrlr->cqs[qid] == NULL) {
+			return false;
+		}
+
+		return (vu_ctrlr->cqs[qid]->cq_state != VFIO_USER_CQ_DELETED &&
+			vu_ctrlr->cqs[qid]->cq_state != VFIO_USER_CQ_UNUSED);
+	}
+
+	if (vu_ctrlr->sqs[qid] == NULL) {
+		return false;
+	}
+
+	return (vu_ctrlr->sqs[qid]->sq_state != VFIO_USER_SQ_DELETED &&
+		vu_ctrlr->sqs[qid]->sq_state != VFIO_USER_SQ_UNUSED);
 }
 
 static inline size_t
@@ -1032,7 +1058,9 @@ asq_setup(struct nvmf_vfio_user_ctrlr *ctrlr)
 		return ret;
 	}
 
-	*sq_dbl_tailp(ctrlr, sq) = 0;
+	sq->dbl_tailp = ctrlr->bar0_doorbells + queue_index(0, false);
+
+	*sq_dbl_tailp(sq) = 0;
 
 	return 0;
 }
@@ -1066,7 +1094,9 @@ acq_setup(struct nvmf_vfio_user_ctrlr *ctrlr)
 		return ret;
 	}
 
-	*cq_dbl_headp(ctrlr, cq) = 0;
+	cq->dbl_headp = ctrlr->bar0_doorbells + queue_index(0, true);
+
+	*cq_dbl_headp(cq) = 0;
 
 	return 0;
 }
@@ -1153,15 +1183,15 @@ post_completion(struct nvmf_vfio_user_ctrlr *ctrlr, struct nvmf_vfio_user_cq *cq
 	regs = spdk_nvmf_ctrlr_get_regs(ctrlr->ctrlr);
 	if (regs->csts.bits.shst != SPDK_NVME_SHST_NORMAL) {
 		SPDK_DEBUGLOG(nvmf_vfio,
-			      "%s: ignore completion SQ%d cid=%d status=%#x\n",
+			      "%s: ignore completion sqid:%d cid=%d status=%#x\n",
 			      ctrlr_id(ctrlr), sqid, cid, sc);
 		return 0;
 	}
 
-	if (cq_is_full(ctrlr, cq)) {
-		SPDK_ERRLOG("%s: CQ%d full (tail=%d, head=%d)\n",
+	if (cq_is_full(cq)) {
+		SPDK_ERRLOG("%s: cqid:%d full (tail=%d, head=%d)\n",
 			    ctrlr_id(ctrlr), cq->qid, *cq_tailp(cq),
-			    *cq_dbl_headp(ctrlr, cq));
+			    *cq_dbl_headp(cq));
 		return -1;
 	}
 
@@ -1169,9 +1199,9 @@ post_completion(struct nvmf_vfio_user_ctrlr *ctrlr, struct nvmf_vfio_user_cq *cq
 
 	assert(ctrlr->sqs[sqid] != NULL);
 	SPDK_DEBUGLOG(nvmf_vfio,
-		      "%s: request complete SQ%d cid=%d status=%#x SQ head=%#x CQ tail=%#x\n",
-		      ctrlr_id(ctrlr), sqid, cid, sc, *sq_headp(ctrlr->sqs[sqid]),
-		      *cq_tailp(cq));
+		      "%s: request complete sqid:%d cid=%d status=%#x "
+		      "sqhead=%d cq tail=%d\n", ctrlr_id(ctrlr), sqid, cid, sc,
+		      *sq_headp(ctrlr->sqs[sqid]), *cq_tailp(cq));
 
 	cpl->sqhd = *sq_headp(ctrlr->sqs[sqid]);
 	cpl->sqid = sqid;
@@ -1211,32 +1241,6 @@ post_completion(struct nvmf_vfio_user_ctrlr *ctrlr, struct nvmf_vfio_user_cq *cq
 	return 0;
 }
 
-static bool
-io_q_exists(struct nvmf_vfio_user_ctrlr *vu_ctrlr, const uint16_t qid, const bool is_cq)
-{
-	assert(vu_ctrlr != NULL);
-
-	if (qid == 0 || qid >= NVMF_VFIO_USER_MAX_QPAIRS_PER_CTRLR) {
-		return false;
-	}
-
-	if (is_cq) {
-		if (vu_ctrlr->cqs[qid] == NULL) {
-			return false;
-		}
-
-		return (vu_ctrlr->cqs[qid]->cq_state != VFIO_USER_CQ_DELETED &&
-			vu_ctrlr->cqs[qid]->cq_state != VFIO_USER_CQ_UNUSED);
-	}
-
-	if (vu_ctrlr->sqs[qid] == NULL) {
-		return false;
-	}
-
-	return (vu_ctrlr->sqs[qid]->sq_state != VFIO_USER_SQ_DELETED &&
-		vu_ctrlr->sqs[qid]->sq_state != VFIO_USER_SQ_UNUSED);
-}
-
 static void
 free_sq_reqs(struct nvmf_vfio_user_sq *sq)
 {
@@ -1257,7 +1261,7 @@ delete_sq_done(struct nvmf_vfio_user_ctrlr *vu_ctrlr, struct nvmf_vfio_user_sq *
 	struct nvmf_vfio_user_cq *cq;
 	uint16_t cqid;
 
-	SPDK_DEBUGLOG(nvmf_vfio, "%s: delete SQ%d=%p done\n", ctrlr_id(vu_ctrlr),
+	SPDK_DEBUGLOG(nvmf_vfio, "%s: delete sqid:%d=%p done\n", ctrlr_id(vu_ctrlr),
 		      sq->qid, sq);
 
 	/* Free SQ resources */
@@ -1401,6 +1405,7 @@ alloc_sq_reqs(struct nvmf_vfio_user_ctrlr *vu_ctrlr, struct nvmf_vfio_user_sq *s
 		req->qpair = &sq->qpair;
 		req->rsp = (union nvmf_c2h_msg *)&vu_req->rsp;
 		req->cmd = (union nvmf_h2c_msg *)&vu_req->cmd;
+		req->stripped_data = NULL;
 
 		TAILQ_INSERT_TAIL(&sq->free_reqs, vu_req, link);
 	}
@@ -1412,6 +1417,12 @@ err:
 		free(vu_req);
 	}
 	return -ENOMEM;
+}
+
+static volatile uint32_t *
+ctrlr_doorbell_ptr(struct nvmf_vfio_user_ctrlr *ctrlr)
+{
+	return ctrlr->bar0_doorbells;
 }
 
 static uint16_t
@@ -1438,7 +1449,7 @@ handle_create_io_sq(struct nvmf_vfio_user_ctrlr *ctrlr,
 	}
 
 	if (cqid == 0 || cqid >= vu_transport->transport.opts.max_qpairs_per_ctrlr) {
-		SPDK_ERRLOG("%s: invalid CQID %u\n", ctrlr_id(ctrlr), cqid);
+		SPDK_ERRLOG("%s: invalid cqid:%u\n", ctrlr_id(ctrlr), cqid);
 		*sct = SPDK_NVME_SCT_COMMAND_SPECIFIC;
 		return SPDK_NVME_SC_INVALID_QUEUE_IDENTIFIER;
 	}
@@ -1459,7 +1470,7 @@ handle_create_io_sq(struct nvmf_vfio_user_ctrlr *ctrlr,
 	sq = ctrlr->sqs[qid];
 	sq->size = qsize;
 
-	SPDK_DEBUGLOG(nvmf_vfio, "%s: SQ%d CQID=%d\n", ctrlr_id(ctrlr),
+	SPDK_DEBUGLOG(nvmf_vfio, "%s: sqid:%d cqid:%d\n", ctrlr_id(ctrlr),
 		      qid, cqid);
 
 	sq->mapping.prp1 = cmd->dptr.prp.prp1;
@@ -1471,7 +1482,7 @@ handle_create_io_sq(struct nvmf_vfio_user_ctrlr *ctrlr,
 		return SPDK_NVME_SC_INTERNAL_DEVICE_ERROR;
 	}
 
-	SPDK_DEBUGLOG(nvmf_vfio, "%s: mapped SQ%d IOVA=%#lx vaddr=%p\n",
+	SPDK_DEBUGLOG(nvmf_vfio, "%s: mapped sqid:%d IOVA=%#lx vaddr=%p\n",
 		      ctrlr_id(ctrlr), qid, cmd->dptr.prp.prp1,
 		      q_addr(&sq->mapping));
 
@@ -1486,7 +1497,10 @@ handle_create_io_sq(struct nvmf_vfio_user_ctrlr *ctrlr,
 	ctrlr->cqs[sq->cqid]->cq_ref++;
 	sq->sq_state = VFIO_USER_SQ_CREATED;
 	*sq_headp(sq) = 0;
-	*sq_dbl_tailp(ctrlr, sq) = 0;
+
+	sq->dbl_tailp = ctrlr_doorbell_ptr(ctrlr) + queue_index(qid, false);
+
+	*sq_dbl_tailp(sq) = 0;
 
 	/*
 	 * Create our new I/O qpair. This asynchronously invokes, on a suitable
@@ -1542,6 +1556,8 @@ handle_create_io_cq(struct nvmf_vfio_user_ctrlr *ctrlr,
 
 	cq->mapping.prp1 = cmd->dptr.prp.prp1;
 
+	cq->dbl_headp = ctrlr_doorbell_ptr(ctrlr) + queue_index(qid, true);
+
 	err = map_q(ctrlr, &cq->mapping, cq->size, true, true);
 	if (err) {
 		SPDK_ERRLOG("%s: failed to map I/O queue: %m\n", ctrlr_id(ctrlr));
@@ -1559,7 +1575,7 @@ handle_create_io_cq(struct nvmf_vfio_user_ctrlr *ctrlr,
 	cq->cq_state = VFIO_USER_CQ_CREATED;
 
 	*cq_tailp(cq) = 0;
-	*cq_dbl_headp(ctrlr, cq) = 0;
+	*cq_dbl_headp(cq) = 0;
 
 	*sct = SPDK_NVME_SCT_GENERIC;
 	return SPDK_NVME_SC_SUCCESS;
@@ -1584,7 +1600,7 @@ handle_create_io_q(struct nvmf_vfio_user_ctrlr *ctrlr,
 
 	qid = cmd->cdw10_bits.create_io_q.qid;
 	if (qid == 0 || qid >= vu_transport->transport.opts.max_qpairs_per_ctrlr) {
-		SPDK_ERRLOG("%s: invalid QID=%d, max=%d\n", ctrlr_id(ctrlr),
+		SPDK_ERRLOG("%s: invalid qid=%d, max=%d\n", ctrlr_id(ctrlr),
 			    qid, vu_transport->transport.opts.max_qpairs_per_ctrlr);
 		sct = SPDK_NVME_SCT_COMMAND_SPECIFIC;
 		sc = SPDK_NVME_SC_INVALID_QUEUE_IDENTIFIER;
@@ -1592,7 +1608,7 @@ handle_create_io_q(struct nvmf_vfio_user_ctrlr *ctrlr,
 	}
 
 	if (io_q_exists(ctrlr, qid, is_cq)) {
-		SPDK_ERRLOG("%s: %cQ%d already exists\n", ctrlr_id(ctrlr),
+		SPDK_ERRLOG("%s: %cqid:%d already exists\n", ctrlr_id(ctrlr),
 			    is_cq ? 'C' : 'S', qid);
 		sct = SPDK_NVME_SCT_COMMAND_SPECIFIC;
 		sc = SPDK_NVME_SC_INVALID_QUEUE_IDENTIFIER;
@@ -1655,7 +1671,7 @@ handle_del_io_q(struct nvmf_vfio_user_ctrlr *ctrlr,
 	struct nvmf_vfio_user_cq *cq;
 	struct vfio_user_delete_sq_ctx *ctx;
 
-	SPDK_DEBUGLOG(nvmf_vfio, "%s: delete I/O %cQ: QID=%d\n",
+	SPDK_DEBUGLOG(nvmf_vfio, "%s: delete I/O %cqid:%d\n",
 		      ctrlr_id(ctrlr), is_cq ? 'C' : 'S',
 		      cmd->cdw10_bits.delete_io_q.qid);
 
@@ -1865,7 +1881,7 @@ memory_region_add_cb(vfu_ctx_t *vfu_ctx, vfu_dma_info_t *info)
 		if (cq->size && q_addr(&cq->mapping) == NULL) {
 			ret = map_q(ctrlr, &cq->mapping, cq->size, true, false);
 			if (ret) {
-				SPDK_DEBUGLOG(nvmf_vfio, "Memory isn't ready to remap CQID %d %#lx-%#lx\n",
+				SPDK_DEBUGLOG(nvmf_vfio, "Memory isn't ready to remap cqid:%d %#lx-%#lx\n",
 					      cq->qid, cq->mapping.prp1,
 					      cq->mapping.prp1 + cq->size * sizeof(struct spdk_nvme_cpl));
 				continue;
@@ -1875,7 +1891,7 @@ memory_region_add_cb(vfu_ctx_t *vfu_ctx, vfu_dma_info_t *info)
 		if (sq->size) {
 			ret = map_q(ctrlr, &sq->mapping, sq->size, false, false);
 			if (ret) {
-				SPDK_DEBUGLOG(nvmf_vfio, "Memory isn't ready to remap SQID %d %#lx-%#lx\n",
+				SPDK_DEBUGLOG(nvmf_vfio, "Memory isn't ready to remap sqid:%d %#lx-%#lx\n",
 					      sq->qid, sq->mapping.prp1,
 					      sq->mapping.prp1 + sq->size * sizeof(struct spdk_nvme_cmd));
 				continue;
@@ -3331,6 +3347,7 @@ nvmf_vfio_user_listen(struct spdk_nvmf_transport *transport,
 			    endpoint_id(endpoint), path, spdk_strerror(errno));
 		goto out;
 	}
+	unlink(path);
 
 	endpoint->devmem_fd = ret;
 	ret = ftruncate(endpoint->devmem_fd,
@@ -3363,6 +3380,7 @@ nvmf_vfio_user_listen(struct spdk_nvmf_transport *transport,
 			    endpoint_id(endpoint), path, spdk_strerror(errno));
 		goto out;
 	}
+	unlink(path);
 
 	endpoint->migr_fd = ret;
 	ret = ftruncate(endpoint->migr_fd,
@@ -3994,7 +4012,7 @@ nvmf_vfio_user_poll_group_add(struct spdk_nvmf_transport_poll_group *group,
 	vu_req->cb_arg = sq;
 
 	SPDK_DEBUGLOG(nvmf_vfio,
-		      "%s: sending connect fabrics command for QID=%#x cntlid=%#x\n",
+		      "%s: sending connect fabrics command for qid:%#x cntlid=%#x\n",
 		      ctrlr_id(ctrlr), qpair->qid, data->cntlid);
 
 	spdk_nvmf_request_exec_fabrics(req);
@@ -4277,7 +4295,7 @@ handle_cmd_req(struct nvmf_vfio_user_ctrlr *ctrlr, struct spdk_nvme_cmd *cmd,
 	req = &vu_req->req;
 
 	assert(req->qpair != NULL);
-	SPDK_DEBUGLOG(nvmf_vfio, "%s: handle qid%u, req opc=%#x cid=%d\n",
+	SPDK_DEBUGLOG(nvmf_vfio, "%s: handle sqid:%u, req opc=%#x cid=%d\n",
 		      ctrlr_id(ctrlr), req->qpair->qid, cmd->opc, cmd->cid);
 
 	vu_req->cb_fn = handle_cmd_rsp;
@@ -4316,43 +4334,60 @@ handle_cmd_req(struct nvmf_vfio_user_ctrlr *ctrlr, struct spdk_nvme_cmd *cmd,
 	return 0;
 }
 
+/*
+ * If we suppressed an IRQ in post_completion(), check if it needs to be fired
+ * here: if the host isn't up to date, and is apparently not actively processing
+ * the queue (i.e. ->last_head isn't changing), we need an IRQ.
+ */
+static void
+handle_suppressed_irq(struct nvmf_vfio_user_ctrlr *ctrlr,
+		      struct nvmf_vfio_user_sq *sq)
+{
+	struct nvmf_vfio_user_cq *cq = ctrlr->cqs[sq->cqid];
+	uint32_t cq_head;
+	uint32_t cq_tail;
+
+	if (!cq->ien || !ctrlr_interrupt_enabled(ctrlr) ||
+	    !adaptive_irq_enabled(ctrlr, cq)) {
+		return;
+	}
+
+	cq_tail = *cq_tailp(cq);
+
+	/* Already sent? */
+	if (cq_tail == cq->last_trigger_irq_tail) {
+		return;
+	}
+
+	spdk_ivdt_dcache(cq_dbl_headp(cq));
+	cq_head = *cq_dbl_headp(cq);
+
+	if (cq_head != cq_tail && cq_head == cq->last_head) {
+		int err = vfu_irq_trigger(ctrlr->endpoint->vfu_ctx, cq->iv);
+		if (err != 0) {
+			SPDK_ERRLOG("%s: failed to trigger interrupt: %m\n",
+				    ctrlr_id(ctrlr));
+		} else {
+			cq->last_trigger_irq_tail = cq_tail;
+		}
+	}
+
+	cq->last_head = cq_head;
+}
+
 /* Returns the number of commands processed, or a negative value on error. */
 static int
 nvmf_vfio_user_sq_poll(struct nvmf_vfio_user_sq *sq)
 {
 	struct nvmf_vfio_user_ctrlr *ctrlr;
-	struct nvmf_vfio_user_cq *cq;
 	uint32_t new_tail;
 	int count = 0;
-	uint32_t cq_head;
-	uint32_t cq_tail;
-	int err;
 
 	assert(sq != NULL);
 
 	ctrlr = sq->ctrlr;
-	cq = ctrlr->cqs[sq->cqid];
 
-	if (cq->ien && ctrlr_interrupt_enabled(ctrlr) &&
-	    adaptive_irq_enabled(ctrlr, cq)) {
-		cq_tail = *cq_tailp(cq);
-
-		if (cq_tail != cq->last_trigger_irq_tail) {
-			spdk_ivdt_dcache(cq_dbl_headp(ctrlr, cq));
-			cq_head = *cq_dbl_headp(ctrlr, cq);
-
-			if (cq_head != cq_tail && cq_head == cq->last_head) {
-				err = vfu_irq_trigger(ctrlr->endpoint->vfu_ctx, cq->iv);
-				if (err != 0) {
-					SPDK_ERRLOG("%s: failed to trigger interrupt: %m\n",
-						    ctrlr_id(ctrlr));
-				} else {
-					cq->last_trigger_irq_tail = cq_tail;
-				}
-			}
-			cq->last_head = cq_head;
-		}
-	}
+	handle_suppressed_irq(ctrlr, sq);
 
 	/* On aarch64 platforms, doorbells update from guest VM may not be seen
 	 * on SPDK target side. This is because there is memory type mismatch
@@ -4364,10 +4399,10 @@ nvmf_vfio_user_sq_poll(struct nvmf_vfio_user_sq *sq)
 	 * cannot fix this. Use "dc civac" to invalidate cache may solve
 	 * this.
 	 */
-	spdk_ivdt_dcache(sq_dbl_tailp(ctrlr, sq));
+	spdk_ivdt_dcache(sq_dbl_tailp(sq));
 
 	/* Load-Acquire. */
-	new_tail = *sq_dbl_tailp(ctrlr, sq);
+	new_tail = *sq_dbl_tailp(sq);
 
 	/*
 	 * Ensure that changes to the queue are visible to us.
@@ -4380,7 +4415,7 @@ nvmf_vfio_user_sq_poll(struct nvmf_vfio_user_sq *sq)
 	if (spdk_unlikely(new_tail >= sq->size)) {
 		union spdk_nvme_async_event_completion event = {};
 
-		SPDK_DEBUGLOG(nvmf_vfio, "%s: invalid SQ%u doorbell value %u\n", ctrlr_id(ctrlr), sq->qid,
+		SPDK_DEBUGLOG(nvmf_vfio, "%s: invalid sqid:%u doorbell value %u\n", ctrlr_id(ctrlr), sq->qid,
 			      new_tail);
 		event.bits.async_event_type = SPDK_NVME_ASYNC_EVENT_TYPE_ERROR;
 		event.bits.async_event_info = SPDK_NVME_ASYNC_EVENT_INVALID_DB_WRITE;

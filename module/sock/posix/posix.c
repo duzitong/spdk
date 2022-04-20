@@ -366,6 +366,9 @@ posix_fd_create(struct addrinfo *res, struct spdk_sock_opts *opts)
 	int fd;
 	int val = 1;
 	int rc, sz;
+#if defined(__linux__)
+	int to;
+#endif
 
 	fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 	if (fd < 0) {
@@ -417,6 +420,21 @@ posix_fd_create(struct addrinfo *res, struct spdk_sock_opts *opts)
 			return -1;
 		}
 	}
+
+	if (opts->ack_timeout) {
+#if defined(__linux__)
+		to = opts->ack_timeout;
+		rc = setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &to, sizeof(to));
+		if (rc != 0) {
+			close(fd);
+			/* error */
+			return -1;
+		}
+#else
+		SPDK_WARNLOG("TCP_USER_TIMEOUT is not supported.\n");
+#endif
+	}
+
 	return fd;
 }
 
@@ -730,11 +748,11 @@ _sock_flush(struct spdk_sock *sock)
 	msg.msg_iovlen = iovcnt;
 #ifdef SPDK_ZEROCOPY
 	if (psock->zcopy) {
-		flags = MSG_ZEROCOPY;
+		flags = MSG_ZEROCOPY | MSG_NOSIGNAL;
 	} else
 #endif
 	{
-		flags = 0;
+		flags = MSG_NOSIGNAL;
 	}
 	rc = sendmsg(psock->fd, &msg, flags);
 	if (rc <= 0) {
@@ -744,12 +762,14 @@ _sock_flush(struct spdk_sock *sock)
 		return rc;
 	}
 
-	/* Handling overflow case, because we use psock->sendmsg_idx - 1 for the
-	 * req->internal.offset, so sendmsg_idx should not be zero  */
-	if (spdk_unlikely(psock->sendmsg_idx == UINT32_MAX)) {
-		psock->sendmsg_idx = 1;
-	} else {
-		psock->sendmsg_idx++;
+	if (psock->zcopy) {
+		/* Handling overflow case, because we use psock->sendmsg_idx - 1 for the
+		 * req->internal.offset, so sendmsg_idx should not be zero  */
+		if (spdk_unlikely(psock->sendmsg_idx == UINT32_MAX)) {
+			psock->sendmsg_idx = 1;
+		} else {
+			psock->sendmsg_idx++;
+		}
 	}
 
 	/* Consume the requests that were actually written */
@@ -1081,13 +1101,13 @@ posix_sock_is_connected(struct spdk_sock *_sock)
 }
 
 static struct spdk_sock_group_impl *
-posix_sock_group_impl_get_optimal(struct spdk_sock *_sock)
+posix_sock_group_impl_get_optimal(struct spdk_sock *_sock, struct spdk_sock_group_impl *hint)
 {
 	struct spdk_posix_sock *sock = __posix_sock(_sock);
 	struct spdk_sock_group_impl *group_impl;
 
 	if (sock->placement_id != -1) {
-		spdk_sock_map_lookup(&g_map, sock->placement_id, &group_impl);
+		spdk_sock_map_lookup(&g_map, sock->placement_id, &group_impl, hint);
 		return group_impl;
 	}
 

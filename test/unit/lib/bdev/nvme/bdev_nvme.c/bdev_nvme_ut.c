@@ -1147,6 +1147,8 @@ spdk_nvme_poll_group_process_completions(struct spdk_nvme_poll_group *group,
 	TAILQ_FOREACH_SAFE(qpair, &group->connected_qpairs, poll_group_tailq, tmp_qpair) {
 		if (qpair->failure_reason != SPDK_NVME_QPAIR_FAILURE_NONE) {
 			spdk_nvme_ctrlr_disconnect_io_qpair(qpair);
+			/* Bump the number of completions so this counts as "busy" */
+			num_completions++;
 			continue;
 		}
 
@@ -1181,6 +1183,11 @@ spdk_nvme_poll_group_remove(struct spdk_nvme_poll_group *group,
 			    struct spdk_nvme_qpair *qpair)
 {
 	CU_ASSERT(!qpair->is_connected);
+
+	if (qpair->poll_group == NULL) {
+		return -ENOENT;
+	}
+
 	CU_ASSERT(qpair->poll_group_tailq_head == &group->disconnected_qpairs);
 
 	TAILQ_REMOVE(&group->disconnected_qpairs, qpair, poll_group_tailq);
@@ -4001,7 +4008,7 @@ test_find_io_path(void)
 	struct spdk_nvme_qpair qpair1 = {}, qpair2 = {};
 	struct spdk_nvme_ctrlr ctrlr1 = {}, ctrlr2 = {};
 	struct nvme_ctrlr nvme_ctrlr1 = { .ctrlr = &ctrlr1, }, nvme_ctrlr2 = { .ctrlr = &ctrlr2, };
-	struct nvme_ctrlr_channel ctrlr_ch1 = { .ctrlr = &nvme_ctrlr1, }, ctrlr_ch2 = { .ctrlr = &nvme_ctrlr2, };
+	struct nvme_ctrlr_channel ctrlr_ch1 = {}, ctrlr_ch2 = {};
 	struct nvme_qpair nvme_qpair1 = { .ctrlr_ch = &ctrlr_ch1, .ctrlr = &nvme_ctrlr1, };
 	struct nvme_qpair nvme_qpair2 = { .ctrlr_ch = &ctrlr_ch2, .ctrlr = &nvme_ctrlr2, };
 	struct nvme_ns nvme_ns1 = {}, nvme_ns2 = {};

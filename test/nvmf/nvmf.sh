@@ -25,6 +25,7 @@ if [[ $SPDK_TEST_URING -eq 0 ]]; then
 	run_test "nvmf_abort" test/nvmf/target/abort.sh "${TEST_ARGS[@]}"
 	run_test "nvmf_ns_hotplug_stress" test/nvmf/target/ns_hotplug_stress.sh "${TEST_ARGS[@]}"
 	run_test "nvmf_connect_stress" test/nvmf/target/connect_stress.sh "${TEST_ARGS[@]}"
+	run_test "nvmf_fused_ordering" test/nvmf/target/fused_ordering.sh "${TEST_ARGS[@]}"
 	run_test "nvmf_delete_subsystem" test/nvmf/target/delete_subsystem.sh "${TEST_ARGS[@]}"
 	run_test "nvmf_multicontroller" test/nvmf/host/multicontroller.sh "${TEST_ARGS[@]}"
 	run_test "nvmf_aer" test/nvmf/host/aer.sh "${TEST_ARGS[@]}"
@@ -48,6 +49,9 @@ if [ $RUN_NIGHTLY -eq 1 ]; then
 	run_test "nvmf_fuzz" test/nvmf/target/fabrics_fuzz.sh "${TEST_ARGS[@]}"
 	run_test "nvmf_multiconnection" test/nvmf/target/multiconnection.sh "${TEST_ARGS[@]}"
 	run_test "nvmf_initiator_timeout" test/nvmf/target/initiator_timeout.sh "${TEST_ARGS[@]}"
+	if [ $SPDK_TEST_FUZZER -eq 1 ]; then
+		run_test "nvmf_llvm_fuzz" test/nvmf/target/llvm_nvme_fuzz.sh "${TEST_ARGS[@]}" "--time=60000" "--all"
+	fi
 fi
 
 run_test "nvmf_nmic" test/nvmf/target/nmic.sh "${TEST_ARGS[@]}"
@@ -59,6 +63,7 @@ if [[ $NET_TYPE == phy ]]; then
 	# run_test "nvmf_srq_overwhelm" test/nvmf/target/srq_overwhelm.sh $TEST_ARGS
 fi
 
+run_test "nvmf_queue_depth" test/nvmf/target/queue_depth.sh "${TEST_ARGS[@]}"
 run_test "nvmf_multipath" test/nvmf/target/multipath.sh "${TEST_ARGS[@]}"
 run_test "nvmf_zcopy" test/nvmf/target/zcopy.sh "${TEST_ARGS[@]}"
 

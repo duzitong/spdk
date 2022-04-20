@@ -2,9 +2,24 @@
 
 ## v22.05: (Upcoming Release)
 
+### sock
+
+A new option `ack_timeout` was added to the `spdk_sock_opts` structure.
+
+### util
+
+A new parameter `bounce_iovcnt` was added to `spdk_dif_generate_copy` and `spdk_dif_verify_copy`.
+The `bounce_iovcnt` is used to specify the number of bounce_iov to support multiple block-aligned
+fragment copies.
+
 ### bdev
 
 Removed deprecated spdk_bdev_module_finish_done(). Use spdk_bdev_module_fini_done() instead.
+
+A new API `spdk_bdev_unregister_by_name` was added to handle race conditions correctly.
+
+New APIs, `spdk_for_each_bdev` and `spdk_for_each_bdev_leaf`, were added to provide iteration
+safe for race conditions.
 
 ### idxd
 
@@ -82,6 +97,14 @@ and `framework_get_scheduler` to retrieve them.
 Added `dynamic` scheduler options: load_limit, core_limit, core_busy. Their descriptions
 are available in JSON-RPC document, in section
 [framework_set_scheduler](jsonrpc.html#rpc_framework_set_scheduler).
+
+### raid
+
+Add concat as a special raid module. The concat module could create a virtual bdev.  The
+virtual bdev combines multiple underlying bdevs together. The layout of the underlying
+bdevs is one after another. The concat bdev is extendable. When the free space of the
+concat bdev is not enough, the user can deconstruct the concat bdev, then reconstruct it
+with an additional underlying bdev.
 
 ## v22.01
 
@@ -192,6 +215,11 @@ individual traces.
 
 Added `spdk_ioviter_first` and `spdk_ioviter_next` to iterate over two iovecs and
 yield pointers to common length segments.
+
+### sock
+
+A new parameter `hint` is added to `spdk_sock_get_optimal_sock_group`. It allows to suggest
+a poll group when no optimal poll group is found.
 
 ## v21.10
 

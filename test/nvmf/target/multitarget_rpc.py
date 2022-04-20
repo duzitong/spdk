@@ -2,11 +2,11 @@
 
 # Not for use in production. Please see the changelog for v19.10.
 
-from rpc.client import print_dict, JSONRPCException
+from spdk.rpc.client import print_dict, JSONRPCException
 
 import logging
 import argparse
-import rpc
+import spdk.rpc as rpc
 import sys
 import shlex
 
@@ -17,7 +17,7 @@ except ImportError:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description='NVMe-oF RPC command line interface. NOTE: spdk/scripts/ is expected in PYTHONPATH')
+        description='NVMe-oF RPC command line interface. NOTE: spdk/python is expected in PYTHONPATH')
     parser.add_argument('-s', dest='server_addr',
                         help='RPC domain socket path or IP address', default='/var/tmp/spdk.sock')
     parser.add_argument('-p', dest='port',

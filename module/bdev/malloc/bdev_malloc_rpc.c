@@ -136,7 +136,11 @@ rpc_bdev_malloc_delete_cb(void *cb_arg, int bdeverrno)
 {
 	struct spdk_jsonrpc_request *request = cb_arg;
 
-	spdk_jsonrpc_send_bool_response(request, bdeverrno == 0);
+	if (bdeverrno == 0) {
+		spdk_jsonrpc_send_bool_response(request, true);
+	} else {
+		spdk_jsonrpc_send_error_response(request, bdeverrno, spdk_strerror(-bdeverrno));
+	}
 }
 
 static void
@@ -144,7 +148,6 @@ rpc_bdev_malloc_delete(struct spdk_jsonrpc_request *request,
 		       const struct spdk_json_val *params)
 {
 	struct rpc_delete_malloc req = {NULL};
-	struct spdk_bdev *bdev;
 
 	if (spdk_json_decode_object(params, rpc_delete_malloc_decoders,
 				    SPDK_COUNTOF(rpc_delete_malloc_decoders),
@@ -155,14 +158,7 @@ rpc_bdev_malloc_delete(struct spdk_jsonrpc_request *request,
 		goto cleanup;
 	}
 
-	bdev = spdk_bdev_get_by_name(req.name);
-	if (bdev == NULL) {
-		SPDK_INFOLOG(bdev_malloc, "bdev '%s' does not exist\n", req.name);
-		spdk_jsonrpc_send_error_response(request, -ENODEV, spdk_strerror(ENODEV));
-		goto cleanup;
-	}
-
-	delete_malloc_disk(bdev, rpc_bdev_malloc_delete_cb, request);
+	delete_malloc_disk(req.name, rpc_bdev_malloc_delete_cb, request);
 
 cleanup:
 	free_rpc_delete_malloc(&req);

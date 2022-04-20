@@ -52,6 +52,22 @@ function ocf_precompile() {
 	./configure $config_params
 }
 
+function llvm_precompile() {
+	# llvm need clang compiler
+	local clangV
+	local clang_complier
+
+	clangV=$(clang --version | grep version | cut -d" " -f3)
+	clang_complier=$(echo "$clangV" | cut -d"." -f1)
+
+	export CC=clang-$clang_complier
+	export CXX=clang++-$clang_complier
+	# Set config to use precompiled library
+	config_params="$config_params --with-fuzzer=/usr/lib64/clang/$clangV/lib/linux/libclang_rt.fuzzer_no_main-x86_64.a"
+	# need to reconfigure to avoid clearing llvm related files on future make clean.
+	./configure $config_params
+}
+
 function build_native_dpdk() {
 	local external_dpdk_dir
 	local external_dpdk_base_dir
@@ -126,8 +142,8 @@ function build_native_dpdk() {
 		DPDK_DRIVERS+=("crypto/qat")
 		DPDK_DRIVERS+=("compress/qat")
 		DPDK_DRIVERS+=("common/qat")
-		# 22.03.0 is version of DPDK with stable support for mlx5 crypto.
-		if ge "$dpdk_ver" 22.03.0; then
+		# 21.11.0 is version of DPDK with stable support for mlx5 crypto.
+		if ge "$dpdk_ver" 21.11.0; then
 			# SPDK enables CRYPTO_MLX in case supported version of DPDK is detected
 			# so make sure proper libs are built.
 			DPDK_DRIVERS+=("bus/auxiliary")
@@ -171,13 +187,11 @@ function build_native_dpdk() {
 
 	cd $external_dpdk_base_dir
 	if [ "$(uname -s)" = "Linux" ]; then
-		if [[ $dpdk_ver == 20.11* ]]; then
+		if lt $dpdk_ver 21.11.0; then
 			patch -p1 < "$rootdir/test/common/config/pkgdep/patches/dpdk/20.11/dpdk_pci.patch"
 			patch -p1 < "$rootdir/test/common/config/pkgdep/patches/dpdk/20.11/dpdk_qat.patch"
-		elif [[ $dpdk_ver == 21.11* ]]; then
-			patch -p1 < "$rootdir/test/common/config/pkgdep/patches/dpdk/21.11/dpdk_qat.patch"
-		elif [[ $dpdk_ver == 22.03* ]]; then
-			patch -p1 < "$rootdir/test/common/config/pkgdep/patches/dpdk/22.03/dpdk_qat.patch"
+		else
+			patch -p1 < "$rootdir/test/common/config/pkgdep/patches/dpdk/21.11+/dpdk_qat.patch"
 		fi
 	fi
 
@@ -333,10 +347,6 @@ function unittest_build() {
 	$MAKE $MAKEFLAGS
 }
 
-if [ $SPDK_RUN_VALGRIND -eq 1 ]; then
-	run_test "valgrind" echo "using valgrind"
-fi
-
 if [ $SPDK_RUN_ASAN -eq 1 ]; then
 	run_test "asan" echo "using asan"
 fi
@@ -360,6 +370,10 @@ if [[ $SPDK_TEST_OCF -eq 1 ]]; then
 	run_test "autobuild_ocf_precompile" ocf_precompile
 fi
 
+if [[ $SPDK_TEST_FUZZER -eq 1 ]]; then
+	run_test "autobuild_llvm_precompile" llvm_precompile
+fi
+
 if [[ $SPDK_TEST_AUTOBUILD -eq 1 ]]; then
 	run_test "autobuild" autobuild_test_suite $1
 elif [[ $SPDK_TEST_UNITTEST -eq 1 ]]; then
@@ -367,7 +381,12 @@ elif [[ $SPDK_TEST_UNITTEST -eq 1 ]]; then
 elif [[ $SPDK_TEST_SCANBUILD -eq 1 ]]; then
 	run_test "scanbuild_make" scanbuild_make
 else
-	# if we aren't testing the unittests, build with shared objects.
-	./configure $config_params --with-shared
+	if [[ $SPDK_TEST_FUZZER -eq 1 ]]; then
+		# if we are testing nvmf fuzz with llvm lib, --with-shared will cause lib link fail
+		./configure $config_params
+	else
+		# if we aren't testing the unittests, build with shared objects.
+		./configure $config_params --with-shared
+	fi
 	run_test "make" $MAKE $MAKEFLAGS
 fi

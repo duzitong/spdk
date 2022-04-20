@@ -646,18 +646,18 @@ vbdev_delay_insert_association(const char *bdev_name, const char *vbdev_name,
 int
 vbdev_delay_update_latency_value(char *delay_name, uint64_t latency_us, enum delay_io_type type)
 {
-	struct spdk_bdev *delay_bdev;
 	struct vbdev_delay *delay_node;
 	uint64_t ticks_mhz = spdk_get_ticks_hz() / SPDK_SEC_TO_USEC;
 
-	delay_bdev = spdk_bdev_get_by_name(delay_name);
-	if (delay_bdev == NULL) {
-		return -ENODEV;
-	} else if (delay_bdev->module != &delay_if) {
-		return -EINVAL;
+	TAILQ_FOREACH(delay_node, &g_delay_nodes, link) {
+		if (strcmp(delay_node->delay_bdev.name, delay_name) == 0) {
+			break;
+		}
 	}
 
-	delay_node = SPDK_CONTAINEROF(delay_bdev, struct vbdev_delay, delay_bdev);
+	if (delay_node == NULL) {
+		return -ENODEV;
+	}
 
 	switch (type) {
 	case DELAY_AVG_READ:
@@ -887,26 +887,25 @@ create_delay_disk(const char *bdev_name, const char *vbdev_name, uint64_t avg_re
 }
 
 void
-delete_delay_disk(struct spdk_bdev *bdev, spdk_bdev_unregister_cb cb_fn, void *cb_arg)
+delete_delay_disk(const char *vbdev_name, spdk_bdev_unregister_cb cb_fn, void *cb_arg)
 {
 	struct bdev_association *assoc;
+	int rc;
 
-	if (!bdev || bdev->module != &delay_if) {
-		cb_fn(cb_arg, -ENODEV);
-		return;
-	}
-
-	TAILQ_FOREACH(assoc, &g_bdev_associations, link) {
-		if (strcmp(assoc->vbdev_name, bdev->name) == 0) {
-			TAILQ_REMOVE(&g_bdev_associations, assoc, link);
-			free(assoc->bdev_name);
-			free(assoc->vbdev_name);
-			free(assoc);
-			break;
+	rc = spdk_bdev_unregister_by_name(vbdev_name, &delay_if, cb_fn, cb_arg);
+	if (rc == 0) {
+		TAILQ_FOREACH(assoc, &g_bdev_associations, link) {
+			if (strcmp(assoc->vbdev_name, vbdev_name) == 0) {
+				TAILQ_REMOVE(&g_bdev_associations, assoc, link);
+				free(assoc->bdev_name);
+				free(assoc->vbdev_name);
+				free(assoc);
+				break;
+			}
 		}
+	} else {
+		cb_fn(cb_arg, rc);
 	}
-
-	spdk_bdev_unregister(bdev, cb_fn, cb_arg);
 }
 
 static void

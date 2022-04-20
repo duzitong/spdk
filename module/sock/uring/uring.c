@@ -457,6 +457,23 @@ retry:
 			continue;
 		}
 
+		if (opts->ack_timeout) {
+#if defined(__linux__)
+			val = opts->ack_timeout;
+			rc = setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &val, sizeof val);
+			if (rc != 0) {
+				close(fd);
+				fd = -1;
+				/* error */
+				continue;
+			}
+#else
+			SPDK_WARNLOG("TCP_USER_TIMEOUT is not supported.\n");
+#endif
+		}
+
+
+
 #if defined(SO_PRIORITY)
 		if (opts != NULL && opts->priority) {
 			rc = setsockopt(fd, SOL_SOCKET, SO_PRIORITY, &opts->priority, sizeof val);
@@ -1283,13 +1300,13 @@ uring_sock_is_connected(struct spdk_sock *_sock)
 }
 
 static struct spdk_sock_group_impl *
-uring_sock_group_impl_get_optimal(struct spdk_sock *_sock)
+uring_sock_group_impl_get_optimal(struct spdk_sock *_sock, struct spdk_sock_group_impl *hint)
 {
 	struct spdk_uring_sock *sock = __uring_sock(_sock);
 	struct spdk_sock_group_impl *group;
 
 	if (sock->placement_id != -1) {
-		spdk_sock_map_lookup(&g_map, sock->placement_id, &group);
+		spdk_sock_map_lookup(&g_map, sock->placement_id, &group, hint);
 		return group;
 	}
 
