@@ -138,12 +138,11 @@ cleanup:
 	free_rpc_bdev_replica_get_bdevs(&req);
 }
 SPDK_RPC_REGISTER("bdev_replica_get_bdevs", rpc_bdev_replica_get_bdevs, SPDK_RPC_RUNTIME)
-SPDK_RPC_REGISTER_ALIAS_DEPRECATED(bdev_replica_get_bdevs, get_replica_bdevs)
 
 /*
- * Base bdevs in RPC bdev_replica_create
+ * Base bdevs in RPC bdev_replica_initiator_create
  */
-struct rpc_bdev_replica_create_base_bdevs {
+struct rpc_bdev_replica_initiator_create_base_bdevs {
 	/* Number of base bdevs */
 	size_t           num_base_bdevs;
 
@@ -152,26 +151,26 @@ struct rpc_bdev_replica_create_base_bdevs {
 };
 
 /*
- * Input structure for RPC rpc_bdev_replica_create
+ * Input structure for RPC rpc_bdev_replica_initiator_create
  */
-struct rpc_bdev_replica_create {
+struct rpc_bdev_replica_initiator_create {
 	/* Replica bdev name */
-	char                                 *name;
+	char                                 				*name;
 
 	/* Base bdevs information */
-	struct rpc_bdev_replica_create_base_bdevs base_bdevs;
+	struct rpc_bdev_replica_initiator_create_base_bdevs base_bdevs;
 };
 
 /*
  * brief:
- * free_rpc_bdev_replica_create function is to free RPC bdev_replica_create related parameters
+ * free_rpc_bdev_replica_initiator_create function is to free RPC bdev_replica_initiator_create related parameters
  * params:
  * req - pointer to RPC request
  * returns:
  * none
  */
 static void
-free_rpc_bdev_replica_create(struct rpc_bdev_replica_create *req)
+free_rpc_bdev_replica_initiator_create(struct rpc_bdev_replica_initiator_create *req)
 {
 	size_t i;
 
@@ -182,27 +181,27 @@ free_rpc_bdev_replica_create(struct rpc_bdev_replica_create *req)
 }
 
 /*
- * Decoder function for RPC bdev_replica_create to decode base bdevs list
+ * Decoder function for RPC bdev_replica_initiator_create to decode base bdevs list
  */
 static int
 decode_base_bdevs(const struct spdk_json_val *val, void *out)
 {
-	struct rpc_bdev_replica_create_base_bdevs *base_bdevs = out;
+	struct rpc_bdev_replica_initiator_create_base_bdevs *base_bdevs = out;
 	return spdk_json_decode_array(val, spdk_json_decode_string, base_bdevs->base_bdevs,
 				      RPC_MAX_BASE_BDEVS, &base_bdevs->num_base_bdevs, sizeof(char *));
 }
 
 /*
- * Decoder object for RPC bdev_replica_create
+ * Decoder object for RPC bdev_replica_initiator_create
  */
-static const struct spdk_json_object_decoder rpc_bdev_replica_create_decoders[] = {
-	{"name", offsetof(struct rpc_bdev_replica_create, name), spdk_json_decode_string},
-	{"base_bdevs", offsetof(struct rpc_bdev_replica_create, base_bdevs), decode_base_bdevs},
+static const struct spdk_json_object_decoder rpc_bdev_replica_initiator_create_decoders[] = {
+	{"name", offsetof(struct rpc_bdev_replica_initiator_create, name), spdk_json_decode_string},
+	{"base_bdevs", offsetof(struct rpc_bdev_replica_initiator_create, base_bdevs), decode_base_bdevs},
 };
 
 /*
  * brief:
- * rpc_bdev_replica_create function is the RPC for creating Replica bdevs. It takes
+ * rpc_bdev_replica_initiator_create function is the RPC for creating Replica bdevs. It takes
  * input as replica bdev name and list of base bdev names.
  * params:
  * request - pointer to json rpc request
@@ -211,23 +210,23 @@ static const struct spdk_json_object_decoder rpc_bdev_replica_create_decoders[] 
  * none
  */
 static void
-rpc_bdev_replica_create(struct spdk_jsonrpc_request *request,
+rpc_bdev_replica_initiator_create(struct spdk_jsonrpc_request *request,
 		     const struct spdk_json_val *params)
 {
-	struct rpc_bdev_replica_create	req = {};
+	struct rpc_bdev_replica_initiator_create	req = {};
 	struct replica_bdev_config		*replica_cfg;
 	int				rc;
 	size_t				i;
 
-	if (spdk_json_decode_object(params, rpc_bdev_replica_create_decoders,
-				    SPDK_COUNTOF(rpc_bdev_replica_create_decoders),
+	if (spdk_json_decode_object(params, rpc_bdev_replica_initiator_create_decoders,
+				    SPDK_COUNTOF(rpc_bdev_replica_initiator_create_decoders),
 				    &req)) {
 		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
 						 "spdk_json_decode_object failed");
 		goto cleanup;
 	}
 
-	rc = replica_bdev_config_add(req.name, req.base_bdevs.num_base_bdevs,
+	rc = replica_bdev_config_add(req.name, req.base_bdevs.num_base_bdevs, REPLICA_BDEV_TYPE_INITIATOR
 				  &replica_cfg);
 	if (rc != 0) {
 		spdk_jsonrpc_send_error_response_fmt(request, rc,
@@ -268,10 +267,127 @@ rpc_bdev_replica_create(struct spdk_jsonrpc_request *request,
 	spdk_jsonrpc_send_bool_response(request, true);
 
 cleanup:
-	free_rpc_bdev_replica_create(&req);
+	free_rpc_bdev_replica_initiator_create(&req);
 }
-SPDK_RPC_REGISTER("bdev_replica_create", rpc_bdev_replica_create, SPDK_RPC_RUNTIME)
-SPDK_RPC_REGISTER_ALIAS_DEPRECATED(bdev_replica_create, construct_replica_bdev)
+SPDK_RPC_REGISTER("bdev_replica_initiator_create", rpc_bdev_replica_initiator_create, SPDK_RPC_RUNTIME)
+
+
+/*
+ * Input structure for RPC rpc_bdev_replica_initiator_create
+ */
+struct rpc_bdev_replica_target_create {
+	/* Replica bdev name */
+	char	*name;
+
+	char	*log_bdev_name;
+
+	char	*base_bdev_name;		
+};
+
+/*
+ * brief:
+ * free_rpc_bdev_replica_target_create function is to free RPC bdev_replica_target_create related parameters
+ * params:
+ * req - pointer to RPC request
+ * returns:
+ * none
+ */
+static void
+free_rpc_bdev_replica_target_create(struct rpc_bdev_replica_target_create *req)
+{
+	free(req->name);
+	free(req->log_bdev_name);
+	free(req->base_bdev_name);
+}
+
+/*
+ * Decoder object for RPC bdev_replica_target_create
+ */
+static const struct spdk_json_object_decoder rpc_bdev_replica_target_create_decoders[] = {
+	{"name", offsetof(struct rpc_bdev_replica_target_create, name), spdk_json_decode_string},
+	{"log_bdev_name", offsetof(struct rpc_bdev_replica_target_create, log_bdev_name), spdk_json_decode_string},
+	{"base_bdev_name", offsetof(struct rpc_bdev_replica_target_create, base_bdev_name), spdk_json_decode_string},
+};
+
+/*
+ * brief:
+ * rpc_bdev_replica_target_create function is the RPC for creating Replica target bdevs. It takes
+ * input as replica bdev name and list of base bdev names.
+ * params:
+ * request - pointer to json rpc request
+ * params - pointer to request parameters
+ * returns:
+ * none
+ */
+static void
+rpc_bdev_replica_target_create(struct spdk_jsonrpc_request *request,
+		     const struct spdk_json_val *params)
+{
+	struct rpc_bdev_replica_target_create	req = {};
+	struct replica_bdev_config		*replica_cfg;
+	int				rc;
+	size_t				i;
+
+	if (spdk_json_decode_object(params, rpc_bdev_replica_target_create_decoders,
+				    SPDK_COUNTOF(rpc_bdev_replica_target_create_decoders),
+				    &req)) {
+		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
+						 "spdk_json_decode_object failed");
+		goto cleanup;
+	}
+
+	rc = replica_bdev_config_add(req.name, 2, REPLICA_BDEV_TYPE_TARGET, &replica_cfg);
+	if (rc != 0) {
+		spdk_jsonrpc_send_error_response_fmt(request, rc,
+						     "Failed to add Replica bdev config %s: %s",
+						     req.name, spdk_strerror(-rc));
+		goto cleanup;
+	}
+
+	rc = replica_bdev_config_add_base_bdev(replica_cfg, req.log_bdev_name, 0);
+	if (rc != 0) {
+		replica_bdev_config_cleanup(replica_cfg);
+		spdk_jsonrpc_send_error_response_fmt(request, rc,
+								"Failed to add log bdev %s to Replica bdev config %s: %s",
+								req.log_bdev_name, req.name,
+								spdk_strerror(-rc));
+		goto cleanup;
+	}
+
+	rc = replica_bdev_config_add_base_bdev(replica_cfg, req.base_bdev_name, 1);
+	if (rc != 0) {
+		replica_bdev_config_cleanup(replica_cfg);
+		spdk_jsonrpc_send_error_response_fmt(request, rc,
+								"Failed to add base bdev %s to Replica bdev config %s: %s",
+								req.base_bdev_name, req.name,
+								spdk_strerror(-rc));
+		goto cleanup;
+	}
+	
+
+	rc = replica_bdev_create(replica_cfg);
+	if (rc != 0) {
+		replica_bdev_config_cleanup(replica_cfg);
+		spdk_jsonrpc_send_error_response_fmt(request, rc,
+						     "Failed to create Replica bdev %s: %s",
+						     req.name, spdk_strerror(-rc));
+		goto cleanup;
+	}
+
+	rc = replica_bdev_add_base_devices(replica_cfg);
+	if (rc != 0) {
+		spdk_jsonrpc_send_error_response_fmt(request, rc,
+						     "Failed to add any base bdev to Replica bdev %s: %s",
+						     req.name, spdk_strerror(-rc));
+		goto cleanup;
+	}
+
+	spdk_jsonrpc_send_bool_response(request, true);
+
+cleanup:
+	free_rpc_bdev_replica_target_create(&req);
+}
+SPDK_RPC_REGISTER("bdev_replica_target_create", rpc_bdev_replica_target_create, SPDK_RPC_RUNTIME)
 
 /*
  * Input structure for RPC deleting a replica bdev
@@ -393,4 +509,3 @@ cleanup:
 	free(ctx);
 }
 SPDK_RPC_REGISTER("bdev_replica_delete", rpc_bdev_replica_delete, SPDK_RPC_RUNTIME)
-SPDK_RPC_REGISTER_ALIAS_DEPRECATED(bdev_replica_delete, destroy_replica_bdev)

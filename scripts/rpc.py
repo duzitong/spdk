@@ -1973,19 +1973,43 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     p.add_argument('category', help='all or online or configuring or offline')
     p.set_defaults(func=bdev_replica_get_bdevs)
 
-    def bdev_replica_create(args):
+    def bdev_replica_initiator_create(args):
+        target_bdevs = []
+        for u in args.target_bdevs.strip().split(" "):
+            target_bdevs.append(u)
+
+        rpc.bdev.bdev_replica_initiator_create(args.client,
+                                  name=args.name,
+                                  base_bdevs=base_bdevs)
+    p = subparsers.add_parser('bdev_replica_initiator_create', aliases=['construct_replica_initiator_bdev'],
+                              help='Create new replica initiator bdev')
+    p.add_argument('-n', '--name', help='replica initiator bdev name', required=True)
+    p.add_argument('-b', '--base-bdevs', help='base bdevs name, whitespace separated list in quotes', required=True)
+    p.set_defaults(func=bdev_replica_initiator_create)
+
+    def bdev_replica_initiator_delete(args):
+        rpc.bdev.bdev_replica_initiator_delete(args.client,
+                                  name=args.name)
+    p = subparsers.add_parser('bdev_replica_initiator_delete', aliases=['destroy_replica_bdev'],
+                              help='Delete existing replica initiator bdev')
+    p.add_argument('name', help='replica initiator bdev name')
+    p.set_defaults(func=bdev_replica_initiator_delete)
+
+    def bdev_replica_target_create(args):
         base_bdevs = []
         for u in args.base_bdevs.strip().split(" "):
             base_bdevs.append(u)
 
-        rpc.bdev.bdev_replica_create(args.client,
+        rpc.bdev.bdev_replica_target_create(args.client,
                                   name=args.name,
-                                  base_bdevs=base_bdevs)
-    p = subparsers.add_parser('bdev_replica_create', aliases=['construct_replica_bdev'],
-                              help='Create new replica bdev')
-    p.add_argument('-n', '--name', help='replica bdev name', required=True)
-    p.add_argument('-b', '--base-bdevs', help='base bdevs name, whitespace separated list in quotes', required=True)
-    p.set_defaults(func=bdev_replica_create)
+                                  log_bdev=log_bdev,
+                                  base_bdev=base_bdev)
+    p = subparsers.add_parser('bdev_replica_create', aliases=['construct_replica_target_bdev'],
+                              help='Create new replica target bdev')
+    p.add_argument('-n', '--name', help='replica target bdev name', required=True)
+    p.add_argument('-l', '--log-bdev', help='log bdev name', required=True)
+    p.add_argument('-b', '--base-bdev', help='base bdev name', required=True)
+    p.set_defaults(func=bdev_replica_target_create)
 
     def bdev_replica_delete(args):
         rpc.bdev.bdev_replica_delete(args.client,

@@ -37,7 +37,15 @@
 #include "spdk/bdev_module.h"
 
 /*
- * Raid state describes the state of the replica. This replica bdev can be either in
+*/
+enum replica_bdev_type {
+	REPLICA_BDEV_TYPE_INITIATOR,
+
+	REPLICA_BDEV_TYPE_TARGET
+}
+
+/*
+ * Replica state describes the state of the replica. This replica bdev can be either in
  * configured list or configuring list
  */
 enum replica_bdev_state {
@@ -141,6 +149,12 @@ struct replica_bdev {
 
 	/* Set to true if destroy of this replica bdev is started. */
 	bool				destroy_started;
+
+	/* Module for intiator or target */
+	struct replica_bdev_module	*module;
+
+	/* Private data for the raid module */
+	void				*module_private;
 };
 
 #define REPLICA_FOR_EACH_BASE_BDEV(r, i) \
@@ -160,8 +174,12 @@ struct replica_base_bdev_config {
  * parsing the config file
  */
 struct replica_bdev_config {
+	enum replica_bdev_type 	type;
+
 	/* base bdev config per underlying bdev */
-	struct replica_base_bdev_config	*base_bdev;
+	/* initiator: replicate targets */
+	/* target: base_bdev[0] is log_bdev, base_bdev[1] is base_bdev */
+	struct replica_base_bdev_config	*base_bdevs;
 
 	/* Points to already created replica bdev  */
 	struct replica_bdev		*replica_bdev;
@@ -227,15 +245,6 @@ struct replica_bdev_config *replica_bdev_config_find_by_name(const char *replica
  * REPLICA module descriptor
  */
 struct replica_bdev_module {
-	/* Minimum required number of base bdevs. Must be > 0. */
-	uint8_t base_bdevs_min;
-
-	/*
-	 * Maximum number of base bdevs that can be removed without failing
-	 * the array.
-	 */
-	uint8_t base_bdevs_max_degraded;
-
 	/*
 	 * Called when the replica is starting, right before changing the state to
 	 * online and registering the bdev. Parameters of the bdev like blockcnt
@@ -256,9 +265,31 @@ struct replica_bdev_module {
 
 	/* Handler for requests without payload (flush, unmap). Optional. */
 	void (*submit_null_payload_request)(struct replica_bdev_io *replica_io);
-
-	TAILQ_ENTRY(replica_bdev_module) link;
 };
+
+void replica_bdev_set_initiator_module(struct replica_bdev_module *replica_module);
+
+#define __REPLICA_INITIATOR_MODULE_REGISTER(line) __REPLICA_INITIATOR_MODULE_REGISTER_(line)
+#define __REPLICA_INITIATOR_MODULE_REGISTER_(line) replica_initiator_module_register_##line
+
+#define REPLICA_INITIATOR_MODULE_REGISTER(_module)					\
+__attribute__((constructor)) static void				\
+__REPLICA_INITIATOR_MODULE_REGISTER(__LINE__)(void)					\
+{									\
+    replica_bdev_set_initiator_module(_module);					\
+}
+
+void replica_bdev_set_target_module(struct replica_bdev_module *replica_module);
+
+#define __REPLICA_TARGET_MODULE_REGISTER(line) __REPLICA_TARGET_MODULE_REGISTER(line)
+#define __REPLICA_TARGET_MODULE_REGISTER_(line) replica_target_module_register_##line
+
+#define REPLICA_TARGET_MODULE_REGISTER(_module)					\
+__attribute__((constructor)) static void				\
+__REPLICA_TARGET_MODULE_REGISTER(__LINE__)(void)					\
+{									\
+    replica_bdev_set_target_module(_module);					\
+}
 
 bool
 replica_bdev_io_complete_part(struct replica_bdev_io *replica_io, uint64_t completed,

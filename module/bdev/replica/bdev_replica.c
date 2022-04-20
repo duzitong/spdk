@@ -65,7 +65,28 @@ struct replica_all_tailq		g_replica_bdev_list = TAILQ_HEAD_INITIALIZER(g_replica
 struct replica_offline_tailq	g_replica_bdev_offline_list = TAILQ_HEAD_INITIALIZER(
 			g_replica_bdev_offline_list);
 
-static TAILQ_HEAD(, replica_bdev_module) g_replica_modules = TAILQ_HEAD_INITIALIZER(g_replica_modules);
+static replica_bdev_module *g_replica_initiator_module;
+static replica_bdev_module *g_replica_target_module;
+
+void replica_bdev_set_initiator_module(struct replica_bdev_module *replica_module)
+{
+	if (g_replica_initiator_module != NULL) {
+		SPDK_ERRLOG("module for replica initiator already registered.\n");
+		assert(false);
+	} else {
+		g_replica_initiator_module = replica_module;
+	}
+}
+
+void replica_bdev_set_target_module(struct replica_bdev_module *replica_module)
+{
+	if (g_replica_target_module != NULL) {
+		SPDK_ERRLOG("module for replica target already registered.\n");
+		assert(false);
+	} else {
+		g_replica_target_module = replica_module;
+	}
+}
 
 /* Function declarations */
 static void	replica_bdev_examine(struct spdk_bdev *bdev);
@@ -895,11 +916,11 @@ replica_bdev_config_cleanup(struct replica_bdev_config *replica_cfg)
 	TAILQ_REMOVE(&g_replica_config.replica_bdev_config_head, replica_cfg, link);
 	g_replica_config.total_replica_bdev--;
 
-	if (replica_cfg->base_bdev) {
+	if (replica_cfg->base_bdevs) {
 		for (i = 0; i < replica_cfg->num_base_bdevs; i++) {
-			free(replica_cfg->base_bdev[i].name);
+			free(replica_cfg->base_bdevs[i].name);
 		}
-		free(replica_cfg->base_bdev);
+		free(replica_cfg->base_bdevs);
 	}
 	free(replica_cfg->name);
 	free(replica_cfg);
@@ -957,7 +978,7 @@ replica_bdev_config_find_by_name(const char *replica_name)
  */
 int
 replica_bdev_config_add(const char *replica_name, uint8_t num_base_bdevs,
-		     struct replica_bdev_config **_replica_cfg)
+		     enum replica_bdev_type type, struct replica_bdev_config **_replica_cfg)
 {
 	struct replica_bdev_config *replica_cfg;
 
@@ -987,13 +1008,15 @@ replica_bdev_config_add(const char *replica_name, uint8_t num_base_bdevs,
 	}
 	replica_cfg->num_base_bdevs = num_base_bdevs;
 
-	replica_cfg->base_bdev = calloc(num_base_bdevs, sizeof(*replica_cfg->base_bdev));
-	if (replica_cfg->base_bdev == NULL) {
+	replica_cfg->base_bdevs = calloc(num_base_bdevs, sizeof(*replica_cfg->base_bdevs));
+	if (replica_cfg->base_bdevs == NULL) {
 		free(replica_cfg->name);
 		free(replica_cfg);
 		SPDK_ERRLOG("unable to allocate memory\n");
 		return -ENOMEM;
 	}
+
+	replica_cfg->type = type;
 
 	TAILQ_INSERT_TAIL(&g_replica_config.replica_bdev_config_head, replica_cfg, link);
 	g_replica_config.total_replica_bdev++;
@@ -1024,8 +1047,8 @@ replica_bdev_config_add_base_bdev(struct replica_bdev_config *replica_cfg, const
 
 	TAILQ_FOREACH(tmp, &g_replica_config.replica_bdev_config_head, link) {
 		for (i = 0; i < tmp->num_base_bdevs; i++) {
-			if (tmp->base_bdev[i].name != NULL) {
-				if (!strcmp(tmp->base_bdev[i].name, base_bdev_name)) {
+			if (tmp->base_bdevs[i].name != NULL) {
+				if (!strcmp(tmp->base_bdevs[i].name, base_bdev_name)) {
 					SPDK_ERRLOG("duplicate base bdev name %s mentioned\n",
 						    base_bdev_name);
 					return -EEXIST;
@@ -1034,8 +1057,8 @@ replica_bdev_config_add_base_bdev(struct replica_bdev_config *replica_cfg, const
 		}
 	}
 
-	replica_cfg->base_bdev[slot].name = strdup(base_bdev_name);
-	if (replica_cfg->base_bdev[slot].name == NULL) {
+	replica_cfg->base_bdevs[slot].name = strdup(base_bdev_name);
+	if (replica_cfg->base_bdevs[slot].name == NULL) {
 		SPDK_ERRLOG("unable to allocate memory\n");
 		return -ENOMEM;
 	}
@@ -1117,7 +1140,7 @@ replica_bdev_can_claim_bdev(const char *bdev_name, struct replica_bdev_config **
 			 * If match is found then return true and the slot information where
 			 * this base bdev should be inserted in replica bdev
 			 */
-			if (!strcmp(bdev_name, replica_cfg->base_bdev[i].name)) {
+			if (!strcmp(bdev_name, replica_cfg->base_bdevs[i].name)) {
 				*_replica_cfg = replica_cfg;
 				*base_bdev_slot = i;
 				return true;
@@ -1177,6 +1200,11 @@ replica_bdev_create(struct replica_bdev_config *replica_cfg)
 		return -ENOMEM;
 	}
 
+	if (replica_cfg->type == REPLICA_BDEV_TYPE_INITIATOR) {
+		replica_bdev->module = g_replica_initiator_module;
+	} else {
+		replica_bdev->module = g_replica_target_module;
+	}
 	replica_bdev->num_base_bdevs = replica_cfg->num_base_bdevs;
 	replica_bdev->base_bdev_info = calloc(replica_bdev->num_base_bdevs,
 					   sizeof(struct replica_base_bdev_info));

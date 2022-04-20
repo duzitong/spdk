@@ -398,11 +398,11 @@ def bdev_replica_get_bdevs(client, category):
     return client.call('bdev_replica_get_bdevs', params)
 
 
-def bdev_replica_create(client, name, base_bdevs):
-    """Create replica bdev.
+def bdev_replica_initiator_create(client, name, base_bdevs):
+    """Create replica initiator bdev.
 
     Args:
-        name: user defined replica bdev name
+        name: user defined replica initiator bdev name
         base_bdevs: Space separated names of Nvme bdevs in double quotes, like "Nvme0n1 Nvme1n1 Nvme2n1"
 
     Returns:
@@ -410,7 +410,22 @@ def bdev_replica_create(client, name, base_bdevs):
     """
     params = {'name': name, 'base_bdevs': base_bdevs}
 
-    return client.call('bdev_replica_create', params)
+    return client.call('bdev_replica_initiator_create', params)
+
+def bdev_replica_target_create(client, name, log_bdev, base_bdev):
+    """Create replica target bdev.
+
+    Args:
+        name: user defined replica bdev name
+        log_bdev: bdev to save logs
+        base_bdev: bdev to save all data
+
+    Returns:
+        None
+    """
+    params = {'name': name, 'log_bdev': log_bdev, 'base_bdev': base_bdev}
+
+    return client.call('bdev_replica_target_create', params)
 
 
 def bdev_replica_delete(client, name):
