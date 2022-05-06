@@ -685,7 +685,7 @@ replica_bdev_get_buf_cb(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_io
 		return;
 	}
 
-	replica_bdev_submit_read_request(replica_io);
+	replica_io->replica_bdev->module->submit_read_request(replica_io);
 }
 
 /*
@@ -716,16 +716,18 @@ replica_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bde
 				     bdev_io->u.bdev.num_blocks * bdev_io->bdev->blocklen);
 		break;
 	case SPDK_BDEV_IO_TYPE_WRITE:
-		replica_bdev_submit_write_request(replica_io);
+		replica_io->replica_bdev->module->submit_write_request(replica_io);
 		break;
 
 	case SPDK_BDEV_IO_TYPE_RESET:
-		replica_bdev_submit_reset_request(replica_io);
+		replica_io->replica_bdev->module->submit_reset_request(replica_io);
 		break;
 
 	case SPDK_BDEV_IO_TYPE_FLUSH:
+		replica_io->replica_bdev->module->submit_flush_request(replica_io);
+		break;
 	case SPDK_BDEV_IO_TYPE_UNMAP:
-		replica_bdev_submit_null_payload_request(replica_io);
+		replica_io->replica_bdev->module->submit_unmap_request(replica_io);
 		break;
 
 	default:
@@ -752,6 +754,19 @@ inline static bool
 _replica_bdev_io_type_supported(struct replica_bdev *replica_bdev, enum spdk_bdev_io_type io_type)
 {
 	struct replica_base_bdev_info *base_info;
+
+	if (io_type == SPDK_BDEV_IO_TYPE_RESET) && replica_bdev->module->submit_reset_request == NULL) {
+		return false;
+	}
+
+	if (io_type == SPDK_BDEV_IO_TYPE_FLUSH) && replica_bdev->module->submit_flush_request == NULL) {
+		return false;
+	}
+
+	if (io_type == SPDK_BDEV_IO_TYPE_UNMAP) && replica_bdev->module->submit_unmap_request == NULL) {
+		return false;
+	}
+
 
 	REPLICA_FOR_EACH_BASE_BDEV(replica_bdev, base_info) {
 		if (base_info->bdev == NULL) {

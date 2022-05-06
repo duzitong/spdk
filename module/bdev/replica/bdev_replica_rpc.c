@@ -39,8 +39,6 @@
 #include "spdk/log.h"
 #include "spdk/env.h"
 
-#define RPC_MAX_BASE_BDEVS 255
-
 /*
  * Input structure for bdev_replica_get_bdevs RPC
  */
@@ -147,7 +145,7 @@ struct rpc_bdev_replica_initiator_create_base_bdevs {
 	size_t           num_base_bdevs;
 
 	/* List of base bdevs names */
-	char             *base_bdevs[RPC_MAX_BASE_BDEVS];
+	char             *base_bdevs[MAX_BASE_BDEVS];
 };
 
 /*
@@ -188,7 +186,7 @@ decode_base_bdevs(const struct spdk_json_val *val, void *out)
 {
 	struct rpc_bdev_replica_initiator_create_base_bdevs *base_bdevs = out;
 	return spdk_json_decode_array(val, spdk_json_decode_string, base_bdevs->base_bdevs,
-				      RPC_MAX_BASE_BDEVS, &base_bdevs->num_base_bdevs, sizeof(char *));
+				      MAX_BASE_BDEVS, &base_bdevs->num_base_bdevs, sizeof(char *));
 }
 
 /*

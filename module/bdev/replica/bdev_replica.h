@@ -36,6 +36,8 @@
 
 #include "spdk/bdev_module.h"
 
+#define MAX_BASE_BDEVS 5
+
 /*
 */
 enum replica_bdev_type {
@@ -109,6 +111,8 @@ struct replica_bdev_io {
 	uint64_t			base_bdev_io_remaining;
 	uint8_t				base_bdev_io_submitted;
 	uint8_t				base_bdev_io_status;
+
+	struct spdk_bdev_io	*orig_io;
 };
 
 /*
@@ -150,11 +154,14 @@ struct replica_bdev {
 	/* Set to true if destroy of this replica bdev is started. */
 	bool				destroy_started;
 
+	/* thread where bdev is opened */
+	struct spdk_thread			*thread;	
+
 	/* Module for intiator or target */
 	struct replica_bdev_module	*module;
 
 	/* Private data for the raid module */
-	void				*module_private;
+	void						*module_private;
 };
 
 #define REPLICA_FOR_EACH_BASE_BDEV(r, i) \
@@ -260,11 +267,20 @@ struct replica_bdev_module {
 	 */
 	void (*stop)(struct replica_bdev *replica_bdev);
 
-	/* Handler for R/W requests */
-	void (*submit_rw_request)(struct replica_bdev_io *replica_io);
+	/* Handler for read requests */
+	void (*submit_read_request)(struct replica_bdev_io *replica_io);
 
-	/* Handler for requests without payload (flush, unmap). Optional. */
-	void (*submit_null_payload_request)(struct replica_bdev_io *replica_io);
+	/* Handler for write requests */
+	void (*submit_write_request)(struct replica_bdev_io *replica_io);
+
+	/* Handler for reset requests */
+	void (*submit_reset_request)(struct replica_bdev_io *replica_io);
+
+	/* Handler for flush requests */
+	void (*submit_flush_request)(struct replica_bdev_io *replica_io);
+
+	/* Handler for unmap requests */
+	void (*submit_unmap_request)(struct replica_bdev_io *replica_io);
 };
 
 void replica_bdev_set_initiator_module(struct replica_bdev_module *replica_module);
@@ -299,5 +315,17 @@ replica_bdev_queue_io_wait(struct replica_bdev_io *replica_io, struct spdk_bdev 
 			struct spdk_io_channel *ch, spdk_bdev_io_wait_cb cb_fn);
 void
 replica_bdev_io_complete(struct replica_bdev_io *replica_io, enum spdk_bdev_io_status status);
+
+struct replica_log {
+	uint64_t 	seq;
+
+	void 		*data;
+
+	uint64_t	data_offset;
+
+	uint64_t	data_length;
+
+	TAILQ_ENTRY(replica_log) link;
+}
 
 #endif /* SPDK_BDEV_REPLICA_INTERNAL_H */
