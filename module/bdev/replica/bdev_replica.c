@@ -706,9 +706,24 @@ replica_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bde
 
 	replica_io->replica_bdev = bdev_io->bdev->ctxt;
 	replica_io->replica_ch = spdk_io_channel_get_ctx(ch);
+	replica_io->orig_io = bdev_io;
+
 	replica_io->base_bdev_io_remaining = 0;
 	replica_io->base_bdev_io_submitted = 0;
 	replica_io->base_bdev_io_status = SPDK_BDEV_IO_STATUS_SUCCESS;
+
+	/* Send this request to the bdev opened thread if that's not what we're on. */
+	if (spdk_get_thread() != replica_io->replica_bdev->thread) {
+		spdk_thread_send_msg(replica_io->replica_bdev->thread, _replica_bdev_submit_request, bdev_io);
+	} else {
+		_replica_bdev_submit_request(bdev_io);
+	}
+}
+
+static void
+_replica_bdev_submit_request(void *arg)
+{
+	struct replica_bdev_io *replica_io = arg;
 
 	switch (bdev_io->type) {
 	case SPDK_BDEV_IO_TYPE_READ:

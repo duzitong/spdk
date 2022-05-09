@@ -43,30 +43,149 @@
 #define MAX_QUORUM_LOSS 1
 
 struct initiator_info {
+	/* Owning replica bdev */
+	struct replica_bdev 		*replica_bdev
+
     /* Seq number for current io. First 32 bits for topology ver., second for message seq. */
     uint64_t                    seq;
 
-    /* Seq number that is replicated to quorum bdevs */
-	uint64_t                    commit_seq;
+    /* Completed seq number of base bdevs */
+	uint64_t                    completed_seq[MAX_BASE_BDEVS];
 
-    /* Forgotten seq number of base bdevs */
-	uint64_t                    forget_seq[MAX_BASE_BDEVS];
-
-    /* lst poller */
-    struct spdk_poller          *lst_poller;
-
-    /* Epoch of last synced commit seq */
-    uint64_t                    lst_epoch;
-
-    /* lst poller */
+    /* Cleaner poller
+	 * Cleaner publish the min completed_seq of all target nodes to all targets.
+	 * Initiator and target nodes will remove replica logs before this seq number.
+	 * Cleaner also needs to recycle data cache that one of the target nodes have moved onto its SSD.
+	 * When recycling data cache, only data in replica log is recycled.
+	 * Replica log entry is kept to track which target to read data from its SSD. 
+	 */
     struct spdk_poller          *cleaner_poller;
 
     /* TailQ to maintain logs */
     TAILQ_HEAD(, replica_log)   replica_logs;
 
-    /* Array index for replica logs */
+    /* Array index for replica logs 
+	 * TODO: change to other data structure like b-tree.
+	 */
     TAILQ_ENTRY(replica_log)    *index;
 };
+
+static void
+initiator_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
+{
+	struct replica_bdev_io *replica_io = cb_arg;
+
+	spdk_bdev_free_io(bdev_io);
+
+	initiator_write_complete_part(replica_io, 1, success ?
+				   SPDK_BDEV_IO_STATUS_SUCCESS :
+				   SPDK_BDEV_IO_STATUS_FAILED);
+}
+
+/*
+ * brief:
+ * initiator_write_complete_part - signal the completion of a part of the expected
+ * base bdev IOs and complete the replica_io if this is the final expected IO.
+ * The caller should first set replica_io->base_bdev_io_remaining. This function
+ * will decrement this counter by the value of the 'completed' parameter and
+ * complete the replica_io if the counter reaches 0. The caller is free to
+ * interpret the 'base_bdev_io_remaining' and 'completed' values as needed,
+ * it can represent e.g. blocks or IOs.
+ * params:
+ * replica_io - pointer to replica_bdev_io
+ * completed - the part of the replica_io that has been completed
+ * status - status of the base IO
+ * returns:
+ * true - if the replica_io is completed
+ * false - otherwise
+ */
+bool
+initiator_write_complete_part(struct replica_bdev_io *replica_io, uint64_t completed,
+			   enum spdk_bdev_io_status status)
+{
+	assert(replica_io->base_bdev_io_remaining >= completed);
+	replica_io->base_bdev_io_remaining -= completed;
+
+	if (status != SPDK_BDEV_IO_STATUS_SUCCESS) {
+		replica_io->base_bdev_io_status = status;
+	}
+
+	if (replica_io->base_bdev_io_remaining <= MAX_QUORUM_LOSS) {
+		/*
+		 * TODO: Update mem cache
+		 */
+		
+		replica_bdev_io_complete(replica_io, replica_io->base_bdev_io_status);
+		return true;
+	} else {
+		return false;
+	}
+}
+
+static void
+initiator_submit_write_request(struct replica_bdev_io *replica_io);
+
+static void
+_initiator_submit_write_request(void *_replica_io)
+{
+	struct replica_bdev_io *replica_io = _replica_io;
+
+	initiator_submit_write_request(replica_io);
+}
+
+/*
+ * brief:
+ * initiator_submit_write_request function submits write requests to member disks;
+ * it will submit as many as possible unless a write fails with -ENOMEM, in
+ * which case it will queue it for later submission
+ * params:
+ * replica_io
+ * returns:
+ * none
+ */
+static void
+initiator_submit_write_request(struct replica_bdev_io *replica_io)
+{
+	struct spdk_bdev_io		*bdev_io = spdk_bdev_io_from_ctx(replica_io);
+	struct replica_bdev		*replica_bdev;
+	int				ret;
+	uint8_t				i;
+	struct replica_base_bdev_info	*base_info;
+	struct spdk_io_channel		*base_ch;
+
+	replica_bdev = replica_io->replica_bdev;
+
+	if (replica_io->base_bdev_io_remaining == 0) {
+		replica_io->base_bdev_io_remaining = replica_bdev->num_base_bdevs;
+	}
+
+	// TODO: construct metadata
+
+	while (replica_io->base_bdev_io_submitted < replica_bdev->num_base_bdevs) {
+		i = replica_io->base_bdev_io_submitted;
+		base_info = &replica_bdev->base_bdev_info[i];
+		base_ch = replica_io->replica_ch->base_channel[i];
+
+		// TODO: send with metadata
+		ret = spdk_bdev_writev_blocks(base_info->desc, base_ch,
+						bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
+						bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, initiator_base_bdev_write_complete,
+						replica_io);
+
+		if (ret == 0) {
+			replica_io->base_bdev_io_submitted++;
+		} else if (ret == -ENOMEM) {
+			replica_bdev_queue_io_wait(replica_io, base_info->bdev, base_ch,
+						_initiator_submit_write_request);
+			return;
+		} else {
+			SPDK_ERRLOG("bdev io submit error not due to ENOMEM, it should not happen\n");
+			assert(false);
+			replica_bdev_io_complete(replica_io, SPDK_BDEV_IO_STATUS_FAILED);
+			return;
+		}
+	}
+}
 
 static inline uint8_t
 raid5_stripe_data_chunks_num(const struct raid_bdev *raid_bdev)
@@ -84,28 +203,23 @@ static int
 initiator_start(struct replica_bdev *replica_bdev)
 {
 	uint64_t min_blockcnt = UINT64_MAX;
-	struct raid_base_bdev_info *base_info;
-	struct raid5_info *r5info;
+	struct replica_base_bdev_info *base_info;
+	struct initiator_info *initiator_info;
 
-	r5info = calloc(1, sizeof(*r5info));
-	if (!r5info) {
-		SPDK_ERRLOG("Failed to allocate r5info\n");
+	initiator_info = calloc(1, sizeof(*initiator_info));
+	if (!initiator_info) {
+		SPDK_ERRLOG("Failed to allocate initiator_info\n");
 		return -ENOMEM;
 	}
-	r5info->raid_bdev = raid_bdev;
+	initiator_info->replica_bdev = replica_bdev;
 
-	RAID_FOR_EACH_BASE_BDEV(raid_bdev, base_info) {
+	REPLICA_FOR_EACH_BASE_BDEV(replica_bdev, base_info) {
 		min_blockcnt = spdk_min(min_blockcnt, base_info->bdev->blockcnt);
 	}
 
-	r5info->total_stripes = min_blockcnt / raid_bdev->strip_size;
-	r5info->stripe_blocks = raid_bdev->strip_size * raid5_stripe_data_chunks_num(raid_bdev);
+	replica_bdev->bdev.blockcnt = min_blockcnt;
 
-	raid_bdev->bdev.blockcnt = r5info->stripe_blocks * r5info->total_stripes;
-	raid_bdev->bdev.optimal_io_boundary = r5info->stripe_blocks;
-	raid_bdev->bdev.split_on_optimal_io_boundary = true;
-
-	raid_bdev->module_private = r5info;
+	replica_bdev->module_private = initiator_info;
 
 	return 0;
 }
@@ -122,7 +236,7 @@ static struct replica_bdev_module g_initiator_module = {
 	.start = initiator_start,
 	.stop = initiator_stop,
 	.submit_read_request = ,
-    .submit_write_request = ,
+    .submit_write_request = initiator_submit_write_request,
 };
 REPLICA_INITIATOR_MODULE_REGISTER(&g_initiator_module)
 
