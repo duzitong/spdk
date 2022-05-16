@@ -103,6 +103,14 @@ bool
 initiator_write_complete_part(struct replica_bdev_io *replica_io, uint64_t completed,
 			   enum spdk_bdev_io_status status)
 {
+	struct spdk_bdev_io		*bdev_io = spdk_bdev_io_from_ctx(replica_io);
+	struct iovec			*iov = bdev_io->u.bdev.iovs;
+	uint32_t 				iovcnt = bdev_io->u.bdev.iovcnt;
+	struct replica_log 		*replica_log;
+	void					*dst;
+	struct initiator_info	*initiator_info = replica_io->replica_bdev->module_private;
+	uint32_t				i;
+
 	assert(replica_io->base_bdev_io_remaining >= completed);
 	replica_io->base_bdev_io_remaining -= completed;
 
@@ -110,12 +118,37 @@ initiator_write_complete_part(struct replica_bdev_io *replica_io, uint64_t compl
 		replica_io->base_bdev_io_status = status;
 	}
 
-	if (replica_io->base_bdev_io_remaining <= MAX_QUORUM_LOSS) {
+	if (replica_io->base_bdev_io_remaining == MAX_QUORUM_LOSS) {
 		/*
-		 * TODO: Update mem cache
+		 * Update mem cache
 		 */
+		replica_log = calloc(1, *replica_log);
+		replica_log->seq = replica_io->seq;
+		dst = replica_log->data;
+		dst = spdk_zmalloc(bdev_io->u.bdev.num_blocks * replica_io->replica_bdev->bdev.blocklen,
+			2 * 1024 * 1024, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+
+		for (i = 0; i < iovcnt; i++) {
+			assert(iov[i].iov_base != NULL);
+			if (ACCEL_FLAG_PERSISTENT) {
+				_pmem_memcpy(dst, iov[i].iov_base, (size_t)iov[i].iov_len);
+			} else {
+				memcpy(dst, iov[i].iov_base, (size_t)iov[i].iov_len);
+			}
+			dst += iov[i].iov_len;
+		}
+		replica_log->data_offset = bdev_io->u.bdev.offset_blocks;
+		replica_log->data_length = bdev_io->u.bdev.num_blocks;
+
+		TAILQ_INSERT_TAIL(&initiator_info->replica_logs, replica_log, link);
+
+		for (i = replica_log->data_offset; i < replica_log->data_offset + replica_log->data_length; i++) {
+			index[i] = replica_log;
+		}
 		
 		replica_bdev_io_complete(replica_io, replica_io->base_bdev_io_status);
+		return true;
+	} else if (replica_io->base_bdev_io_remaining < MAX_QUORUM_LOSS) {
 		return true;
 	} else {
 		return false;
@@ -148,27 +181,32 @@ initiator_submit_write_request(struct replica_bdev_io *replica_io)
 {
 	struct spdk_bdev_io		*bdev_io = spdk_bdev_io_from_ctx(replica_io);
 	struct replica_bdev		*replica_bdev;
+	struct initiator_info	*initiator_info;
+	struct replica_metadata *metadata;
 	int				ret;
 	uint8_t				i;
 	struct replica_base_bdev_info	*base_info;
 	struct spdk_io_channel		*base_ch;
 
 	replica_bdev = replica_io->replica_bdev;
+	initiator_info = replica_bdev->module_private;
 
 	if (replica_io->base_bdev_io_remaining == 0) {
 		replica_io->base_bdev_io_remaining = replica_bdev->num_base_bdevs;
 	}
 
-	// TODO: construct metadata
+	metadata = calloc(1, sizeof(*metadata));
+	metadata->version = 1;
+	metadata->seq = ++initiator_info->seq;
+	replica_io->seq = metadata->seq;
 
 	while (replica_io->base_bdev_io_submitted < replica_bdev->num_base_bdevs) {
 		i = replica_io->base_bdev_io_submitted;
 		base_info = &replica_bdev->base_bdev_info[i];
 		base_ch = replica_io->replica_ch->base_channel[i];
 
-		// TODO: send with metadata
-		ret = spdk_bdev_writev_blocks(base_info->desc, base_ch,
-						bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
+		ret = spdk_bdev_writev_blocks_with_md(base_info->desc, base_ch,
+						bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt, metadata,
 						bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, initiator_base_bdev_write_complete,
 						replica_io);
 
@@ -220,6 +258,8 @@ initiator_start(struct replica_bdev *replica_bdev)
 	replica_bdev->bdev.blockcnt = min_blockcnt;
 
 	replica_bdev->module_private = initiator_info;
+
+	initiator_info->replica_logs = = TAILQ_HEAD_INITIALIZER(initiator_info->replica_logs);
 
 	return 0;
 }

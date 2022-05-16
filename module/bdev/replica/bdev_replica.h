@@ -112,6 +112,9 @@ struct replica_bdev_io {
 	uint8_t				base_bdev_io_submitted;
 	uint8_t				base_bdev_io_status;
 
+	/* Assigned seq number of this request */
+	uint64_t			seq;
+
 	struct spdk_bdev_io	*orig_io;
 };
 
@@ -326,6 +329,12 @@ struct replica_log {
 	uint64_t	data_length;
 
 	TAILQ_ENTRY(replica_log) link;
+}
+
+struct replica_metadata {
+	uint8_t		version;
+
+	uint64_t	seq;
 }
 
 #endif /* SPDK_BDEV_REPLICA_INTERNAL_H */
