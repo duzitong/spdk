@@ -4188,7 +4188,7 @@ nvmf_rdma_poller_poll(struct spdk_nvmf_rdma_transport *rtransport,
 static int
 nvmf_rdma_poll_group_poll(struct spdk_nvmf_transport_poll_group *group)
 {
-	SPDK_DEBUGLOG(rdma, "enter");
+	// SPDK_DEBUGLOG(rdma, "enter");
 	struct spdk_nvmf_rdma_transport *rtransport;
 	struct spdk_nvmf_rdma_poll_group *rgroup;
 	struct spdk_nvmf_rdma_poller	*rpoller;
@@ -4206,7 +4206,7 @@ nvmf_rdma_poll_group_poll(struct spdk_nvmf_transport_poll_group *group)
 		count += rc;
 	}
 
-	SPDK_DEBUGLOG(rdma, "leave");
+	// SPDK_DEBUGLOG(rdma, "leave");
 	return count;
 }
 
