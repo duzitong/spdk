@@ -2172,6 +2172,7 @@ nvmf_tcp_sock_process(struct spdk_nvmf_tcp_qpair *tqpair)
 			if (!pdu->data_len) {
 				return NVME_TCP_PDU_IN_PROGRESS;
 			}
+			SPDK_DEBUGLOG(nvmf_tcp, "pdu data len = %d\n", pdu->data_len);
 
 			data_len = pdu->data_len;
 			/* data digest */

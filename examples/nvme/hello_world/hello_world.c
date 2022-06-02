@@ -80,6 +80,11 @@ register_ns(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_ns *ns)
 
 	printf("  Namespace ID: %d size: %juGB\n", spdk_nvme_ns_get_id(ns),
 	       spdk_nvme_ns_get_size(ns) / 1000000000);
+	printf("#sectors = %lld, sector size = %d\n", spdk_nvme_ns_get_num_sectors(ns),
+		spdk_nvme_ns_get_sector_size(ns));
+	printf("Extended LBA size = %d, support = %d\n",
+		spdk_nvme_ns_get_extended_sector_size(ns),
+		spdk_nvme_ns_supports_extended_lba(ns));
 }
 
 struct hello_world_sequence {
@@ -147,9 +152,12 @@ write_complete(void *arg, const struct spdk_nvme_cpl *completion)
 		spdk_free(sequence->buf);
 	}
 	sequence->buf = spdk_zmalloc(0x1000, 0x1000, NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
+	if (((char*)sequence->buf)[0] != '\0') {
+		printf("read buf is not zeroed\n");
+	}
 
 	rc = spdk_nvme_ns_cmd_read(ns_entry->ns, ns_entry->qpair, sequence->buf,
-				   0, /* LBA start */
+				   1, /* LBA start */
 				   1, /* number of LBAs */
 				   read_complete, (void *)sequence, 0);
 	if (rc != 0) {
@@ -216,6 +224,7 @@ hello_world(void)
 		 *  qpair.  This enables extremely efficient I/O processing by making all
 		 *  I/O operations completely lockless.
 		 */
+		printf("alloc qid...\n");
 		ns_entry->qpair = spdk_nvme_ctrlr_alloc_io_qpair(ns_entry->ctrlr, NULL, 0);
 		if (ns_entry->qpair == NULL) {
 			printf("ERROR: spdk_nvme_ctrlr_alloc_io_qpair() failed\n");
@@ -261,6 +270,9 @@ hello_world(void)
 		 */
 		snprintf(sequence.buf, 0x1000, "%s", "Hello world!\n");
 
+		void* mbuf = spdk_zmalloc(8, 0, NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
+		snprintf(mbuf, 8, "%s", "MD\n");
+
 		/*
 		 * Write the data buffer to LBA 0 of this namespace.  "write_complete" and
 		 *  "&sequence" are specified as the completion callback function and
@@ -275,10 +287,14 @@ hello_world(void)
 		 *  It is the responsibility of the application to trigger the polling
 		 *  process.
 		 */
-		rc = spdk_nvme_ns_cmd_write(ns_entry->ns, ns_entry->qpair, sequence.buf,
-					    0, /* LBA start */
+		// rc = spdk_nvme_ns_cmd_write(ns_entry->ns, ns_entry->qpair, sequence.buf,
+		// 			    0, /* LBA start */
+		// 			    1, /* number of LBAs */
+		// 			    write_complete, &sequence, 0);
+		rc = spdk_nvme_ns_cmd_write_with_md(ns_entry->ns, ns_entry->qpair, sequence.buf, mbuf,
+					    1, /* LBA start */
 					    1, /* number of LBAs */
-					    write_complete, &sequence, 0);
+					    write_complete, &sequence, 0, 0, 0);
 		if (rc != 0) {
 			fprintf(stderr, "starting write I/O failed\n");
 			exit(1);

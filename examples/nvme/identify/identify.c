@@ -971,6 +971,10 @@ print_namespace(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_ns *ns)
 		printf("Protection Information Transferred as: %s\n",
 		       nsdata->dps.md_start ? "First 8 Bytes" : "Last 8 Bytes");
 	}
+	printf("flbas = %d %d %d\n", nsdata->flbas.format, nsdata->flbas.extended, nsdata->flbas.reserved2);
+	uint8_t x = 0;
+	memcpy(&x, &nsdata->flbas, sizeof(nsdata->flbas));
+	printf("flbas = %d\n", x);
 	if (nsdata->lbaf[nsdata->flbas.format].ms > 0) {
 		printf("Metadata Transferred as:               %s\n",
 		       nsdata->flbas.extended ? "Extended Data LBA" : "Separate Metadata Buffer");

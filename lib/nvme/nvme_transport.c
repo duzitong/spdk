@@ -597,8 +597,13 @@ int
 nvme_transport_qpair_submit_request(struct spdk_nvme_qpair *qpair, struct nvme_request *req)
 {
 	const struct spdk_nvme_transport *transport;
+	if (req->cmd.opc == SPDK_NVME_OPC_WRITE) {
+		printf("write req data buf = 0x%p\n", req->payload.contig_or_cb_arg);
+		printf("write req md buf = 0x%p\n", req->payload.md);
+	}
 
 	if (spdk_likely(!nvme_qpair_is_admin_queue(qpair))) {
+		printf("not admin q\n");
 		return qpair->transport->ops.qpair_submit_request(qpair, req);
 	}
 

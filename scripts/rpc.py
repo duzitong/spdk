@@ -389,6 +389,35 @@ if __name__ == "__main__":
     p.add_argument('name', help='malloc bdev name')
     p.set_defaults(func=bdev_malloc_delete)
 
+    def bdev_target_create(args):
+        num_blocks = (args.total_size * 1024 * 1024) // args.block_size
+        print_json(rpc.bdev.bdev_target_create(args.client,
+                                               num_blocks=int(num_blocks),
+                                               block_size=args.block_size,
+                                               name=args.name,
+                                               uuid=args.uuid,
+                                               optimal_io_boundary=args.optimal_io_boundary))
+    p = subparsers.add_parser('bdev_target_create', aliases=['construct_target_bdev'],
+                              help='Create a bdev with target backend')
+    p.add_argument('-b', '--name', help="Name of the bdev")
+    p.add_argument('-u', '--uuid', help="UUID of the bdev")
+    p.add_argument(
+        'total_size', help='Size of target bdev in MB (float > 0)', type=float)
+    p.add_argument('block_size', help='Block size for this bdev', type=int)
+    p.add_argument('-o', '--optimal-io-boundary', help="""Split on optimal IO boundary, in number of
+    blocks, default 0 (disabled)""", type=int)
+    p.set_defaults(func=bdev_target_create)
+
+    def bdev_target_delete(args):
+        rpc.bdev.bdev_target_delete(args.client,
+                                    name=args.name)
+
+    p = subparsers.add_parser('bdev_target_delete', aliases=['delete_target_bdev'],
+                              help='Delete a target disk')
+    p.add_argument('name', help='target bdev name')
+    p.set_defaults(func=bdev_target_delete)
+
+
     def bdev_null_create(args):
         num_blocks = (args.total_size * 1024 * 1024) // args.block_size
         if args.dif_type and not args.md_size:

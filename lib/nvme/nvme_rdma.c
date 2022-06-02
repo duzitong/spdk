@@ -1864,14 +1864,18 @@ nvme_rdma_req_init(struct nvme_rdma_qpair *rqpair, struct nvme_request *req,
 		rc = nvme_rdma_build_null_request(rdma_req);
 	} else if (payload_type == NVME_PAYLOAD_TYPE_CONTIG) {
 		if (icd_supported) {
+			printf("contig inline\n");
 			rc = nvme_rdma_build_contig_inline_request(rqpair, rdma_req);
 		} else {
+			printf("contig\n");
 			rc = nvme_rdma_build_contig_request(rqpair, rdma_req);
 		}
 	} else if (payload_type == NVME_PAYLOAD_TYPE_SGL) {
 		if (icd_supported) {
+			printf("sgl inline\n");
 			rc = nvme_rdma_build_sgl_inline_request(rqpair, rdma_req);
 		} else {
+			printf("sgl\n");
 			rc = nvme_rdma_build_sgl_request(rqpair, rdma_req);
 		}
 	} else {

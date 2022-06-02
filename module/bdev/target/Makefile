@@ -31,31 +31,18 @@
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-SPDK_ROOT_DIR := $(abspath $(CURDIR)/../..)
+SPDK_ROOT_DIR := $(abspath $(CURDIR)/../../..)
+# NVME_DIR := $(SPDK_ROOT_DIR)/lib/nvme
 include $(SPDK_ROOT_DIR)/mk/spdk.common.mk
+# include $(SPDK_ROOT_DIR)/mk/spdk.modules.mk
 
-DIRS-y += delay error gpt lvol malloc null nvme passthru raid replica split target zone_block
+SO_VER := 4
+SO_MINOR := 0
 
-DIRS-$(CONFIG_CRYPTO) += crypto
+C_SRCS = bdev_target.c bdev_target_rpc.c
+LIBNAME = bdev_target
 
-DIRS-$(CONFIG_OCF) += ocf
+SPDK_MAP_FILE = $(SPDK_ROOT_DIR)/mk/spdk_blank.map
+# SPDK_LIB_LIST = $(ALL_MODULES_LIST) nvme
 
-DIRS-$(CONFIG_REDUCE) += compress
-
-DIRS-$(CONFIG_URING) += uring
-
-ifeq ($(OS),Linux)
-DIRS-y += aio ftl
-DIRS-$(CONFIG_ISCSI_INITIATOR) += iscsi
-DIRS-$(CONFIG_VIRTIO) += virtio
-DIRS-$(CONFIG_PMDK) += pmem
-endif
-
-DIRS-$(CONFIG_RBD) += rbd
-
-.PHONY: all clean $(DIRS-y)
-
-all: $(DIRS-y)
-clean: $(DIRS-y)
-
-include $(SPDK_ROOT_DIR)/mk/spdk.subdirs.mk
+include $(SPDK_ROOT_DIR)/mk/spdk.lib.mk

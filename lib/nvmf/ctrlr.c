@@ -4318,6 +4318,9 @@ spdk_nvmf_request_exec(struct spdk_nvmf_request *req)
 	} else if (spdk_unlikely(nvmf_qpair_is_admin_queue(qpair))) {
 		status = nvmf_ctrlr_process_admin_cmd(req);
 	} else {
+		printf("nvmf req iovcnt = %d, data from pool = %d\n",
+		req->iovcnt,
+		req->data_from_pool);
 		status = nvmf_ctrlr_process_io_cmd(req);
 	}
 
