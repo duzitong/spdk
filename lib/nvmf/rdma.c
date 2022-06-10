@@ -1361,10 +1361,12 @@ nvmf_rdma_setup_wr(struct ibv_send_wr *wr, struct ibv_send_wr *next,
 		   enum spdk_nvme_data_transfer xfer)
 {
 	if (xfer == SPDK_NVME_DATA_CONTROLLER_TO_HOST) {
+		SPDK_DEBUGLOG(rdma, "setup rdma write req\n");
 		wr->opcode = IBV_WR_RDMA_WRITE;
 		wr->send_flags = 0;
 		wr->next = next;
 	} else if (xfer == SPDK_NVME_DATA_HOST_TO_CONTROLLER) {
+		SPDK_DEBUGLOG(rdma, "setup rdma read req\n");
 		wr->opcode = IBV_WR_RDMA_READ;
 		wr->send_flags = IBV_SEND_SIGNALED;
 		wr->next = NULL;
@@ -2390,7 +2392,7 @@ nvmf_rdma_request_process(struct spdk_nvmf_rdma_transport *rtransport,
 static void
 nvmf_rdma_opts_init(struct spdk_nvmf_transport_opts *opts)
 {
-	SPDK_DEBUGLOG(rdma, "enter");
+	SPDK_DEBUGLOG(rdma, "enter\n");
 	opts->max_queue_depth =		SPDK_NVMF_RDMA_DEFAULT_MAX_QUEUE_DEPTH;
 	opts->max_qpairs_per_ctrlr =	SPDK_NVMF_RDMA_DEFAULT_MAX_QPAIRS_PER_CTRLR;
 	opts->in_capsule_data_size =	SPDK_NVMF_RDMA_DEFAULT_IN_CAPSULE_DATA_SIZE;
@@ -2402,7 +2404,7 @@ nvmf_rdma_opts_init(struct spdk_nvmf_transport_opts *opts)
 	opts->dif_insert_or_strip =	SPDK_NVMF_RDMA_DIF_INSERT_OR_STRIP;
 	opts->abort_timeout_sec =	SPDK_NVMF_RDMA_DEFAULT_ABORT_TIMEOUT_SEC;
 	opts->transport_specific =      NULL;
-	SPDK_DEBUGLOG(rdma, "leave");
+	SPDK_DEBUGLOG(rdma, "leave\n");
 }
 
 static int nvmf_rdma_destroy(struct spdk_nvmf_transport *transport,
@@ -2421,7 +2423,7 @@ nvmf_rdma_accept(void *ctx);
 static struct spdk_nvmf_transport *
 nvmf_rdma_create(struct spdk_nvmf_transport_opts *opts)
 {
-	SPDK_DEBUGLOG(rdma, "enter");
+	SPDK_DEBUGLOG(rdma, "enter\n");
 	int rc;
 	struct spdk_nvmf_rdma_transport *rtransport;
 	struct spdk_nvmf_rdma_device	*device, *tmp;
@@ -2697,7 +2699,7 @@ nvmf_rdma_create(struct spdk_nvmf_transport_opts *opts)
 		nvmf_rdma_destroy(&rtransport->transport, NULL, NULL);
 		return NULL;
 	}
-	SPDK_DEBUGLOG(rdma, "leave");
+	SPDK_DEBUGLOG(rdma, "leave\n");
 
 	return &rtransport->transport;
 }
@@ -2783,7 +2785,7 @@ static int
 nvmf_rdma_listen(struct spdk_nvmf_transport *transport, const struct spdk_nvme_transport_id *trid,
 		 struct spdk_nvmf_listen_opts *listen_opts)
 {
-	SPDK_DEBUGLOG(rdma, "enter");
+	SPDK_DEBUGLOG(rdma, "enter\n");
 	struct spdk_nvmf_rdma_transport	*rtransport;
 	struct spdk_nvmf_rdma_device	*device;
 	struct spdk_nvmf_rdma_port	*port;
@@ -2895,7 +2897,7 @@ nvmf_rdma_listen(struct spdk_nvmf_transport *transport, const struct spdk_nvme_t
 
 	TAILQ_INSERT_TAIL(&rtransport->ports, port, link);
 	pthread_mutex_unlock(&rtransport->lock);
-	SPDK_DEBUGLOG(rdma, "leave");
+	SPDK_DEBUGLOG(rdma, "leave\n");
 	return 0;
 }
 
@@ -3471,7 +3473,7 @@ static struct spdk_nvmf_transport_poll_group *
 nvmf_rdma_poll_group_create(struct spdk_nvmf_transport *transport,
 			    struct spdk_nvmf_poll_group *group)
 {
-	SPDK_DEBUGLOG(rdma, "enter");
+	SPDK_DEBUGLOG(rdma, "enter\n");
 	struct spdk_nvmf_rdma_transport		*rtransport;
 	struct spdk_nvmf_rdma_poll_group	*rgroup;
 	struct spdk_nvmf_rdma_poller		*poller;
@@ -3573,7 +3575,7 @@ nvmf_rdma_poll_group_create(struct spdk_nvmf_transport *transport,
 	}
 
 	pthread_mutex_unlock(&rtransport->lock);
-	SPDK_DEBUGLOG(rdma, "leave");
+	SPDK_DEBUGLOG(rdma, "leave\n");
 	return &rgroup->group;
 }
 
