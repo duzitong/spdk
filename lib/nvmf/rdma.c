@@ -3395,7 +3395,6 @@ nvmf_process_ib_events(struct spdk_nvmf_rdma_device *device, uint32_t max_events
 static int
 nvmf_rdma_accept(void *ctx)
 {
-	SPDK_DEBUGLOG(rdma, "enter\n");
 	int	nfds, i = 0;
 	struct spdk_nvmf_transport *transport = ctx;
 	struct spdk_nvmf_rdma_transport *rtransport;
