@@ -218,6 +218,7 @@ int
 spdk_rdma_get_translation(struct spdk_rdma_mem_map *map, void *address,
 			  size_t length, struct spdk_rdma_memory_translation *translation)
 {
+	SPDK_ERRLOG("enter\n");
 	uint64_t real_length = length;
 
 	assert(map);

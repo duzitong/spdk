@@ -1446,6 +1446,7 @@ nvmf_rdma_fill_wr_sgl(struct spdk_nvmf_rdma_poll_group *rgroup,
 		      struct ibv_send_wr *wr,
 		      uint32_t total_length)
 {
+	SPDK_ERRLOG("enter\n");
 	struct spdk_rdma_memory_translation mem_translation;
 	struct ibv_sge	*sg_ele;
 	struct iovec *iov;
@@ -2105,6 +2106,7 @@ nvmf_rdma_request_process(struct spdk_nvmf_rdma_transport *rtransport,
 
 			/* If no data to transfer, ready to execute. */
 			if (rdma_req->req.xfer == SPDK_NVME_DATA_NONE) {
+				SPDK_DEBUGLOG(rdma, "ready to exe 2\n");
 				rdma_req->state = RDMA_REQUEST_STATE_READY_TO_EXECUTE;
 				break;
 			}
@@ -2148,7 +2150,8 @@ nvmf_rdma_request_process(struct spdk_nvmf_rdma_transport *rtransport,
 				rdma_req->state = RDMA_REQUEST_STATE_DATA_TRANSFER_TO_CONTROLLER_PENDING;
 				break;
 			}
-
+			
+			SPDK_DEBUGLOG(rdma, "ready to exec 3\n");
 			rdma_req->state = RDMA_REQUEST_STATE_READY_TO_EXECUTE;
 			break;
 		case RDMA_REQUEST_STATE_DATA_TRANSFER_TO_CONTROLLER_PENDING:
@@ -3392,6 +3395,7 @@ nvmf_process_ib_events(struct spdk_nvmf_rdma_device *device, uint32_t max_events
 static int
 nvmf_rdma_accept(void *ctx)
 {
+	SPDK_DEBUGLOG(rdma, "enter\n");
 	int	nfds, i = 0;
 	struct spdk_nvmf_transport *transport = ctx;
 	struct spdk_nvmf_rdma_transport *rtransport;
@@ -3516,6 +3520,7 @@ nvmf_rdma_poll_group_create(struct spdk_nvmf_transport *transport,
 			}
 			poller->max_srq_depth = spdk_min((int)rtransport->rdma_opts.max_srq_depth, device->attr.max_srq_wr);
 
+			SPDK_DEBUGLOG(rdma, "use srq\n");
 			device->num_srq++;
 			memset(&srq_init_attr, 0, sizeof(srq_init_attr));
 			srq_init_attr.pd = device->pd;
@@ -3688,6 +3693,7 @@ static int
 nvmf_rdma_poll_group_add(struct spdk_nvmf_transport_poll_group *group,
 			 struct spdk_nvmf_qpair *qpair)
 {
+	SPDK_DEBUGLOG(rdma, "enter\n");
 	struct spdk_nvmf_rdma_poll_group	*rgroup;
 	struct spdk_nvmf_rdma_qpair		*rqpair;
 	struct spdk_nvmf_rdma_device		*device;
@@ -4132,6 +4138,7 @@ nvmf_rdma_poller_poll(struct spdk_nvmf_rdma_transport *rtransport,
 				rqpair->current_read_depth--;
 				/* wait for all outstanding reads associated with the same rdma_req to complete before proceeding. */
 				if (rdma_req->num_outstanding_data_wr == 0) {
+					SPDK_DEBUGLOG(rdma, "ready to exe 1\n");
 					rdma_req->state = RDMA_REQUEST_STATE_READY_TO_EXECUTE;
 					nvmf_rdma_request_process(rtransport, rdma_req);
 				}

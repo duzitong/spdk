@@ -608,7 +608,7 @@ int
 spdk_mem_map_set_translation(struct spdk_mem_map *map, uint64_t vaddr, uint64_t size,
 			     uint64_t translation)
 {
-	DEBUG_PRINT("vaddr = 0x%llx\n, size = 0x%llx\n, translation = 0x%llx\n", vaddr, size, translation);
+	// DEBUG_PRINT("vaddr = 0x%llx\n, size = 0x%llx\n, translation = 0x%llx\n", vaddr, size, translation);
 	uint64_t vfn_2mb;
 	struct map_1gb *map_1gb;
 	uint64_t idx_1gb;
@@ -655,6 +655,7 @@ spdk_mem_map_clear_translation(struct spdk_mem_map *map, uint64_t vaddr, uint64_
 inline uint64_t
 spdk_mem_map_translate(const struct spdk_mem_map *map, uint64_t vaddr, uint64_t *size)
 {
+	DEBUG_PRINT("vaddr = 0x%llx\n, size = 0x%llx\n, translation = 0x%llx\n", vaddr, size, translation);
 	const struct map_1gb *map_1gb;
 	const struct map_2mb *map_2mb;
 	uint64_t idx_256tb;
