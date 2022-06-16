@@ -63,11 +63,6 @@ struct initiator_info {
 
     /* TailQ to maintain logs */
     TAILQ_HEAD(, replica_log)   replica_logs;
-
-    /* Array index for replica logs 
-	 * TODO: change to other data structure like b-tree.
-	 */
-    TAILQ_ENTRY(replica_log)    *index;
 };
 
 static void
@@ -142,9 +137,9 @@ initiator_write_complete_part(struct replica_bdev_io *replica_io, uint64_t compl
 
 		TAILQ_INSERT_TAIL(&initiator_info->replica_logs, replica_log, link);
 
-		for (i = replica_log->data_offset; i < replica_log->data_offset + replica_log->data_length; i++) {
-			index[i] = replica_log;
-		}
+		/*
+		 TODO?: Add index
+		 */
 		
 		replica_bdev_io_complete(replica_io, replica_io->base_bdev_io_status);
 		return true;
@@ -251,6 +246,13 @@ initiator_start(struct replica_bdev *replica_bdev)
 	}
 	initiator_info->replica_bdev = replica_bdev;
 
+	/*
+	 * TODO: Rebuild seq and completed seq from targets
+	 * TODO: Register cleaner poller
+	 */
+
+	initiator_info->replica_logs = TAILQ_HEAD_INITIALIZER(initiator_info->replica_logs);
+
 	REPLICA_FOR_EACH_BASE_BDEV(replica_bdev, base_info) {
 		min_blockcnt = spdk_min(min_blockcnt, base_info->bdev->blockcnt);
 	}
@@ -258,8 +260,6 @@ initiator_start(struct replica_bdev *replica_bdev)
 	replica_bdev->bdev.blockcnt = min_blockcnt;
 
 	replica_bdev->module_private = initiator_info;
-
-	initiator_info->replica_logs = = TAILQ_HEAD_INITIALIZER(initiator_info->replica_logs);
 
 	return 0;
 }
