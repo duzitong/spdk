@@ -1,34 +1,6 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation.
  *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "spdk/stdinc.h"
@@ -51,6 +23,7 @@ static char *g_host;
 static char *g_sock_impl_name;
 static int g_port;
 static bool g_is_server;
+static int g_zcopy;
 static bool g_verbose;
 
 /*
@@ -62,6 +35,7 @@ struct hello_context_t {
 	char *host;
 	char *sock_impl_name;
 	int port;
+	int zcopy;
 
 	bool verbose;
 	int bytes_in;
@@ -88,6 +62,8 @@ hello_sock_usage(void)
 	printf(" -N sock_impl  socket implementation, e.g., -N posix or -N uring\n");
 	printf(" -S            start in server mode\n");
 	printf(" -V            print out additional informations\n");
+	printf(" -z            disable zero copy send for the given sock implementation\n");
+	printf(" -Z            enable zero copy send for the given sock implementation\n");
 }
 
 /*
@@ -114,6 +90,12 @@ static int hello_sock_parse_arg(int ch, char *arg)
 		break;
 	case 'V':
 		g_verbose = true;
+		break;
+	case 'Z':
+		g_zcopy = 1;
+		break;
+	case 'z':
+		g_zcopy = 0;
 		break;
 	default:
 		return -EINVAL;
@@ -215,11 +197,16 @@ hello_sock_connect(struct hello_context_t *ctx)
 	int rc;
 	char saddr[ADDR_STR_LEN], caddr[ADDR_STR_LEN];
 	uint16_t cport, sport;
+	struct spdk_sock_opts opts;
+
+	opts.opts_size = sizeof(opts);
+	spdk_sock_get_default_opts(&opts);
+	opts.zcopy = ctx->zcopy;
 
 	SPDK_NOTICELOG("Connecting to the server on %s:%d with sock_impl(%s)\n", ctx->host, ctx->port,
 		       ctx->sock_impl_name);
 
-	ctx->sock = spdk_sock_connect(ctx->host, ctx->port, ctx->sock_impl_name);
+	ctx->sock = spdk_sock_connect_ext(ctx->host, ctx->port, ctx->sock_impl_name, &opts);
 	if (ctx->sock == NULL) {
 		SPDK_ERRLOG("connect error(%d): %s\n", errno, spdk_strerror(errno));
 		return -1;
@@ -346,7 +333,13 @@ hello_sock_group_poll(void *arg)
 static int
 hello_sock_listen(struct hello_context_t *ctx)
 {
-	ctx->sock = spdk_sock_listen(ctx->host, ctx->port, ctx->sock_impl_name);
+	struct spdk_sock_opts opts;
+
+	opts.opts_size = sizeof(opts);
+	spdk_sock_get_default_opts(&opts);
+	opts.zcopy = ctx->zcopy;
+
+	ctx->sock = spdk_sock_listen_ext(ctx->host, ctx->port, ctx->sock_impl_name, &opts);
 	if (ctx->sock == NULL) {
 		SPDK_ERRLOG("Cannot create server socket\n");
 		return -1;
@@ -413,7 +406,7 @@ main(int argc, char **argv)
 	opts.name = "hello_sock";
 	opts.shutdown_cb = hello_sock_shutdown_cb;
 
-	if ((rc = spdk_app_parse_args(argc, argv, &opts, "H:N:P:SV", NULL, hello_sock_parse_arg,
+	if ((rc = spdk_app_parse_args(argc, argv, &opts, "H:N:P:SVzZ", NULL, hello_sock_parse_arg,
 				      hello_sock_usage)) != SPDK_APP_PARSE_ARGS_SUCCESS) {
 		exit(rc);
 	}
@@ -421,6 +414,7 @@ main(int argc, char **argv)
 	hello_context.host = g_host;
 	hello_context.sock_impl_name = g_sock_impl_name;
 	hello_context.port = g_port;
+	hello_context.zcopy = g_zcopy;
 	hello_context.verbose = g_verbose;
 
 	rc = spdk_app_start(&opts, hello_start, &hello_context);

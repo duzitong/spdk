@@ -1,35 +1,7 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation.
  *   All rights reserved.
  *   Copyright (c) 2021 Mellanox Technologies LTD. All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "spdk/stdinc.h"
@@ -38,10 +10,11 @@
 #include "spdk_cunit.h"
 #include "spdk/thread.h"
 #include "spdk_internal/mock.h"
-#include "common/lib/test_env.c"
+#include "common/lib/ut_multithread.c"
 #include "unit/lib/json_mock.c"
 
 #include "vhost/vhost.c"
+#include "vhost/vhost_blk.c"
 #include <rte_version.h>
 #include "vhost/rte_vhost_user.c"
 
@@ -95,18 +68,128 @@ DEFINE_STUB(rte_vhost_get_vring_base_from_inflight, int,
 DEFINE_STUB(rte_vhost_extern_callback_register, int,
 	    (int vid, struct rte_vhost_user_extern_ops const *const ops, void *ctx), 0);
 
+/* rte_vhost_user.c shutdowns vhost_user sessions in a separte pthread */
+DECLARE_WRAPPER(pthread_create, int, (pthread_t *thread, const pthread_attr_t *attr,
+				      void *(*start_routine)(void *), void *arg));
+int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start_routine)(void *),
+		   void *arg)
+{
+	start_routine(arg);
+	return 0;
+}
+DEFINE_STUB(pthread_detach, int, (pthread_t thread), 0);
+
+DEFINE_STUB(spdk_bdev_writev, int,
+	    (struct spdk_bdev_desc *desc, struct spdk_io_channel *ch,
+	     struct iovec *iov, int iovcnt, uint64_t offset, uint64_t len,
+	     spdk_bdev_io_completion_cb cb, void *cb_arg),
+	    0);
+
+DEFINE_STUB(spdk_bdev_unmap, int,
+	    (struct spdk_bdev_desc *desc, struct spdk_io_channel *ch,
+	     uint64_t offset, uint64_t nbytes,
+	     spdk_bdev_io_completion_cb cb, void *cb_arg),
+	    0);
+
+DEFINE_STUB(spdk_bdev_write_zeroes, int,
+	    (struct spdk_bdev_desc *desc, struct spdk_io_channel *ch,
+	     uint64_t offset, uint64_t nbytes,
+	     spdk_bdev_io_completion_cb cb, void *cb_arg),
+	    0);
+
+DEFINE_STUB(spdk_bdev_get_num_blocks, uint64_t, (const struct spdk_bdev *bdev), 0);
+
+DEFINE_STUB(spdk_bdev_get_block_size, uint32_t, (const struct spdk_bdev *bdev), 512);
+DEFINE_STUB(spdk_bdev_get_name, const char *, (const struct spdk_bdev *bdev), "test");
+DEFINE_STUB(spdk_bdev_get_buf_align, size_t, (const struct spdk_bdev *bdev), 64);
+DEFINE_STUB(spdk_bdev_io_type_supported, bool, (struct spdk_bdev *bdev,
+		enum spdk_bdev_io_type io_type), true);
+DEFINE_STUB(spdk_bdev_open_ext, int,
+	    (const char *bdev_name, bool write,	spdk_bdev_event_cb_t event_cb,
+	     void *event_ctx, struct spdk_bdev_desc **desc), 0);
+DEFINE_STUB(spdk_bdev_desc_get_bdev, struct spdk_bdev *,
+	    (struct spdk_bdev_desc *desc), NULL);
+DEFINE_STUB_V(spdk_bdev_close, (struct spdk_bdev_desc *desc));
+DEFINE_STUB(spdk_bdev_queue_io_wait, int, (struct spdk_bdev *bdev, struct spdk_io_channel *ch,
+		struct spdk_bdev_io_wait_entry *entry), 0);
+DEFINE_STUB_V(spdk_bdev_free_io, (struct spdk_bdev_io *bdev_io));
+DEFINE_STUB(spdk_bdev_get_io_channel, struct spdk_io_channel *, (struct spdk_bdev_desc *desc), 0);
+DEFINE_STUB(spdk_bdev_readv, int,
+	    (struct spdk_bdev_desc *desc, struct spdk_io_channel *ch,
+	     struct iovec *iov, int iovcnt, uint64_t offset, uint64_t nbytes,
+	     spdk_bdev_io_completion_cb cb, void *cb_arg),
+	    0);
+DEFINE_STUB(spdk_bdev_flush, int,
+	    (struct spdk_bdev_desc *desc, struct spdk_io_channel *ch,
+	     uint64_t offset, uint64_t nbytes,
+	     spdk_bdev_io_completion_cb cb, void *cb_arg),
+	    0);
+DEFINE_STUB(rte_vhost_set_inflight_desc_split, int, (int vid, uint16_t vring_idx, uint16_t idx), 0);
+DEFINE_STUB(rte_vhost_set_inflight_desc_packed, int, (int vid, uint16_t vring_idx, uint16_t head,
+		uint16_t last, uint16_t *inflight_entry), 0);
+DEFINE_STUB(rte_vhost_slave_config_change, int, (int vid, bool need_reply), 0);
+DEFINE_STUB(spdk_json_decode_bool, int, (const struct spdk_json_val *val, void *out), 0);
+DEFINE_STUB(spdk_json_decode_object_relaxed, int,
+	    (const struct spdk_json_val *values, const struct spdk_json_object_decoder *decoders,
+	     size_t num_decoders, void *out), 0);
+
 void *
 spdk_call_unaffinitized(void *cb(void *arg), void *arg)
 {
 	return cb(arg);
 }
 
-static struct spdk_vhost_dev_backend g_vdev_backend;
+static struct spdk_vhost_dev_backend g_vdev_backend = {.type = VHOST_BACKEND_SCSI};
 static struct spdk_vhost_user_dev_backend g_vdev_user_backend;
+
+static bool g_init_fail;
+static void
+init_cb(int rc)
+{
+	g_init_fail = rc;
+}
 
 static int
 test_setup(void)
 {
+	allocate_cores(1);
+	allocate_threads(1);
+	set_thread(0);
+
+	g_init_fail = true;
+	spdk_vhost_scsi_init(init_cb);
+	assert(g_init_fail == false);
+
+	g_init_fail = true;
+	spdk_vhost_blk_init(init_cb);
+	assert(g_init_fail == false);
+
+	return 0;
+}
+
+static bool g_fini_fail;
+static void
+fini_cb(void)
+{
+	g_fini_fail = false;
+}
+
+static int
+test_cleanup(void)
+{
+	g_fini_fail = true;
+	spdk_vhost_scsi_fini(fini_cb);
+	poll_threads();
+	assert(g_fini_fail == false);
+
+	g_fini_fail = true;
+	spdk_vhost_blk_fini(fini_cb);
+	poll_threads();
+	assert(g_fini_fail == false);
+
+	free_threads();
+	free_cores();
+
 	return 0;
 }
 
@@ -121,7 +204,7 @@ alloc_vdev(struct spdk_vhost_dev **vdev_p, const char *name, const char *cpumask
 	CU_ASSERT(rc == 0);
 	SPDK_CU_ASSERT_FATAL(vdev != NULL);
 	memset(vdev, 0, sizeof(*vdev));
-	rc = vhost_dev_register(vdev, name, cpumask, &g_vdev_backend, &g_vdev_user_backend);
+	rc = vhost_dev_register(vdev, name, cpumask, NULL, &g_vdev_backend, &g_vdev_user_backend);
 	if (rc == 0) {
 		*vdev_p = vdev;
 	} else {
@@ -582,7 +665,7 @@ main(int argc, char **argv)
 	CU_set_error_action(CUEA_ABORT);
 	CU_initialize_registry();
 
-	suite = CU_add_suite("vhost_suite", test_setup, NULL);
+	suite = CU_add_suite("vhost_suite", test_setup, test_cleanup);
 
 	CU_ADD_TEST(suite, desc_to_iov_test);
 	CU_ADD_TEST(suite, create_controller_test);

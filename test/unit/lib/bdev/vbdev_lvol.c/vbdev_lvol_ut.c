@@ -1,34 +1,7 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation.
  *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *   Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #include "spdk_cunit.h"
@@ -60,13 +33,22 @@ bool lvol_already_opened = false;
 bool g_examine_done = false;
 bool g_bdev_alias_already_exists = false;
 bool g_lvs_with_name_already_exists = false;
+bool g_ext_api_called;
 
 DEFINE_STUB_V(spdk_bdev_module_fini_start_done, (void));
+DEFINE_STUB(spdk_bdev_get_memory_domains, int, (struct spdk_bdev *bdev,
+		struct spdk_memory_domain **domains, int array_size), 0);
 
 const struct spdk_bdev_aliases_list *
 spdk_bdev_get_aliases(const struct spdk_bdev *bdev)
 {
 	return &bdev->aliases;
+}
+
+uint32_t
+spdk_bdev_get_md_size(const struct spdk_bdev *bdev)
+{
+	return bdev->md_len;
 }
 
 int
@@ -563,6 +545,23 @@ spdk_blob_io_writev(struct spdk_blob *blob, struct spdk_io_channel *channel,
 }
 
 void
+spdk_blob_io_writev_ext(struct spdk_blob *blob, struct spdk_io_channel *channel,
+			struct iovec *iov, int iovcnt, uint64_t offset, uint64_t length,
+			spdk_blob_op_complete cb_fn, void *cb_arg,
+			struct spdk_blob_ext_io_opts *io_opts)
+{
+	struct vbdev_lvol_io *lvol_io = (struct vbdev_lvol_io *)g_io->driver_ctx;
+
+	CU_ASSERT(blob == NULL);
+	CU_ASSERT(channel == g_ch);
+	CU_ASSERT(offset == g_io->u.bdev.offset_blocks);
+	CU_ASSERT(length == g_io->u.bdev.num_blocks);
+	CU_ASSERT(io_opts == &lvol_io->ext_io_opts);
+	g_ext_api_called = true;
+	cb_fn(cb_arg, 0);
+}
+
+void
 spdk_blob_io_readv(struct spdk_blob *blob, struct spdk_io_channel *channel,
 		   struct iovec *iov, int iovcnt, uint64_t offset, uint64_t length,
 		   spdk_blob_op_complete cb_fn, void *cb_arg)
@@ -571,6 +570,23 @@ spdk_blob_io_readv(struct spdk_blob *blob, struct spdk_io_channel *channel,
 	CU_ASSERT(channel == g_ch);
 	CU_ASSERT(offset == g_io->u.bdev.offset_blocks);
 	CU_ASSERT(length == g_io->u.bdev.num_blocks);
+	cb_fn(cb_arg, 0);
+}
+
+void
+spdk_blob_io_readv_ext(struct spdk_blob *blob, struct spdk_io_channel *channel,
+		       struct iovec *iov, int iovcnt, uint64_t offset, uint64_t length,
+		       spdk_blob_op_complete cb_fn, void *cb_arg,
+		       struct spdk_blob_ext_io_opts *io_opts)
+{
+	struct vbdev_lvol_io *lvol_io = (struct vbdev_lvol_io *)g_io->driver_ctx;
+
+	CU_ASSERT(blob == NULL);
+	CU_ASSERT(channel == g_ch);
+	CU_ASSERT(offset == g_io->u.bdev.offset_blocks);
+	CU_ASSERT(length == g_io->u.bdev.num_blocks);
+	CU_ASSERT(io_opts == &lvol_io->ext_io_opts);
+	g_ext_api_called = true;
 	cb_fn(cb_arg, 0);
 }
 
@@ -1356,7 +1372,9 @@ ut_vbdev_lvol_io_type_supported(void)
 static void
 ut_lvol_read_write(void)
 {
-	g_io = calloc(1, sizeof(struct spdk_bdev_io));
+	struct spdk_bdev_ext_io_opts bdev_ext_opts = {};
+
+	g_io = calloc(1, sizeof(struct spdk_bdev_io) + vbdev_lvs_get_ctx_size());
 	SPDK_CU_ASSERT_FATAL(g_io != NULL);
 	g_base_bdev = calloc(1, sizeof(struct spdk_bdev));
 	SPDK_CU_ASSERT_FATAL(g_base_bdev != NULL);
@@ -1373,6 +1391,19 @@ ut_lvol_read_write(void)
 
 	lvol_write(g_lvol, g_ch, g_io);
 	CU_ASSERT(g_io->internal.status = SPDK_BDEV_IO_STATUS_SUCCESS);
+
+	g_ext_api_called = false;
+	g_io->u.bdev.ext_opts = &bdev_ext_opts;
+
+	lvol_read(g_ch, g_io);
+	CU_ASSERT(g_io->internal.status = SPDK_BDEV_IO_STATUS_SUCCESS);
+	CU_ASSERT(g_ext_api_called == true);
+	g_ext_api_called = false;
+
+	lvol_write(g_lvol, g_ch, g_io);
+	CU_ASSERT(g_io->internal.status = SPDK_BDEV_IO_STATUS_SUCCESS);
+	CU_ASSERT(g_ext_api_called == true);
+	g_ext_api_called = false;
 
 	free(g_io);
 	free(g_base_bdev);

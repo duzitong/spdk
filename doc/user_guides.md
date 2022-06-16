@@ -12,3 +12,5 @@
 - @subpage jsonrpc
 - @subpage jsonrpc_proxy
 - @subpage usdt
+- @subpage nvme_multipath
+- @subpage sma

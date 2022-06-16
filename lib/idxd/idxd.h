@@ -1,34 +1,6 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation.
  *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef __IDXD_H__
@@ -69,6 +41,11 @@ static inline void movdir64b(void *dst, const void *src)
 #define WQ_PRIORITY_1		1
 #define IDXD_MAX_QUEUES		64
 
+enum idxd_dev {
+	IDXD_DEV_TYPE_DSA	= 0,
+	IDXD_DEV_TYPE_IAA	= 1,
+};
+
 /* Each pre-allocated batch structure goes on a per channel list and
  * contains the memory for both user descriptors.
  */
@@ -77,8 +54,8 @@ struct idxd_batch {
 	struct idxd_ops			*user_ops;
 	uint64_t			user_desc_addr;
 	uint8_t				index;
+	uint8_t				refcnt;
 	struct spdk_idxd_io_channel	*chan;
-	bool				transparent;
 	TAILQ_ENTRY(idxd_batch)		link;
 };
 
@@ -105,9 +82,9 @@ struct spdk_idxd_io_channel {
 	 * data descriptors and are located in the batch structure.
 	 */
 	void					*desc_base;
-	TAILQ_HEAD(, idxd_ops)			ops_pool;
+	STAILQ_HEAD(, idxd_ops)			ops_pool;
 	/* Current list of outstanding operations to poll. */
-	TAILQ_HEAD(op_head, idxd_ops)		ops_outstanding;
+	STAILQ_HEAD(op_head, idxd_ops)		ops_outstanding;
 	void					*ops_base;
 
 	TAILQ_HEAD(, idxd_batch)		batch_pool;
@@ -124,20 +101,28 @@ struct pci_dev_id {
  * size and must be 32 byte aligned.
  */
 struct idxd_ops {
-	struct idxd_hw_comp_record	hw;
+	union {
+		struct dsa_hw_comp_record	hw;
+		struct iaa_hw_comp_record	iaa_hw;
+	};
 	void				*cb_arg;
 	spdk_idxd_req_cb		cb_fn;
 	struct idxd_batch		*batch;
 	struct idxd_hw_desc		*desc;
-	uint32_t			*crc_dst;
-	char				pad[8];
-	TAILQ_ENTRY(idxd_ops)		link;
+	union {
+		uint32_t		*crc_dst;
+		uint32_t		*output_size;
+	};
+	struct idxd_ops			*parent;
+	uint32_t			count;
+	STAILQ_ENTRY(idxd_ops)		link;
 };
-SPDK_STATIC_ASSERT(sizeof(struct idxd_ops) == 96, "size mismatch");
+SPDK_STATIC_ASSERT(sizeof(struct idxd_ops) == 128, "size mismatch");
 
 struct spdk_idxd_impl {
 	const char *name;
-	int (*probe)(void *cb_ctx, spdk_idxd_attach_cb attach_cb);
+	int (*probe)(void *cb_ctx, spdk_idxd_attach_cb attach_cb,
+		     spdk_idxd_probe_cb probe_cb);
 	void (*destruct)(struct spdk_idxd_device *idxd);
 	void (*dump_sw_error)(struct spdk_idxd_device *idxd, void *portal);
 	char *(*portal_get_addr)(struct spdk_idxd_device *idxd);
@@ -153,6 +138,8 @@ struct spdk_idxd_device {
 	uint32_t			total_wq_size;
 	uint32_t			chan_per_device;
 	pthread_mutex_t			num_channels_lock;
+	enum idxd_dev			type;
+	struct iaa_aecs			*aecs;
 };
 
 void idxd_impl_register(struct spdk_idxd_impl *impl);

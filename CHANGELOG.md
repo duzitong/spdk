@@ -1,6 +1,8 @@
 # Changelog
 
-## v22.05: (Upcoming Release)
+## v22.09: (Upcoming Release)
+
+## v22.05
 
 ### sock
 
@@ -21,13 +23,34 @@ A new API `spdk_bdev_unregister_by_name` was added to handle race conditions cor
 New APIs, `spdk_for_each_bdev` and `spdk_for_each_bdev_leaf`, were added to provide iteration
 safe for race conditions.
 
-### idxd
+A new RPC `bdev_nvme_get_io_paths` was added to get all active I/O paths.
+
+A new RPC `bdev_nvme_set_preferred_path` was added to set preferred I/O path for an NVMe bdev
+when in multipath mode. This RPC does not support NVMe bdevs in failover mode.
+
+A new RPC `bdev_nvme_set_multipath_policy` was added to set multipath policy of a NVMe bdev
+in multipath mode.
+
+A new option `disable_auto_failback` was added to the `bdev_nvme_set_options` RPC to disable
+automatic failback.
+
+### idxd / dsa
 
 A new parameter `flags` was added to all low level submission and preparation
 APIs to enable the caller to pass operation flags per the DSA specification.
 
 A new flag 'SPDK_IDXD_FLAG_PERSISTENT' was added to let DSA know that
 the destination is persistent.
+
+The RPC `idxd_scan_accel_engine` has been renamed to `dsa_scan_accel_engine`
+
+The RPC `iaa_scan_accel_engine` has been added.
+
+Many HW related structs/functions with the name `idxd` have been renamed `dsa`
+to more accurately represent the HW they are associated with.
+
+Two new functions were added to the library `spdk_idxd_submit_compress` and
+`spdk_idxd_submit_decompress`
 
 ### accel_fw
 
@@ -38,6 +61,8 @@ The APIs include:
 `spdk_accel_submit_fill`
 `spdk_accel_submit_copy_crc32c`
 `spdk_accel_submit_copy_crc32cv`
+`spdk_accel_submit_compress`
+`spdk_accel_submit_decompress`
 
 A new flag `ACCEL_FLAG_PERSISTENT` was added to indicate the target memory is PMEM.
 
@@ -65,11 +90,21 @@ New parameters, `ctrlr_loss_timeout_sec`, `reconnect_delay_sec`, and `fast_io_fa
 added to the RPC `bdev_nvme_set_options`. They can be overridden if they are given by the RPC
 `bdev_nvme_attach_controller`.
 
+### blobstore
+
+New functions `spdk_blob_io_writev_ext` and `spdk_blob_io_readv_ext` are added. The new functions accept
+`spdk_blob_ext_io_opts` structure with extended IO request options.
+
 ### event
 
 Added `msg_mempool_size` parameter to `spdk_reactors_init` and `spdk_thread_lib_init_ext`.
 The size of `g_spdk_msg_mempool` can now be controlled through the same-named
 user option of `spdk_app_opts` structure.
+
+### nvme
+
+The API `spdk_nvme_ctrlr_prepare_for_reset()` was deprecated. The functionality provided by the
+`spdk_nvme_ctrlr_prepare_for_reset()` was merged into the API `spdk_nvme_ctrlr_disconnect()`.
 
 ### nvmf
 
@@ -105,6 +140,17 @@ virtual bdev combines multiple underlying bdevs together. The layout of the unde
 bdevs is one after another. The concat bdev is extendable. When the free space of the
 concat bdev is not enough, the user can deconstruct the concat bdev, then reconstruct it
 with an additional underlying bdev.
+
+### sock
+
+Allow MSG_ZEROCOPY flag to be set or not according to data size, which can be enabled and
+set by setting "zerocopy_threshold". zerocopy_threshold = 0 means disable this function;
+zerocopy_threshold > 0 means enable it and use this value as the threshold.
+
+### rpc
+
+Introduced `zerocopy_threshold` to enable zerocopy on send for server sockets according to
+data size to be flushed.
 
 ## v22.01
 

@@ -1,35 +1,7 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation. All rights reserved.
  *   Copyright (c) 2021 Mellanox Technologies LTD. All rights reserved.
  *   Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
@@ -602,7 +574,16 @@ nvme_pcie_ctrlr_connect_qpair(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_qp
 void
 nvme_pcie_ctrlr_disconnect_qpair(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_qpair *qpair)
 {
-	nvme_transport_ctrlr_disconnect_qpair_done(qpair);
+	if (!nvme_qpair_is_admin_queue(qpair) || !ctrlr->is_disconnecting) {
+		nvme_transport_ctrlr_disconnect_qpair_done(qpair);
+	} else {
+		/* If this function is called for the admin qpair via spdk_nvme_ctrlr_reset()
+		 * or spdk_nvme_ctrlr_disconnect(), initiate a Controller Level Reset.
+		 * Then we can abort trackers safely because the Controller Level Reset deletes
+		 * all I/O SQ/CQs.
+		 */
+		nvme_ctrlr_disable(ctrlr);
+	}
 }
 
 /* Used when dst points to MMIO (i.e. CMB) in a virtual machine - in these cases we must
@@ -651,9 +632,12 @@ nvme_pcie_qpair_submit_tracker(struct spdk_nvme_qpair *qpair, struct nvme_tracke
 	spdk_trace_record(TRACE_NVME_PCIE_SUBMIT, qpair->id, 0, (uintptr_t)req,
 			  req->cmd.cid, req->cmd.opc, req->cmd.cdw10, req->cmd.cdw11, req->cmd.cdw12);
 
-	if (req->cmd.fuse == SPDK_NVME_IO_FLAGS_FUSE_FIRST) {
-		/* This is first cmd of two fused commands - don't ring doorbell */
-		qpair->first_fused_submitted = 1;
+	if (req->cmd.fuse) {
+		/*
+		 * Keep track of the fuse operation sequence so that we ring the doorbell only
+		 * after the second fuse is submitted.
+		 */
+		qpair->last_fuse = req->cmd.fuse;
 	}
 
 	/* Don't use wide instructions to copy NVMe command, this is limited by QEMU
@@ -920,7 +904,7 @@ nvme_pcie_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_
 			__builtin_prefetch(&pqpair->tr[next_cpl->cid]);
 		}
 
-#ifdef __PPC64__
+#if defined(__PPC64__) || defined(__riscv)
 		/*
 		 * This memory barrier prevents reordering of:
 		 * - load after store from/to tr
@@ -977,9 +961,18 @@ nvme_pcie_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_
 		nvme_pcie_qpair_check_timeout(qpair);
 	}
 
-	/* Before returning, complete any pending admin request. */
+	/* Before returning, complete any pending admin request or
+	 * process the admin qpair disconnection.
+	 */
 	if (spdk_unlikely(nvme_qpair_is_admin_queue(qpair))) {
 		nvme_pcie_qpair_complete_pending_admin_request(qpair);
+
+		if (nvme_qpair_get_state(qpair) == NVME_QPAIR_DISCONNECTING) {
+			rc = nvme_ctrlr_disable_poll(qpair->ctrlr);
+			if (rc == 0) {
+				nvme_transport_ctrlr_disconnect_qpair_done(qpair);
+			}
+		}
 
 		nvme_robust_mutex_unlock(&ctrlr->ctrlr_lock);
 	}

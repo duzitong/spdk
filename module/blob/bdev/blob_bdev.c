@@ -1,34 +1,6 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation.
  *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "spdk/stdinc.h"
@@ -58,6 +30,7 @@ struct blob_resubmit {
 	uint64_t lba;
 	uint32_t lba_count;
 	struct spdk_bs_dev_cb_args *cb_args;
+	struct spdk_blob_ext_io_opts *ext_io_opts;
 };
 static void bdev_blob_resubmit(void *);
 
@@ -90,9 +63,8 @@ bdev_blob_io_complete(struct spdk_bdev_io *bdev_io, bool success, void *arg)
 
 static void
 bdev_blob_queue_io(struct spdk_bs_dev *dev, struct spdk_io_channel *channel, void *payload,
-		   int iovcnt,
-		   uint64_t lba, uint32_t lba_count, enum spdk_bdev_io_type io_type,
-		   struct spdk_bs_dev_cb_args *cb_args)
+		   int iovcnt, uint64_t lba, uint32_t lba_count, enum spdk_bdev_io_type io_type,
+		   struct spdk_bs_dev_cb_args *cb_args, struct spdk_blob_ext_io_opts *ext_io_opts)
 {
 	int rc;
 	struct spdk_bdev *bdev = __get_bdev(dev);
@@ -117,6 +89,7 @@ bdev_blob_queue_io(struct spdk_bs_dev *dev, struct spdk_io_channel *channel, voi
 	ctx->bdev_io_wait.bdev = bdev;
 	ctx->bdev_io_wait.cb_fn = bdev_blob_resubmit;
 	ctx->bdev_io_wait.cb_arg = ctx;
+	ctx->ext_io_opts = ext_io_opts;
 
 	rc = spdk_bdev_queue_io_wait(bdev, channel, &ctx->bdev_io_wait);
 	if (rc != 0) {
@@ -137,7 +110,7 @@ bdev_blob_read(struct spdk_bs_dev *dev, struct spdk_io_channel *channel, void *p
 				   lba_count, bdev_blob_io_complete, cb_args);
 	if (rc == -ENOMEM) {
 		bdev_blob_queue_io(dev, channel, payload, 0, lba,
-				   lba_count, SPDK_BDEV_IO_TYPE_READ, cb_args);
+				   lba_count, SPDK_BDEV_IO_TYPE_READ, cb_args, NULL);
 	} else if (rc != 0) {
 		cb_args->cb_fn(cb_args->channel, cb_args->cb_arg, rc);
 	}
@@ -153,7 +126,7 @@ bdev_blob_write(struct spdk_bs_dev *dev, struct spdk_io_channel *channel, void *
 				    lba_count, bdev_blob_io_complete, cb_args);
 	if (rc == -ENOMEM) {
 		bdev_blob_queue_io(dev, channel, payload, 0, lba,
-				   lba_count, SPDK_BDEV_IO_TYPE_WRITE, cb_args);
+				   lba_count, SPDK_BDEV_IO_TYPE_WRITE, cb_args, NULL);
 	} else if (rc != 0) {
 		cb_args->cb_fn(cb_args->channel, cb_args->cb_arg, rc);
 	}
@@ -170,7 +143,7 @@ bdev_blob_readv(struct spdk_bs_dev *dev, struct spdk_io_channel *channel,
 				    lba_count, bdev_blob_io_complete, cb_args);
 	if (rc == -ENOMEM) {
 		bdev_blob_queue_io(dev, channel, iov, iovcnt, lba,
-				   lba_count, SPDK_BDEV_IO_TYPE_READ, cb_args);
+				   lba_count, SPDK_BDEV_IO_TYPE_READ, cb_args, NULL);
 	} else if (rc != 0) {
 		cb_args->cb_fn(cb_args->channel, cb_args->cb_arg, rc);
 	}
@@ -187,7 +160,61 @@ bdev_blob_writev(struct spdk_bs_dev *dev, struct spdk_io_channel *channel,
 				     lba_count, bdev_blob_io_complete, cb_args);
 	if (rc == -ENOMEM) {
 		bdev_blob_queue_io(dev, channel, iov, iovcnt, lba,
-				   lba_count, SPDK_BDEV_IO_TYPE_WRITE, cb_args);
+				   lba_count, SPDK_BDEV_IO_TYPE_WRITE, cb_args, NULL);
+	} else if (rc != 0) {
+		cb_args->cb_fn(cb_args->channel, cb_args->cb_arg, rc);
+	}
+}
+
+static void
+bdev_blob_readv_ext(struct spdk_bs_dev *dev, struct spdk_io_channel *channel,
+		    struct iovec *iov, int iovcnt,
+		    uint64_t lba, uint32_t lba_count, struct spdk_bs_dev_cb_args *cb_args,
+		    struct spdk_blob_ext_io_opts *io_opts)
+{
+	struct spdk_bdev_ext_io_opts *bdev_io_opts = NULL;
+	int rc;
+
+	if (io_opts) {
+		/* bdev ext API requires ext_io_opts to be allocated by the user, we don't have enough context to allocate
+		 * bdev ext_opts structure here. Also blob and bdev ext_opts are not API/ABI compatible, so we can't use the given
+		 * io_opts. Restore ext_opts passed by the user of this bs_dev */
+		bdev_io_opts = io_opts->user_ctx;
+		assert(bdev_io_opts);
+	}
+
+	rc = spdk_bdev_readv_blocks_ext(__get_desc(dev), channel, iov, iovcnt, lba, lba_count,
+					bdev_blob_io_complete, cb_args, bdev_io_opts);
+	if (rc == -ENOMEM) {
+		bdev_blob_queue_io(dev, channel, iov, iovcnt, lba, lba_count, SPDK_BDEV_IO_TYPE_READ, cb_args,
+				   io_opts);
+	} else if (rc != 0) {
+		cb_args->cb_fn(cb_args->channel, cb_args->cb_arg, rc);
+	}
+}
+
+static void
+bdev_blob_writev_ext(struct spdk_bs_dev *dev, struct spdk_io_channel *channel,
+		     struct iovec *iov, int iovcnt,
+		     uint64_t lba, uint32_t lba_count, struct spdk_bs_dev_cb_args *cb_args,
+		     struct spdk_blob_ext_io_opts *io_opts)
+{
+	struct spdk_bdev_ext_io_opts *bdev_io_opts = NULL;
+	int rc;
+
+	if (io_opts) {
+		/* bdev ext API requires ext_io_opts to be allocated by the user, we don't have enough context to allocate
+		 * bdev ext_opts structure here. Also blob and bdev ext_opts are not API/ABI compatible, so we can't use the given
+		 * io_opts. Restore ext_opts passed by the user of this bs_dev */
+		bdev_io_opts = io_opts->user_ctx;
+		assert(bdev_io_opts);
+	}
+
+	rc = spdk_bdev_writev_blocks_ext(__get_desc(dev), channel, iov, iovcnt, lba, lba_count,
+					 bdev_blob_io_complete, cb_args, bdev_io_opts);
+	if (rc == -ENOMEM) {
+		bdev_blob_queue_io(dev, channel, iov, iovcnt, lba, lba_count, SPDK_BDEV_IO_TYPE_WRITE, cb_args,
+				   io_opts);
 	} else if (rc != 0) {
 		cb_args->cb_fn(cb_args->channel, cb_args->cb_arg, rc);
 	}
@@ -203,7 +230,7 @@ bdev_blob_write_zeroes(struct spdk_bs_dev *dev, struct spdk_io_channel *channel,
 					   lba_count, bdev_blob_io_complete, cb_args);
 	if (rc == -ENOMEM) {
 		bdev_blob_queue_io(dev, channel, NULL, 0, lba,
-				   lba_count, SPDK_BDEV_IO_TYPE_WRITE_ZEROES, cb_args);
+				   lba_count, SPDK_BDEV_IO_TYPE_WRITE_ZEROES, cb_args, NULL);
 	} else if (rc != 0) {
 		cb_args->cb_fn(cb_args->channel, cb_args->cb_arg, rc);
 	}
@@ -221,7 +248,7 @@ bdev_blob_unmap(struct spdk_bs_dev *dev, struct spdk_io_channel *channel, uint64
 					    bdev_blob_io_complete, cb_args);
 		if (rc == -ENOMEM) {
 			bdev_blob_queue_io(dev, channel, NULL, 0, lba,
-					   lba_count, SPDK_BDEV_IO_TYPE_UNMAP, cb_args);
+					   lba_count, SPDK_BDEV_IO_TYPE_UNMAP, cb_args, NULL);
 		} else if (rc != 0) {
 			cb_args->cb_fn(cb_args->channel, cb_args->cb_arg, rc);
 		}
@@ -243,8 +270,8 @@ bdev_blob_resubmit(void *arg)
 	switch (ctx->io_type) {
 	case SPDK_BDEV_IO_TYPE_READ:
 		if (ctx->iovcnt > 0) {
-			bdev_blob_readv(ctx->dev, ctx->channel, (struct iovec *)ctx->payload, ctx->iovcnt,
-					ctx->lba, ctx->lba_count, ctx->cb_args);
+			bdev_blob_readv_ext(ctx->dev, ctx->channel, (struct iovec *) ctx->payload, ctx->iovcnt,
+					    ctx->lba, ctx->lba_count, ctx->cb_args, ctx->ext_io_opts);
 		} else {
 			bdev_blob_read(ctx->dev, ctx->channel, ctx->payload,
 				       ctx->lba, ctx->lba_count, ctx->cb_args);
@@ -252,8 +279,8 @@ bdev_blob_resubmit(void *arg)
 		break;
 	case SPDK_BDEV_IO_TYPE_WRITE:
 		if (ctx->iovcnt > 0) {
-			bdev_blob_writev(ctx->dev, ctx->channel, (struct iovec *)ctx->payload, ctx->iovcnt,
-					 ctx->lba, ctx->lba_count, ctx->cb_args);
+			bdev_blob_writev_ext(ctx->dev, ctx->channel, (struct iovec *) ctx->payload, ctx->iovcnt,
+					     ctx->lba, ctx->lba_count, ctx->cb_args, ctx->ext_io_opts);
 		} else {
 			bdev_blob_write(ctx->dev, ctx->channel, ctx->payload,
 					ctx->lba, ctx->lba_count, ctx->cb_args);
@@ -345,6 +372,8 @@ blob_bdev_init(struct blob_bdev *b, struct spdk_bdev_desc *desc)
 	b->bs_dev.write = bdev_blob_write;
 	b->bs_dev.readv = bdev_blob_readv;
 	b->bs_dev.writev = bdev_blob_writev;
+	b->bs_dev.readv_ext = bdev_blob_readv_ext;
+	b->bs_dev.writev_ext = bdev_blob_writev_ext;
 	b->bs_dev.write_zeroes = bdev_blob_write_zeroes;
 	b->bs_dev.unmap = bdev_blob_unmap;
 	b->bs_dev.get_base_bdev = bdev_blob_get_base_bdev;

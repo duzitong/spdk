@@ -1,34 +1,6 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation.
  *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "spdk/stdinc.h"
@@ -644,7 +616,11 @@ dd_open_file(struct dd_target *target, const char *fname, int flags, uint64_t sk
 	}
 
 	target->block_size = spdk_max(spdk_fd_get_blocklen(*fd), 1);
+
 	target->total_size = spdk_fd_get_size(*fd);
+	if (target->total_size == 0) {
+		target->total_size = g_opts.io_unit_size * g_opts.io_unit_count;
+	}
 
 	if (input == true) {
 		g_opts.queue_depth = spdk_min(g_opts.queue_depth,
@@ -853,7 +829,12 @@ dd_run(void *arg1)
 #ifdef SPDK_CONFIG_URING
 		if (g_opts.aio == false) {
 			g_job.u.uring.poller = spdk_poller_register(dd_uring_poll, NULL, 0);
-			io_uring_queue_init(g_opts.queue_depth, &g_job.u.uring.ring, 0);
+			rc = io_uring_queue_init(g_opts.queue_depth * 2, &g_job.u.uring.ring, IORING_SETUP_SQPOLL);
+			if (rc) {
+				SPDK_ERRLOG("Failed to create io_uring: %d (%s)\n", rc, spdk_strerror(-rc));
+				dd_exit(rc);
+				return;
+			}
 			g_job.u.uring.active = true;
 		} else
 #endif

@@ -1,34 +1,6 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation.
  *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /**
@@ -1724,7 +1696,20 @@ struct spdk_nvme_power_state {
 	uint8_t rwl		: 5;		/* bits 124:120: relative write latency */
 	uint8_t reserved6	: 3;
 
-	uint8_t reserved7[16];
+	uint16_t idlp;				/* bits 143:128: idle power */
+
+	uint8_t reserved7	: 6;
+	uint8_t ips		: 2;		/* bits 151:150: idle power scale */
+
+	uint8_t reserved8;
+
+	uint16_t actp;				/* bits 175:160: active power */
+
+	uint8_t apw		: 3;		/* bits 178:176: active power workload */
+	uint8_t reserved9	: 3;
+	uint8_t aps		: 2;		/* bits 183:182: active power scale */
+
+	uint8_t reserved10[9];
 };
 SPDK_STATIC_ASSERT(sizeof(struct spdk_nvme_power_state) == 32, "Incorrect size");
 
@@ -1904,6 +1889,11 @@ struct spdk_nvme_cdata_oacs {
 	uint16_t	get_lba_status : 1;
 
 	uint16_t	oacs_rsvd : 6;
+};
+
+struct spdk_nvme_cdata_fuses {
+	uint16_t	compare_and_write : 1;
+	uint16_t	reserved : 15;
 };
 
 struct __attribute__((packed)) spdk_nvme_ctrlr_data {
@@ -2196,10 +2186,7 @@ struct __attribute__((packed)) spdk_nvme_ctrlr_data {
 	struct spdk_nvme_cdata_oncs oncs;
 
 	/** fused operation support */
-	struct {
-		uint16_t	compare_and_write : 1;
-		uint16_t	reserved : 15;
-	} fuses;
+	struct spdk_nvme_cdata_fuses fuses;
 
 	/** format nvm attributes */
 	struct {

@@ -1,35 +1,7 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation.
  *   All rights reserved.
  *   Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "nvme_internal.h"
@@ -136,6 +108,7 @@ static const struct nvme_string sgl_type[] = {
 	{ SPDK_NVME_SGL_TYPE_BIT_BUCKET, "BIT BUCKET" },
 	{ SPDK_NVME_SGL_TYPE_SEGMENT, "SEGMENT" },
 	{ SPDK_NVME_SGL_TYPE_LAST_SEGMENT, "LAST SEGMENT" },
+	{ SPDK_NVME_SGL_TYPE_KEYED_DATA_BLOCK, "KEYED DATA BLOCK" },
 	{ SPDK_NVME_SGL_TYPE_TRANSPORT_DATA_BLOCK, "TRANSPORT DATA BLOCK" },
 	{ SPDK_NVME_SGL_TYPE_VENDOR_SPECIFIC, "VENDOR SPECIFIC" },
 	{ 0xFFFF, "RESERVED" }
@@ -191,11 +164,11 @@ nvme_get_sgl(char *buf, size_t size, struct spdk_nvme_cmd *cmd)
 		     nvme_get_string(sgl_subtype, sgl->generic.subtype), sgl->address);
 	assert(c >= 0 && (size_t)c < size);
 
-	if (sgl->generic.type == SPDK_NVME_SGL_TYPE_KEYED_DATA_BLOCK) {
+	if (sgl->generic.type == SPDK_NVME_SGL_TYPE_DATA_BLOCK) {
 		nvme_get_sgl_unkeyed(buf + c, size - c, cmd);
 	}
 
-	if (sgl->generic.type == SPDK_NVME_SGL_TYPE_DATA_BLOCK) {
+	if (sgl->generic.type == SPDK_NVME_SGL_TYPE_KEYED_DATA_BLOCK) {
 		nvme_get_sgl_keyed(buf + c, size - c, cmd);
 	}
 }
@@ -560,7 +533,7 @@ nvme_qpair_abort_queued_reqs(struct spdk_nvme_qpair *qpair, uint32_t dnr)
 			SPDK_ERRLOG("aborting queued i/o\n");
 		}
 		nvme_qpair_manual_complete_request(qpair, req, SPDK_NVME_SCT_GENERIC,
-						   SPDK_NVME_SC_ABORTED_BY_REQUEST, dnr, true);
+						   SPDK_NVME_SC_ABORTED_SQ_DELETION, dnr, true);
 	}
 }
 
@@ -597,14 +570,17 @@ nvme_qpair_abort_queued_reqs_with_cbarg(struct spdk_nvme_qpair *qpair, void *cmd
 	uint32_t		aborting = 0;
 
 	STAILQ_FOREACH_SAFE(req, &qpair->queued_req, stailq, tmp) {
-		if (req->cb_arg == cmd_cb_arg) {
-			STAILQ_REMOVE(&qpair->queued_req, req, nvme_request, stailq);
-			STAILQ_INSERT_TAIL(&qpair->aborting_queued_req, req, stailq);
-			if (!qpair->ctrlr->opts.disable_error_logging) {
-				SPDK_ERRLOG("aborting queued i/o\n");
-			}
-			aborting++;
+		if ((req->cb_arg != cmd_cb_arg) &&
+		    (req->parent == NULL || req->parent->cb_arg != cmd_cb_arg)) {
+			continue;
 		}
+
+		STAILQ_REMOVE(&qpair->queued_req, req, nvme_request, stailq);
+		STAILQ_INSERT_TAIL(&qpair->aborting_queued_req, req, stailq);
+		if (!qpair->ctrlr->opts.disable_error_logging) {
+			SPDK_ERRLOG("aborting queued i/o\n");
+		}
+		aborting++;
 	}
 
 	return aborting;

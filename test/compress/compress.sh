@@ -32,7 +32,7 @@ function create_vols() {
 	$rpc_py bdev_lvol_create -t -l lvs0 lv0 100
 	waitforbdev lvs0/lv0
 
-	$rpc_py compress_set_pmd -p "$pmd"
+	$rpc_py bdev_compress_set_pmd -p "$pmd"
 	if [ -z "$1" ]; then
 		$rpc_py bdev_compress_create -b lvs0/lv0 -p /tmp/pmem
 	else
@@ -86,9 +86,9 @@ mkdir -p /tmp/pmem
 run_bdevperf 32 4096 3
 run_bdevperf 32 4096 3 512
 run_bdevperf 32 4096 3 4096
+run_bdevio
 
 if [ $RUN_NIGHTLY -eq 1 ]; then
-	run_bdevio
 	run_bdevperf 64 16384 30
 
 	# run perf on nvmf target w/compressed vols

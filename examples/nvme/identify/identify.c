@@ -1,34 +1,6 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation. All rights reserved.
  *   Copyright (c) 2020 Mellanox Technologies LTD. All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "spdk/stdinc.h"
@@ -1671,23 +1643,66 @@ print_controller(struct spdk_nvme_ctrlr *ctrlr, const struct spdk_nvme_transport
 		unsigned ps = features[SPDK_NVME_FEAT_POWER_MANAGEMENT].result & 0x1F;
 		printf("Power Management\n");
 		printf("================\n");
-		printf("Number of Power States:      %u\n", cdata->npss + 1);
-		printf("Current Power State:         Power State #%u\n", ps);
+		printf("Number of Power States:          %u\n", cdata->npss + 1);
+		printf("Current Power State:             Power State #%u\n", ps);
 		for (i = 0; i <= cdata->npss; i++) {
 			const struct spdk_nvme_power_state psd = cdata->psd[i];
-			printf("Power State #%u:  ", i);
+			printf("Power State #%u:\n", i);
 			if (psd.mps) {
 				/* MP scale is 0.0001 W */
-				printf("Max Power: %u.%04u W\n",
+				printf("  Max Power:                    %u.%04u W\n",
 				       psd.mp / 10000,
 				       psd.mp % 10000);
 			} else {
 				/* MP scale is 0.01 W */
-				printf("Max Power: %3u.%02u W\n",
+				printf("  Max Power:                    %3u.%02u W\n",
 				       psd.mp / 100,
 				       psd.mp % 100);
 			}
-			/* TODO: print other power state descriptor fields */
+			printf("  Non-Operational State:         %s\n",
+			       psd.nops ? "Non-Operation" : "Operational");
+			printf("  Entry Latency:                 ");
+			if (psd.enlat) {
+				printf("%u microseconds\n", psd.enlat);
+			} else {
+				printf("Not Reported\n");
+			}
+			printf("  Exit Latency:                  ");
+			if (psd.exlat) {
+				printf("%u microseconds\n", psd.exlat);
+			} else {
+				printf("Not Reported\n");
+			}
+			printf("  Relative Read Throughput:      %u\n", psd.rrt);
+			printf("  Relative Read Latency:         %u\n", psd.rrl);
+			printf("  Relative Write Throughput:     %u\n", psd.rwt);
+			printf("  Relative Write Latency:        %u\n", psd.rwl);
+			printf("  Idle Power:                    ");
+			switch (psd.ips) {
+			case 1:
+				/* Idle Power scale is 0.0001 W */
+				printf("%u.%04u W\n", psd.idlp / 10000, psd.idlp % 10000);
+				break;
+			case 2:
+				/* Idle Power scale is 0.01 W */
+				printf("%u.%02u W\n", psd.idlp / 100, psd.idlp % 100);
+				break;
+			default:
+				printf(" Not Reported\n");
+			}
+			printf("  Active Power:                  ");
+			switch (psd.aps) {
+			case 1:
+				/* Active Power scale is 0.0001 W */
+				printf("%u.%04u W\n", psd.actp / 10000, psd.actp % 10000);
+				break;
+			case 2:
+				/* Active Power scale is 0.01 W */
+				printf("%u.%02u W\n", psd.actp / 100, psd.actp % 100);
+				break;
+			default:
+				printf(" Not Reported\n");
+			}
 		}
 		printf("Non-Operational Permissive Mode: %s\n",
 		       cdata->ctratt.non_operational_power_state_permissive_mode ? "Supported" : "Not Supported");

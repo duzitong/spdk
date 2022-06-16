@@ -1,35 +1,7 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation. All rights reserved.
  *   Copyright (c) 2020 Mellanox Technologies LTD. All rights reserved.
  *   Copyright (c) 2021, 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
@@ -58,6 +30,12 @@
 #define NVME_TCP_HPDA_DEFAULT			0
 #define NVME_TCP_MAX_R2T_DEFAULT		1
 #define NVME_TCP_PDU_H2C_MIN_DATA_SIZE		4096
+
+/*
+ * Maximum value of transport_ack_timeout used by TCP controller
+ */
+#define NVME_TCP_CTRLR_MAX_TRANSPORT_ACK_TIMEOUT	31
+
 
 /* NVMe TCP transport extensions for spdk_nvme_ctrlr */
 struct nvme_tcp_ctrlr {
@@ -314,6 +292,8 @@ fail:
 	return -ENOMEM;
 }
 
+static void nvme_tcp_qpair_abort_reqs(struct spdk_nvme_qpair *qpair, uint32_t dnr);
+
 static void
 nvme_tcp_ctrlr_disconnect_qpair(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_qpair *qpair)
 {
@@ -345,10 +325,9 @@ nvme_tcp_ctrlr_disconnect_qpair(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_
 		TAILQ_REMOVE(&tqpair->send_queue, pdu, tailq);
 	}
 
+	nvme_tcp_qpair_abort_reqs(qpair, 0);
 	nvme_transport_ctrlr_disconnect_qpair_done(qpair);
 }
-
-static void nvme_tcp_qpair_abort_reqs(struct spdk_nvme_qpair *qpair, uint32_t dnr);
 
 static int
 nvme_tcp_ctrlr_delete_io_qpair(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_qpair *qpair)
@@ -402,9 +381,14 @@ _pdu_write_done(void *cb_arg, int err)
 	 * response to a PDU completing here. However, to attempt to make forward progress
 	 * the qpair needs to be polled and we can't rely on another network event to make
 	 * that happen. Add it to a list of qpairs to poll regardless of network activity
-	 * here. */
-	if (tqpair->qpair.poll_group && !STAILQ_EMPTY(&tqpair->qpair.queued_req) &&
-	    !tqpair->needs_poll) {
+	 * here.
+	 * Besides, when tqpair state is NVME_TCP_QPAIR_STATE_FABRIC_CONNECT_POLL or
+	 * NVME_TCP_QPAIR_STATE_INITIALIZING, need to add it to needs_poll list too to make
+	 * forward progress in case that the resources are released after icreq's or CONNECT's
+	 * resp is processed. */
+	if (tqpair->qpair.poll_group && !tqpair->needs_poll && (!STAILQ_EMPTY(&tqpair->qpair.queued_req) ||
+			tqpair->state == NVME_TCP_QPAIR_STATE_FABRIC_CONNECT_POLL ||
+			tqpair->state == NVME_TCP_QPAIR_STATE_INITIALIZING)) {
 		pgroup = nvme_tcp_poll_group(tqpair->qpair.poll_group);
 
 		TAILQ_INSERT_TAIL(&pgroup->needs_poll, tqpair, link);
@@ -476,6 +460,7 @@ pdu_data_crc32_compute(struct nvme_tcp_pdu *pdu)
 		}
 
 		crc32c = nvme_tcp_pdu_calc_data_digest(pdu);
+		crc32c = crc32c ^ SPDK_CRC32C_XOR;
 		MAKE_DIGEST_WORD(pdu->data_digest, crc32c);
 	}
 
@@ -1119,22 +1104,23 @@ nvme_tcp_pdu_payload_handle(struct nvme_tcp_qpair *tqpair,
 			    uint32_t *reaped)
 {
 	int rc = 0;
-	struct nvme_tcp_pdu *pdu;
+	struct nvme_tcp_pdu *pdu = tqpair->recv_pdu;
 	uint32_t crc32c;
 	struct nvme_tcp_poll_group *tgroup;
-	struct nvme_tcp_req *tcp_req;
+	struct nvme_tcp_req *tcp_req = pdu->req;
 
 	assert(tqpair->recv_state == NVME_TCP_PDU_RECV_STATE_AWAIT_PDU_PAYLOAD);
-	pdu = tqpair->recv_pdu;
-
 	SPDK_DEBUGLOG(nvme, "enter\n");
 
-	tcp_req = pdu->req;
-	/* Increase the expected data offset */
-	tcp_req->expected_datao += pdu->data_len;
+	/* The request can be NULL, e.g. in case of C2HTermReq */
+	if (spdk_likely(tcp_req != NULL)) {
+		tcp_req->expected_datao += pdu->data_len;
+	}
 
 	/* check data digest if need */
 	if (pdu->ddgst_enable) {
+		/* But if the data digest is enabled, tcp_req cannot be NULL */
+		assert(tcp_req != NULL);
 		tgroup = nvme_tcp_poll_group(tqpair->qpair.poll_group);
 		/* Only suport this limitated case for the first step */
 		if ((nvme_qpair_get_state(&tqpair->qpair) >= NVME_QPAIR_CONNECTED) &&
@@ -1158,6 +1144,7 @@ nvme_tcp_pdu_payload_handle(struct nvme_tcp_qpair *tqpair,
 		}
 
 		crc32c = nvme_tcp_pdu_calc_data_digest(pdu);
+		crc32c = crc32c ^ SPDK_CRC32C_XOR;
 		rc = MATCH_DIGEST_WORD(pdu->data_digest, crc32c);
 		if (rc == 0) {
 			SPDK_ERRLOG("data digest error on tqpair=(%p) with pdu=%p\n", tqpair, pdu);
@@ -1926,6 +1913,9 @@ nvme_tcp_qpair_connect_sock(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_qpai
 	spdk_sock_get_default_opts(&opts);
 	opts.priority = ctrlr->trid.priority;
 	opts.zcopy = !nvme_qpair_is_admin_queue(qpair);
+	if (ctrlr->opts.transport_ack_timeout) {
+		opts.ack_timeout = 1ULL << ctrlr->opts.transport_ack_timeout;
+	}
 	tqpair->sock = spdk_sock_connect_ext(ctrlr->trid.traddr, port, NULL, &opts);
 	if (!tqpair->sock) {
 		SPDK_ERRLOG("sock connection error of tqpair=%p with addr=%s, port=%ld\n",
@@ -2118,6 +2108,12 @@ static struct spdk_nvme_ctrlr *nvme_tcp_ctrlr_construct(const struct spdk_nvme_t
 
 	tctrlr->ctrlr.opts = *opts;
 	tctrlr->ctrlr.trid = *trid;
+
+	if (opts->transport_ack_timeout > NVME_TCP_CTRLR_MAX_TRANSPORT_ACK_TIMEOUT) {
+		SPDK_NOTICELOG("transport_ack_timeout exceeds max value %d, use max value\n",
+			       NVME_TCP_CTRLR_MAX_TRANSPORT_ACK_TIMEOUT);
+		tctrlr->ctrlr.opts.transport_ack_timeout = NVME_TCP_CTRLR_MAX_TRANSPORT_ACK_TIMEOUT;
+	}
 
 	rc = nvme_ctrlr_construct(&tctrlr->ctrlr);
 	if (rc != 0) {

@@ -1,35 +1,7 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation. All rights reserved.
  *   Copyright (c) 2020 Mellanox Technologies LTD. All rights reserved.
  *   Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "spdk/stdinc.h"
@@ -320,6 +292,8 @@ spdk_sock_connect_ext(const char *ip, int port, char *_impl_name, struct spdk_so
 	struct spdk_sock *sock;
 	struct spdk_sock_opts opts_local;
 	const char *impl_name = NULL;
+	struct spdk_sock_impl_opts impl_opts = {};
+	size_t len;
 
 	if (opts == NULL) {
 		SPDK_ERRLOG("the opts should not be NULL pointer\n");
@@ -346,6 +320,10 @@ spdk_sock_connect_ext(const char *ip, int port, char *_impl_name, struct spdk_so
 			sock->net_impl = impl;
 			TAILQ_INIT(&sock->queued_reqs);
 			TAILQ_INIT(&sock->pending_reqs);
+
+			len = sizeof(struct spdk_sock_impl_opts);
+			spdk_sock_impl_get_opts(impl->name, &impl_opts, &len);
+			sock->zerocopy_threshold = impl_opts.zerocopy_threshold;
 			return sock;
 		}
 	}
@@ -407,6 +385,8 @@ struct spdk_sock *
 spdk_sock_accept(struct spdk_sock *sock)
 {
 	struct spdk_sock *new_sock;
+	struct spdk_sock_impl_opts impl_opts = {};
+	size_t len;
 
 	new_sock = sock->net_impl->accept(sock);
 	if (new_sock != NULL) {
@@ -416,6 +396,10 @@ spdk_sock_accept(struct spdk_sock *sock)
 		new_sock->net_impl = sock->net_impl;
 		TAILQ_INIT(&new_sock->queued_reqs);
 		TAILQ_INIT(&new_sock->pending_reqs);
+
+		len = sizeof(struct spdk_sock_impl_opts);
+		spdk_sock_impl_get_opts(sock->net_impl->name, &impl_opts, &len);
+		new_sock->zerocopy_threshold = impl_opts.zerocopy_threshold;
 	}
 
 	return new_sock;
@@ -850,6 +834,7 @@ spdk_sock_write_config_json(struct spdk_json_write_ctx *w)
 			spdk_json_write_named_uint32(w, "enable_placement_id", opts.enable_placement_id);
 			spdk_json_write_named_bool(w, "enable_zerocopy_send_server", opts.enable_zerocopy_send_server);
 			spdk_json_write_named_bool(w, "enable_zerocopy_send_client", opts.enable_zerocopy_send_client);
+			spdk_json_write_named_uint32(w, "zerocopy_threshold", opts.zerocopy_threshold);
 			spdk_json_write_object_end(w);
 			spdk_json_write_object_end(w);
 		} else {

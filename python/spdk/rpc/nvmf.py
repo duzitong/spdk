@@ -1,8 +1,6 @@
-from .helpers import deprecated_alias
 from .cmd_parser import *
 
 
-@deprecated_alias('set_nvmf_target_max_subsystems')
 def nvmf_set_max_subsystems(client,
                             max_subsystems=None):
     """Set NVMe-oF target options.
@@ -19,7 +17,6 @@ def nvmf_set_max_subsystems(client,
     return client.call('nvmf_set_max_subsystems', params)
 
 
-@deprecated_alias('set_nvmf_target_config')
 def nvmf_set_config(client,
                     passthru_identify_ctrlr=None,
                     poll_groups_mask=None,
@@ -121,6 +118,7 @@ def nvmf_create_transport(client, **params):
         control_msg_num: The number of control messages per poll group - TCP specific (optional)
         disable_mappable_bar0: disable client mmap() of BAR0 - VFIO-USER specific (optional)
         disable_adaptive_irq: Disable adaptive interrupt feature - VFIO-USER specific (optional)
+        disable_shadow_doorbells: disable shadow doorbell support - VFIO-USER specific (optional)
         acceptor_poll_rate: Acceptor poll period in microseconds (optional)
     Returns:
         True or False
@@ -133,7 +131,6 @@ def nvmf_create_transport(client, **params):
     return client.call('nvmf_create_transport', params)
 
 
-@deprecated_alias('get_nvmf_transports')
 def nvmf_get_transports(client, trtype=None, tgt_name=None):
     """Get list of NVMe-oF transports.
     Args:
@@ -155,7 +152,6 @@ def nvmf_get_transports(client, trtype=None, tgt_name=None):
     return client.call('nvmf_get_transports', params)
 
 
-@deprecated_alias('get_nvmf_subsystems')
 def nvmf_get_subsystems(client, nqn=None, tgt_name=None):
     """Get list of NVMe-oF subsystems.
     Args:
@@ -177,7 +173,6 @@ def nvmf_get_subsystems(client, nqn=None, tgt_name=None):
     return client.call('nvmf_get_subsystems', params)
 
 
-@deprecated_alias('nvmf_subsystem_create')
 def nvmf_create_subsystem(client,
                           nqn,
                           serial_number,
@@ -483,7 +478,6 @@ def nvmf_subsystem_allow_any_host(client, nqn, disable, tgt_name=None):
     return client.call('nvmf_subsystem_allow_any_host', params)
 
 
-@deprecated_alias('delete_nvmf_subsystem')
 def nvmf_delete_subsystem(client, nqn, tgt_name=None):
     """Delete an existing NVMe-oF subsystem.
 

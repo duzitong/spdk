@@ -1,35 +1,7 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation. All rights reserved.
  *   Copyright (c) 2019-2021 Mellanox Technologies LTD. All rights reserved.
  *   Copyright (c) 2021, 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
@@ -404,21 +376,13 @@ nvme_rdma_calloc(size_t nmemb, size_t size)
 		return NULL;
 	}
 
-	if (!g_nvme_hooks.get_rkey) {
-		return calloc(nmemb, size);
-	} else {
-		return spdk_zmalloc(nmemb * size, 0, NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
-	}
+	return spdk_zmalloc(nmemb * size, 0, NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
 }
 
 static inline void
 nvme_rdma_free(void *buf)
 {
-	if (!g_nvme_hooks.get_rkey) {
-		free(buf);
-	} else {
-		spdk_free(buf);
-	}
+	spdk_free(buf);
 }
 
 static int nvme_rdma_ctrlr_delete_io_qpair(struct spdk_nvme_ctrlr *ctrlr,
@@ -569,7 +533,7 @@ nvme_rdma_poll_events(struct nvme_rdma_ctrlr *rctrlr)
 	struct rdma_event_channel	*channel = rctrlr->cm_channel;
 
 	STAILQ_FOREACH_SAFE(entry, &rctrlr->pending_cm_events, link, tmp) {
-		event_qpair = nvme_rdma_qpair(entry->evt->id->context);
+		event_qpair = entry->evt->id->context;
 		if (event_qpair->evt == NULL) {
 			event_qpair->evt = entry->evt;
 			STAILQ_REMOVE(&rctrlr->pending_cm_events, entry, nvme_rdma_cm_event_entry, link);
@@ -578,7 +542,7 @@ nvme_rdma_poll_events(struct nvme_rdma_ctrlr *rctrlr)
 	}
 
 	while (rdma_get_cm_event(channel, &event) == 0) {
-		event_qpair = nvme_rdma_qpair(event->id->context);
+		event_qpair = event->id->context;
 		if (event_qpair->evt == NULL) {
 			event_qpair->evt = event;
 		} else {
@@ -815,7 +779,7 @@ nvme_rdma_qpair_init(struct nvme_rdma_qpair *rqpair)
 
 	rctrlr->pd = rqpair->rdma_qp->qp->pd;
 
-	rqpair->cm_id->context = &rqpair->qpair;
+	rqpair->cm_id->context = rqpair;
 
 	return 0;
 }
@@ -1970,7 +1934,7 @@ nvme_rdma_qpair_destroy(struct nvme_rdma_qpair *rqpair)
 	if (qpair->ctrlr != NULL) {
 		rctrlr = nvme_rdma_ctrlr(qpair->ctrlr);
 		STAILQ_FOREACH_SAFE(entry, &rctrlr->pending_cm_events, link, tmp) {
-			if (nvme_rdma_qpair(entry->evt->id->context) == rqpair) {
+			if (entry->evt->id->context == rqpair) {
 				STAILQ_REMOVE(&rctrlr->pending_cm_events, entry, nvme_rdma_cm_event_entry, link);
 				rdma_ack_cm_event(entry->evt);
 				STAILQ_INSERT_HEAD(&rctrlr->free_cm_events, entry, link);
@@ -1994,12 +1958,16 @@ nvme_rdma_qpair_destroy(struct nvme_rdma_qpair *rqpair)
 	}
 }
 
+static void nvme_rdma_qpair_abort_reqs(struct spdk_nvme_qpair *qpair, uint32_t dnr);
+
 static int
 nvme_rdma_qpair_disconnected(struct nvme_rdma_qpair *rqpair, int ret)
 {
 	struct spdk_nvme_qpair *qpair = &rqpair->qpair;
 
 	nvme_rdma_qpair_destroy(rqpair);
+
+	nvme_rdma_qpair_abort_reqs(&rqpair->qpair, 0);
 
 	if (ret) {
 		SPDK_DEBUGLOG(nvme, "Target did not respond to qpair disconnect.\n");
@@ -2178,8 +2146,6 @@ nvme_rdma_stale_conn_retry(struct nvme_rdma_qpair *rqpair)
 	return 0;
 }
 
-static void nvme_rdma_qpair_abort_reqs(struct spdk_nvme_qpair *qpair, uint32_t dnr);
-
 static int
 nvme_rdma_ctrlr_delete_io_qpair(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_qpair *qpair)
 {
@@ -2187,6 +2153,15 @@ nvme_rdma_ctrlr_delete_io_qpair(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_
 
 	assert(qpair != NULL);
 	rqpair = nvme_rdma_qpair(qpair);
+
+	if (rqpair->state != NVME_RDMA_QPAIR_STATE_EXITED) {
+		int rc __attribute__((unused));
+
+		/* qpair was removed from the poll group while the disconnect is not finished.
+		 * Destroy rdma resources forcefully. */
+		rc = nvme_rdma_qpair_disconnected(rqpair, 0);
+		assert(rc == 0);
+	}
 
 	nvme_rdma_qpair_abort_reqs(qpair, 0);
 	nvme_qpair_deinit(qpair);
@@ -3160,6 +3135,10 @@ const struct spdk_nvme_transport_ops rdma_ops = {
 	.ctrlr_set_reg_8 = nvme_fabric_ctrlr_set_reg_8,
 	.ctrlr_get_reg_4 = nvme_fabric_ctrlr_get_reg_4,
 	.ctrlr_get_reg_8 = nvme_fabric_ctrlr_get_reg_8,
+	.ctrlr_set_reg_4_async = nvme_fabric_ctrlr_set_reg_4_async,
+	.ctrlr_set_reg_8_async = nvme_fabric_ctrlr_set_reg_8_async,
+	.ctrlr_get_reg_4_async = nvme_fabric_ctrlr_get_reg_4_async,
+	.ctrlr_get_reg_8_async = nvme_fabric_ctrlr_get_reg_8_async,
 
 	.ctrlr_get_max_xfer_size = nvme_rdma_ctrlr_get_max_xfer_size,
 	.ctrlr_get_max_sges = nvme_rdma_ctrlr_get_max_sges,

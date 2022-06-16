@@ -151,6 +151,8 @@ export SPDK_AUTOTEST_X
 export SPDK_TEST_RAID5
 : ${SPDK_TEST_URING=0}
 export SPDK_TEST_URING
+: ${SPDK_TEST_USDT=0}
+export SPDK_TEST_USDT
 : ${SPDK_TEST_USE_IGB_UIO:=0}
 export SPDK_TEST_USE_IGB_UIO
 : ${SPDK_TEST_SCHEDULER:=0}
@@ -368,6 +370,10 @@ function get_config_params() {
 	# for options with dependencies but no test flag, set them here
 	if [ -f /usr/include/infiniband/verbs.h ]; then
 		config_params+=' --with-rdma'
+	fi
+
+	if [ $SPDK_TEST_USDT -eq 1 ]; then
+		config_params+=" --with-usdt"
 	fi
 
 	if [ $(uname -s) == "FreeBSD" ]; then
@@ -629,7 +635,7 @@ function create_test_list() {
 	# First search all scripts in main SPDK directory.
 	completion=$(grep -shI -d skip --include="*.sh" -e "run_test " $rootdir/*)
 	# Follow up with search in test directory recursively.
-	completion+=$(grep -rshI --include="*.sh" --exclude="autotest_common.sh" -e "run_test " $rootdir/test)
+	completion+=$(grep -rshI --include="*.sh" --exclude="*autotest_common.sh" -e "run_test " $rootdir/test)
 	printf "%s" "$completion" | grep -v "#" \
 		| sed 's/^.*run_test/run_test/' | awk '{print $2}' \
 		| sed 's/\"//g' | sort > $output_dir/all_tests.txt || true
@@ -1040,11 +1046,11 @@ function waitforserial() {
 		nvme_device_counter=$2
 	fi
 
-	# Wait initially for min 2s to make sure all devices are ready for use. It seems
+	# Wait initially for min 4s to make sure all devices are ready for use. It seems
 	# that we may be racing with a kernel where in some cases immediate disconnect may
 	# leave dangling subsystem with no-op block devices which can't be used nor removed
 	# (unless kernel is rebooted) and which start to negatively affect all the tests.
-	sleep 2
+	sleep 4
 	while ((i++ <= 15)); do
 		nvme_devices=$(lsblk -l -o NAME,SERIAL | grep -c "$1")
 		((nvme_devices == nvme_device_counter)) && return 0

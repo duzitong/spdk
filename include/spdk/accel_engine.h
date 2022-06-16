@@ -1,34 +1,6 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation.
  *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /** \file
@@ -54,7 +26,9 @@ enum accel_opcode {
 	ACCEL_OPC_COMPARE		= 3,
 	ACCEL_OPC_CRC32C		= 4,
 	ACCEL_OPC_COPY_CRC32C		= 5,
-	ACCEL_OPC_LAST			= 6,
+	ACCEL_OPC_COMPRESS		= 6,
+	ACCEL_OPC_DECOMPRESS		= 7,
+	ACCEL_OPC_LAST			= 8,
 };
 
 /**
@@ -246,6 +220,48 @@ int spdk_accel_submit_copy_crc32cv(struct spdk_io_channel *ch, void *dst, struct
 				   uint32_t iovcnt, uint32_t *crc_dst, uint32_t seed,
 				   int flags, spdk_accel_completion_cb cb_fn, void *cb_arg);
 
+/**
+ * Build and submit a memory compress request.
+ *
+ * This function will build the compress descriptor and submit it.
+ *
+ * \param ch I/O channel associated with this call
+ * \param dst Destination to compress to.
+ * \param src Source to read from.
+ * \param nbytes_dst Length in bytes of output buffer.
+ * \param nbytes_src Length in bytes of input buffer.
+ * \param output_size The size of the compressed data
+ * \param flags Flags, optional flags that can vary per operation.
+ * \param cb_fn Callback function which will be called when the request is complete.
+ * \param cb_arg Opaque value which will be passed back as the arg parameter in
+ * the completion callback.
+ *
+ * \return 0 on success, negative errno on failure.
+ */
+int spdk_accel_submit_compress(struct spdk_io_channel *ch, void *dst, void *src,
+			       uint64_t nbytes_dst, uint64_t nbytes_src, uint32_t *output_size,
+			       int flags, spdk_accel_completion_cb cb_fn, void *cb_arg);
+
+/**
+ * Build and submit a memory decompress request.
+ *
+ * This function will build the decompress descriptor and submit it.
+ *
+ * \param ch I/O channel associated with this call
+ * \param dst Destination. Must be large enough to hold decompressed data.
+ * \param src Source to read from.
+ * \param nbytes_dst Length in bytes of output buffer.
+ * \param nbytes_src Length in bytes of input buffer.
+ * \param flags Flags, optional flags that can vary per operation.
+ * \param cb_fn Callback function which will be called when the request is complete.
+ * \param cb_arg Opaque value which will be passed back as the arg parameter in
+ * the completion callback.
+ *
+ * \return 0 on success, negative errno on failure.
+ */
+int spdk_accel_submit_decompress(struct spdk_io_channel *ch, void *dst, void *src,
+				 uint64_t nbytes_dst, uint64_t nbytes_src, int flags,
+				 spdk_accel_completion_cb cb_fn, void *cb_arg);
 
 struct spdk_json_write_ctx;
 

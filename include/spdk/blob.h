@@ -1,35 +1,7 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation.
  *   All rights reserved.
  *   Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /** \file
@@ -149,6 +121,21 @@ struct spdk_bs_dev_cb_args {
 	void			*cb_arg;
 };
 
+/**
+ * Structure with optional IO request parameters
+ * The content of this structure must be valid until the IO request is completed
+ */
+struct spdk_blob_ext_io_opts {
+	/** Size of this structure in bytes */
+	size_t size;
+	/** Memory domain which describes payload in this IO request. */
+	struct spdk_memory_domain *memory_domain;
+	/** Context to be passed to memory domain operations */
+	void *memory_domain_ctx;
+	/** Optional user context */
+	void *user_ctx;
+};
+
 struct spdk_bs_dev {
 	/* Create a new channel which is a software construct that is used
 	 * to submit I/O. */
@@ -180,6 +167,18 @@ struct spdk_bs_dev {
 		       struct iovec *iov, int iovcnt,
 		       uint64_t lba, uint32_t lba_count,
 		       struct spdk_bs_dev_cb_args *cb_args);
+
+	void (*readv_ext)(struct spdk_bs_dev *dev, struct spdk_io_channel *channel,
+			  struct iovec *iov, int iovcnt,
+			  uint64_t lba, uint32_t lba_count,
+			  struct spdk_bs_dev_cb_args *cb_args,
+			  struct spdk_blob_ext_io_opts *ext_io_opts);
+
+	void (*writev_ext)(struct spdk_bs_dev *dev, struct spdk_io_channel *channel,
+			   struct iovec *iov, int iovcnt,
+			   uint64_t lba, uint32_t lba_count,
+			   struct spdk_bs_dev_cb_args *cb_args,
+			   struct spdk_blob_ext_io_opts *ext_io_opts);
 
 	void (*flush)(struct spdk_bs_dev *dev, struct spdk_io_channel *channel,
 		      struct spdk_bs_dev_cb_args *cb_args);
@@ -781,6 +780,44 @@ void spdk_blob_io_writev(struct spdk_blob *blob, struct spdk_io_channel *channel
 void spdk_blob_io_readv(struct spdk_blob *blob, struct spdk_io_channel *channel,
 			struct iovec *iov, int iovcnt, uint64_t offset, uint64_t length,
 			spdk_blob_op_complete cb_fn, void *cb_arg);
+
+/**
+ * Write the data described by 'iov' to 'length' io_units beginning at 'offset' io_units
+ * into the blob. Accepts extended IO request options
+ *
+ * \param blob Blob to write.
+ * \param channel I/O channel used to submit requests.
+ * \param iov The pointer points to an array of iovec structures.
+ * \param iovcnt The number of buffers.
+ * \param offset Offset is in io units from the beginning of the blob.
+ * \param length Size of data in io units.
+ * \param cb_fn Called when the operation is complete.
+ * \param cb_arg Argument passed to function cb_fn.
+ * \param io_opts Optional extended IO request options
+ */
+void spdk_blob_io_writev_ext(struct spdk_blob *blob, struct spdk_io_channel *channel,
+			     struct iovec *iov, int iovcnt, uint64_t offset, uint64_t length,
+			     spdk_blob_op_complete cb_fn, void *cb_arg,
+			     struct spdk_blob_ext_io_opts *io_opts);
+
+/**
+ * Read 'length' io_units starting at 'offset' io_units into the blob into the memory
+ * described by 'iov'. Accepts extended IO request options
+ *
+ * \param blob Blob to read.
+ * \param channel I/O channel used to submit requests.
+ * \param iov The pointer points to an array of iovec structures.
+ * \param iovcnt The number of buffers.
+ * \param offset Offset is in io units from the beginning of the blob.
+ * \param length Size of data in io units.
+ * \param cb_fn Called when the operation is complete.
+ * \param cb_arg Argument passed to function cb_fn.
+ * \param io_opts Optional extended IO request options
+ */
+void spdk_blob_io_readv_ext(struct spdk_blob *blob, struct spdk_io_channel *channel,
+			    struct iovec *iov, int iovcnt, uint64_t offset, uint64_t length,
+			    spdk_blob_op_complete cb_fn, void *cb_arg,
+			    struct spdk_blob_ext_io_opts *io_opts);
 
 /**
  * Unmap 'length' io_units beginning at 'offset' io_units on the blob as unused. Unmapped

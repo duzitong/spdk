@@ -1,34 +1,6 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation.
  *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef SPDK_VHOST_INTERNAL_H
@@ -40,6 +12,7 @@
 #include <rte_vhost.h>
 
 #include "spdk_internal/vhost_user.h"
+#include "spdk/bdev.h"
 #include "spdk/log.h"
 #include "spdk/util.h"
 #include "spdk/rpc.h"
@@ -75,7 +48,8 @@
 	(1ULL << VIRTIO_F_NOTIFY_ON_EMPTY) | \
 	(1ULL << VIRTIO_RING_F_EVENT_IDX) | \
 	(1ULL << VIRTIO_RING_F_INDIRECT_DESC) | \
-	(1ULL << VIRTIO_F_RING_PACKED))
+	(1ULL << VIRTIO_F_RING_PACKED) | \
+	(1ULL << VIRTIO_F_ANY_LAYOUT))
 
 #define SPDK_VHOST_DISABLED_FEATURES ((1ULL << VIRTIO_RING_F_EVENT_IDX) | \
 	(1ULL << VIRTIO_F_NOTIFY_ON_EMPTY))
@@ -246,7 +220,14 @@ struct spdk_vhost_user_dev_backend {
 	int (*stop_session)(struct spdk_vhost_session *vsession);
 };
 
+enum vhost_backend_type {
+	VHOST_BACKEND_BLK = 0,
+	VHOST_BACKEND_SCSI,
+};
+
 struct spdk_vhost_dev_backend {
+	enum vhost_backend_type type;
+
 	int (*vhost_get_config)(struct spdk_vhost_dev *vdev, uint8_t *config, uint32_t len);
 	int (*vhost_set_config)(struct spdk_vhost_dev *vdev, uint8_t *config,
 				uint32_t offset, uint32_t size, uint32_t flags);
@@ -415,6 +396,7 @@ vhost_dev_has_feature(struct spdk_vhost_session *vsession, unsigned feature_id)
 }
 
 int vhost_dev_register(struct spdk_vhost_dev *vdev, const char *name, const char *mask_str,
+		       const struct spdk_json_val *params,
 		       const struct spdk_vhost_dev_backend *backend,
 		       const struct spdk_vhost_user_dev_backend *user_backend);
 int vhost_dev_unregister(struct spdk_vhost_dev *vdev);
@@ -512,6 +494,10 @@ int remove_vhost_controller(struct spdk_vhost_dev *vdev);
 struct spdk_io_channel *vhost_blk_get_io_channel(struct spdk_vhost_dev *vdev);
 void vhost_blk_put_io_channel(struct spdk_io_channel *ch);
 
+/* The spdk_bdev pointer should only be used to retrieve
+ * the device properties, ex. number of blocks or I/O type supported. */
+struct spdk_bdev *vhost_blk_get_bdev(struct spdk_vhost_dev *vdev);
+
 /* Function calls from vhost.c to rte_vhost_user.c,
  * shall removed once virtio transport abstraction is complete. */
 int vhost_user_session_set_coalescing(struct spdk_vhost_dev *dev,
@@ -522,7 +508,113 @@ int vhost_user_dev_register(struct spdk_vhost_dev *vdev, const char *name,
 			    struct spdk_cpuset *cpumask, const struct spdk_vhost_user_dev_backend *user_backend);
 int vhost_user_dev_unregister(struct spdk_vhost_dev *vdev);
 int vhost_user_init(void);
-typedef void (*vhost_fini_cb)(void *ctx);
-void vhost_user_fini(vhost_fini_cb vhost_cb);
+void vhost_user_fini(spdk_vhost_fini_cb vhost_cb);
+
+int virtio_blk_construct_ctrlr(struct spdk_vhost_dev *vdev, const char *address,
+			       struct spdk_cpuset *cpumask, const struct spdk_json_val *params,
+			       const struct spdk_vhost_user_dev_backend *user_backend);
+int virtio_blk_destroy_ctrlr(struct spdk_vhost_dev *vdev);
+
+struct spdk_vhost_blk_task;
+
+typedef void (*virtio_blk_request_cb)(uint8_t status, struct spdk_vhost_blk_task *task,
+				      void *cb_arg);
+
+struct spdk_vhost_blk_task {
+	struct spdk_bdev_io *bdev_io;
+	virtio_blk_request_cb cb;
+	void *cb_arg;
+
+	volatile uint8_t *status;
+
+	/* for io wait */
+	struct spdk_bdev_io_wait_entry bdev_io_wait;
+	struct spdk_io_channel *bdev_io_wait_ch;
+	struct spdk_vhost_dev *bdev_io_wait_vdev;
+
+	/** Number of bytes that were written. */
+	uint32_t used_len;
+	uint16_t iovcnt;
+	struct iovec iovs[SPDK_VHOST_IOVS_MAX];
+
+	/** Size of whole payload in bytes */
+	uint32_t payload_size;
+};
+
+int virtio_blk_process_request(struct spdk_vhost_dev *vdev, struct spdk_io_channel *ch,
+			       struct spdk_vhost_blk_task *task, virtio_blk_request_cb cb, void *cb_arg);
+
+typedef void (*bdev_event_cb_complete)(struct spdk_vhost_dev *vdev, void *ctx);
+
+#define SPDK_VIRTIO_BLK_TRSTRING_MAX_LEN 32
+
+struct spdk_virtio_blk_transport_ops {
+	/**
+	 * Transport name
+	 */
+	char name[SPDK_VIRTIO_BLK_TRSTRING_MAX_LEN];
+
+	/**
+	 * Create a transport for the given transport opts
+	 */
+	struct spdk_virtio_blk_transport *(*create)(const struct spdk_json_val *params);
+
+	/**
+	 * Dump transport-specific opts into JSON
+	 */
+	void (*dump_opts)(struct spdk_virtio_blk_transport *transport, struct spdk_json_write_ctx *w);
+
+	/**
+	 * Destroy the transport
+	 */
+	int (*destroy)(struct spdk_virtio_blk_transport *transport,
+		       spdk_vhost_fini_cb cb_fn);
+
+	/**
+	 * Create vhost block controller
+	 */
+	int (*create_ctrlr)(struct spdk_vhost_dev *vdev, struct spdk_cpuset *cpumask,
+			    const char *address, const struct spdk_json_val *params,
+			    void *custom_opts);
+
+	/**
+	 * Destroy vhost block controller
+	 */
+	int (*destroy_ctrlr)(struct spdk_vhost_dev *vdev);
+
+	/*
+	 * Signal removal of the bdev.
+	 */
+	void (*bdev_event)(enum spdk_bdev_event_type type, struct spdk_vhost_dev *vdev,
+			   bdev_event_cb_complete cb, void *cb_arg);
+};
+
+struct spdk_virtio_blk_transport {
+	const struct spdk_virtio_blk_transport_ops	*ops;
+	TAILQ_ENTRY(spdk_virtio_blk_transport)		tailq;
+};
+
+struct virtio_blk_transport_ops_list_element {
+	struct spdk_virtio_blk_transport_ops			ops;
+	TAILQ_ENTRY(virtio_blk_transport_ops_list_element)	link;
+};
+
+void virtio_blk_transport_register(const struct spdk_virtio_blk_transport_ops *ops);
+int virtio_blk_transport_create(const char *transport_name, const struct spdk_json_val *params);
+int virtio_blk_transport_destroy(struct spdk_virtio_blk_transport *transport,
+				 spdk_vhost_fini_cb cb_fn);
+
+const struct spdk_virtio_blk_transport_ops *
+virtio_blk_get_transport_ops(const char *transport_name);
+
+
+/*
+ * Macro used to register new transports.
+ */
+#define SPDK_VIRTIO_BLK_TRANSPORT_REGISTER(name, transport_ops) \
+static void __attribute__((constructor)) _virtio_blk_transport_register_##name(void) \
+{ \
+	virtio_blk_transport_register(transport_ops); \
+}\
 
 #endif /* SPDK_VHOST_INTERNAL_H */

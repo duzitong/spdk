@@ -1,37 +1,9 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation.
  *   All rights reserved.
  *
  *   Copyright (c) 2019-2021 Mellanox Technologies LTD. All rights reserved.
  *   Copyright (c) 2021, 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "spdk/stdinc.h"
@@ -1270,6 +1242,7 @@ register_ns(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_ns *ns)
 		printf("WARNING: IO size %u (-o) is not a multiple of nsid %u sector size %u."
 		       " Removing this ns from test\n", g_io_size_bytes, spdk_nvme_ns_get_id(ns), entry->block_size);
 		g_warn = true;
+		spdk_zipf_free(&entry->zipf);
 		free(entry);
 		return;
 	}
@@ -1673,6 +1646,7 @@ work_fn(void *arg)
 				TAILQ_FOREACH(ns_ctx, &worker->ns_ctx, link) {
 					memset(&ns_ctx->stats, 0, sizeof(ns_ctx->stats));
 					ns_ctx->stats.min_tsc = UINT64_MAX;
+					spdk_histogram_data_reset(ns_ctx->histogram);
 				}
 
 				if (worker->lcore == g_main_core && isatty(STDOUT_FILENO)) {
@@ -1743,7 +1717,7 @@ static void usage(char *program_name)
 	printf("\t[-w, --io-pattern <pattern> io pattern type, must be one of\n");
 	printf("\t\t(read, write, randread, randwrite, rw, randrw)]\n");
 	printf("\t[-M, --rwmixread <0-100> rwmixread (100 for reads, 0 for writes)]\n");
-	printf("\t[-F, --zipf <theta> use zipf distribution for random I/O\n");
+	printf("\t[-F, --zipf <theta> use zipf distribution for random I/O]\n");
 	printf("\t[-L, --enable-sw-latency-tracking enable latency tracking via sw, default: disabled]\n");
 	printf("\t\t-L for latency summary, -LL for detailed histogram\n");
 	printf("\t[-l, --enable-ssd-latency-tracking enable latency tracking via ssd (if supported), default: disabled]\n");
@@ -1780,7 +1754,7 @@ static void usage(char *program_name)
 	printf("\t[-C, --max-completion-per-poll <val> max completions per poll]\n");
 	printf("\t\t(default: 0 - unlimited)\n");
 	printf("\t[-i, --shmem-grp-id <id> shared memory group ID]\n");
-	printf("\t[-Q, --skip-errors log I/O errors every N times (default: 1)\n");
+	printf("\t[-Q, --skip-errors log I/O errors every N times (default: 1)]\n");
 	printf("\t");
 	spdk_log_usage(stdout, "-T");
 	printf("\t[-V, --enable-vmd enable VMD enumeration]\n");
@@ -1796,7 +1770,7 @@ static void usage(char *program_name)
 #ifdef DEBUG
 	printf("\t[-G, --enable-debug enable debug logging]\n");
 #else
-	printf("\t[-G, --enable-debug enable debug logging (flag disabled, must reconfigure with --enable-debug)\n");
+	printf("\t[-G, --enable-debug enable debug logging (flag disabled, must reconfigure with --enable-debug)]\n");
 #endif
 	printf("\t[--transport-stats dump transport statistics]\n");
 	printf("\t[--iova-mode <mode> specify DPDK IOVA mode: va|pa]\n");

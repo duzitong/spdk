@@ -442,7 +442,7 @@ Example response:
     "framework_monitor_context_switch",
     "spdk_kill_instance",
     "ioat_scan_accel_engine",
-    "idxd_scan_accel_engine",
+    "dsa_scan_accel_engine",
     "bdev_virtio_attach_controller",
     "bdev_virtio_scsi_get_devices",
     "bdev_virtio_detach_controller",
@@ -1493,9 +1493,9 @@ Example response:
 
 ## Acceleration Framework Layer {#jsonrpc_components_accel_fw}
 
-### idxd_scan_accel_engine {#rpc_idxd_scan_accel_engine}
+### dsa_scan_accel_engine {#rpc_dsa_scan_accel_engine}
 
-Set config and enable idxd accel engine offload.
+Set config and enable dsa accel engine offload.
 This feature is considered as experimental.
 
 #### Parameters
@@ -1514,7 +1514,38 @@ Example request:
     "config_kernel_mode": false
   },
   "jsonrpc": "2.0",
-  "method": "idxd_scan_accel_engine",
+  "method": "dsa_scan_accel_engine",
+  "id": 1
+}
+~~~
+
+Example response:
+
+~~~json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": true
+}
+~~~
+
+### iaa_scan_accel_engine {#rpc_iaa_scan_accel_engine}
+
+Enable IAA accel engine offload.
+This feature is considered as experimental.
+
+#### Parameters
+
+None
+
+#### Example
+
+Example request:
+
+~~~json
+{
+  "jsonrpc": "2.0",
+  "method": "iaa_scan_accel_engine",
   "id": 1
 }
 ~~~
@@ -2959,10 +2990,11 @@ io_queue_requests          | Optional | number      | The number of requests all
 delay_cmd_submit           | Optional | boolean     | Enable delaying NVMe command submission to allow batching of multiple commands. Default: `true`.
 transport_retry_count      | Optional | number      | The number of attempts per I/O in the transport layer before an I/O fails.
 bdev_retry_count           | Optional | number      | The number of attempts per I/O in the bdev layer before an I/O fails. -1 means infinite retries.
-transport_ack_timeout      | Optional | number      | Time to wait ack until packet retransmission. RDMA specific. Range 0-31 where 0 is driver-specific default value.
+transport_ack_timeout      | Optional | number      | Time to wait ack until retransmission for RDMA or connection close for TCP. Range 0-31 where 0 means use default.
 ctrlr_loss_timeout_sec     | Optional | number      | Time to wait until ctrlr is reconnected before deleting ctrlr.  -1 means infinite reconnects. 0 means no reconnect.
 reconnect_delay_sec        | Optional | number      | Time to delay a reconnect trial. 0 means no reconnect.
 fast_io_fail_timeout_sec   | Optional | number      | Time to wait until ctrlr is reconnected before failing I/O to ctrlr. 0 means no such timeout.
+disable_auto_failback      | Optional | boolean     | Disable automatic failback. The RPC bdev_nvme_set_preferred_path can be used to do manual failback.
 
 #### Example
 
@@ -3153,7 +3185,8 @@ Example response:
       "trid": {
         "trtype": "PCIe",
         "traddr": "0000:05:00.0"
-      }
+      },
+      "cntlid": 0
     }
   ]
 }
@@ -3273,6 +3306,7 @@ adrfam                     | Optional | string      | NVMe-oF target adrfam: ipv
 trsvcid                    | Optional | string      | NVMe-oF target trsvcid: port number
 hostnqn                    | Optional | string      | NVMe-oF target hostnqn
 wait_for_attach            | Optional | bool        | Wait to complete until all discovered NVM subsystems are attached
+attach_timeout_ms          | Optional | number      | Time to wait until the discovery and all discovered NVM subsystems are attached
 ctrlr_loss_timeout_sec     | Optional | number      | Time to wait until ctrlr is reconnected before deleting ctrlr.  -1 means infinite reconnects. 0 means no reconnect.
 reconnect_delay_sec        | Optional | number      | Time to delay a reconnect trial. 0 means no reconnect.
 fast_io_fail_timeout_sec   | Optional | number      | Time to wait until ctrlr is reconnected before failing I/O to ctrlr. 0 means no such timeout.
@@ -3329,6 +3363,169 @@ Example request:
   "id": 1,
   "params": {
     "name": "nvme_auto"
+  }
+}
+~~~
+
+Example response:
+
+~~~json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": true
+}
+~~~
+
+### bdev_nvme_get_discovery_info {#rpc_bdev_nvme_get_discovery_info}
+
+Get information about the discovery service.
+
+#### Example
+
+Example request:
+~~~json
+{
+  "jsonrpc": "2.0",
+  "method": "bdev_nvme_get_discovery_info",
+  "id": 1
+}
+~~~
+
+Example response:
+
+~~~json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": [
+    {
+      "name": "nvme-disc",
+      "trid": {
+        "trtype": "TCP",
+        "adrfam": "IPv4",
+        "traddr": "127.0.0.1",
+        "trsvcid": "8009",
+        "subnqn": "nqn.2014-08.org.nvmexpress.discovery"
+      },
+      "referrals": []
+    }
+  ]
+}
+~~~
+
+### bdev_nvme_get_io_paths {#rpc_bdev_nvme_get_io_paths}
+
+Display all or the specified NVMe bdev's active I/O paths.
+
+#### Parameters
+
+Name                    | Optional | Type        | Description
+----------------------- | -------- | ----------- | -----------
+name                    | Optional | string      | Name of the NVMe bdev
+
+#### Example
+
+Example request:
+
+~~~json
+{
+  "jsonrpc": "2.0",
+  "method": "bdev_nvme_get_io_paths",
+  "id": 1,
+  "params": {
+    "name": "Nvme0n1"
+  }
+}
+~~~
+
+Example response:
+
+~~~json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "poll_groups": [
+      {
+        "thread": "app_thread",
+        "io_paths": [
+          {
+            "bdev_name": "Nvme0n1",
+            "cntlid": 0,
+            "current": true,
+            "connected": true,
+            "accessible": true
+          }
+        ]
+      }
+    ]
+  }
+}
+~~~
+
+### bdev_nvme_set_preferred_path {#rpc_bdev_nvme_set_preferred_path}
+
+Set the preferred I/O path for an NVMe bdev in multipath mode.
+
+NOTE: This RPC does not support NVMe bdevs in failover mode.
+
+#### Parameters
+
+Name                    | Optional | Type        | Description
+----------------------- | -------- | ----------- | -----------
+name                    | Required | string      | Name of the NVMe bdev
+cntlid                  | Required | number      | NVMe-oF controller ID
+
+#### Example
+
+Example request:
+
+~~~json
+{
+  "jsonrpc": "2.0",
+  "method": "bdev_nvme_set_preferred_path",
+  "id": 1,
+  "params": {
+    "name": "Nvme0n1",
+    "cntlid": 0
+  }
+}
+~~~
+
+Example response:
+
+~~~json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": true
+}
+~~~
+
+### bdev_nvme_set_multipath_policy {#rpc_bdev_nvme_set_multipath_policy}
+
+Set multipath policy of the NVMe bdev in multipath mode.
+
+#### Parameters
+
+Name                    | Optional | Type        | Description
+----------------------- | -------- | ----------- | -----------
+name                    | Required | string      | Name of the NVMe bdev
+policy                  | Required | string      | Multipath policy: active_active or active_passive
+
+#### Example
+
+Example request:
+
+~~~json
+{
+  "jsonrpc": "2.0",
+  "method": "bdev_nvme_set_multipath_policy",
+  "id": 1,
+  "params": {
+    "name": "Nvme0n1",
+    "policy": "active_passive"
   }
 }
 ~~~
@@ -6318,6 +6515,7 @@ no_wr_batching              | Optional | boolean | Disable work requests batchin
 control_msg_num             | Optional | number  | The number of control messages per poll group (TCP only)
 disable_mappable_bar0       | Optional | boolean | disable client mmap() of BAR0 (VFIO-USER only)
 disable_adaptive_irq        | Optional | boolean | Disable adaptive interrupt feature (VFIO-USER only)
+disable_shadow_doorbells    | Optional | boolean | disable shadow doorbell support (VFIO-USER only)
 zcopy                       | Optional | boolean | Use zero-copy operations if the underlying bdev supports them
 
 #### Example
@@ -7378,6 +7576,41 @@ Example response:
 }
 ~~~
 
+### virtio_blk_create_transport {#rpc_virtio_blk_create_transport}
+
+Create virtio blk transport.
+
+#### Parameters
+
+Name                    | Optional | Type        | Description
+----------------------- | -------- | ----------- | -----------
+name                    | Required | string      | Transport name
+
+#### Example
+
+Example request:
+
+~~~json
+{
+  "params": {
+    "name": "vhost_user_blk"
+  },
+  "jsonrpc": "2.0",
+  "method": "virtio_blk_create_transport",
+  "id": 1
+}
+~~~
+
+Example response:
+
+~~~json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": true
+}
+~~~
+
 ### vhost_create_blk_controller {#rpc_vhost_create_blk_controller}
 
 Create vhost block controller
@@ -7393,6 +7626,7 @@ ctrlr                   | Required | string      | Controller name
 bdev_name               | Required | string      | Name of bdev to expose block device
 readonly                | Optional | boolean     | If true, this target will be read only (default: false)
 cpumask                 | Optional | string      | @ref cpu_mask for this controller
+transport               | Optional | string      | virtio blk transport name (default: vhost_user_blk)
 
 #### Example
 
@@ -9145,7 +9379,8 @@ Example response:
     "enable_quickack": true,
     "enable_placement_id": 0,
     "enable_zerocopy_send_server": true,
-    "enable_zerocopy_send_client": false
+    "enable_zerocopy_send_client": false,
+    "zerocopy_threshold": 0
   }
 }
 ~~~
@@ -9166,6 +9401,8 @@ enable_quick_ack            | Optional | boolean     | Enable or disable quick A
 enable_placement_id         | Optional | number      | Enable or disable placement_id. 0:disable,1:incoming_napi,2:incoming_cpu
 enable_zerocopy_send_server | Optional | boolean     | Enable or disable zero copy on send for server sockets
 enable_zerocopy_send_client | Optional | boolean     | Enable or disable zero copy on send for client sockets
+zerocopy_threshold          | Optional | number      | Set zerocopy_threshold in bytes. A consecutive sequence of requests' iovecs
+that fall below this threshold may be sent without zerocopy flag set
 
 #### Response
 
@@ -9188,7 +9425,8 @@ Example request:
     "enable_quick_ack": false,
     "enable_placement_id": 0,
     "enable_zerocopy_send_server": true,
-    "enable_zerocopy_send_client": false
+    "enable_zerocopy_send_client": false,
+    "zerocopy_threshold": 10240
   }
 }
 ~~~

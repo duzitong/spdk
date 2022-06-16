@@ -1,35 +1,7 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation. All rights reserved.
  *   Copyright (c) 2019-2021 Mellanox Technologies LTD. All rights reserved.
  *   Copyright (c) 2021, 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /** \file
@@ -227,9 +199,10 @@ struct spdk_nvme_ctrlr_opts {
 	bool disable_error_logging;
 
 	/**
-	 * It is used for RDMA transport
+	 * It is used for both RDMA & TCP transport
 	 * Specify the transport ACK timeout. The value should be in range 0-31 where 0 means
-	 * use driver-specific default value. The value is applied to each RDMA qpair
+	 * use driver-specific default value.
+	 * RDMA: The value is applied to each qpair
 	 * and affects the time that qpair waits for transport layer acknowledgement
 	 * until it retransmits a packet. The value should be chosen empirically
 	 * to meet the needs of a particular application. A low value means less time
@@ -237,6 +210,11 @@ struct spdk_nvme_ctrlr_opts {
 	 * A large value can increase the time the connection is closed.
 	 * The value of ACK timeout is calculated according to the formula
 	 * 4.096 * 2^(transport_ack_timeout) usec.
+	 * TCP: The value is applied to each qpair
+	 * and affects the time that qpair waits for transport layer acknowledgement
+	 * until connection is closed forcefully.
+	 * The value of ACK timeout is calculated according to the formula
+	 * 2^(transport_ack_timeout) msec.
 	 */
 	uint8_t transport_ack_timeout;
 
@@ -1068,6 +1046,7 @@ int spdk_nvme_ctrlr_reset(struct spdk_nvme_ctrlr *ctrlr);
 
 /**
  * Inform the driver that the application is preparing to reset the specified NVMe controller.
+ * (Deprecated, please use spdk_nvme_ctrlr_disconnect() before freeing I/O qpairs instead.)
  *
  * This function allows the driver to make decisions knowing that a reset is about to happen.
  * For example, the pcie transport in this case could skip sending DELETE_CQ and DELETE_SQ
@@ -1361,7 +1340,7 @@ bool spdk_nvme_ctrlr_is_feature_supported(struct spdk_nvme_ctrlr *ctrlr, uint8_t
 typedef void (*spdk_nvme_cmd_cb)(void *ctx, const struct spdk_nvme_cpl *cpl);
 
 /**
- * Signature for callback function invoked when an asynchronous error request
+ * Signature for callback function invoked when an asynchronous event request
  * command is completed.
  *
  * \param aer_cb_arg Context specified by spdk_nvme_register_aer_callback().
@@ -1376,7 +1355,7 @@ typedef void (*spdk_nvme_aer_cb)(void *aer_cb_arg,
  * given NVMe controller.
  *
  * \param ctrlr Opaque handle to NVMe controller.
- * \param aer_cb_fn Callback function invoked when an asynchronous error request
+ * \param aer_cb_fn Callback function invoked when an asynchronous event request
  * command is completed.
  * \param aer_cb_arg Argument passed to callback function.
  */

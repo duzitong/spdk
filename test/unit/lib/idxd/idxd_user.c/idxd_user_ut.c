@@ -1,34 +1,6 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation.
  *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "spdk_cunit.h"
@@ -146,7 +118,6 @@ static int
 test_idxd_group_config(void)
 {
 	struct spdk_user_idxd_device user_idxd = {};
-	struct spdk_idxd_device *idxd = &user_idxd.idxd;
 	uint64_t wqs[MAX_ARRAY_SIZE] = {};
 	uint64_t engines[MAX_ARRAY_SIZE] = {};
 	union idxd_group_flags flags[MAX_ARRAY_SIZE] = {};
@@ -165,7 +136,7 @@ test_idxd_group_config(void)
 	grptbl = (struct idxd_grptbl *)((uint8_t *)user_idxd.registers +
 					(user_idxd.registers->offsets.grpcfg * IDXD_TABLE_OFFSET_MULT));
 
-	rc = idxd_group_config(idxd);
+	rc = idxd_group_config(&user_idxd);
 	CU_ASSERT(rc == 0);
 	for (i = 0 ; i < user_idxd.registers->groupcap.num_groups; i++) {
 		wqs[i] = spdk_mmio_read_8(&grptbl->group[i].wqs[0]);
@@ -195,12 +166,12 @@ test_idxd_reset_dev(void)
 	fake_cmd_status_reg = &user_idxd.registers->cmdsts;
 
 	/* Test happy path */
-	rc = idxd_reset_dev(&user_idxd.idxd);
+	rc = idxd_reset_dev(&user_idxd);
 	CU_ASSERT(rc == 0);
 
 	/* Test error reported path */
 	fake_cmd_status_reg->err = 1;
-	rc = idxd_reset_dev(&user_idxd.idxd);
+	rc = idxd_reset_dev(&user_idxd);
 	CU_ASSERT(rc == -EINVAL);
 
 	free(user_idxd.registers);
@@ -221,18 +192,18 @@ test_idxd_wait_cmd(void)
 	fake_cmd_status_reg = &user_idxd.registers->cmdsts;
 
 	/* Test happy path. */
-	rc = idxd_wait_cmd(&user_idxd.idxd, timeout);
+	rc = idxd_wait_cmd(&user_idxd, timeout);
 	CU_ASSERT(rc == 0);
 
 	/* Setup up our fake register to set the error bit. */
 	fake_cmd_status_reg->err = 1;
-	rc = idxd_wait_cmd(&user_idxd.idxd, timeout);
+	rc = idxd_wait_cmd(&user_idxd, timeout);
 	CU_ASSERT(rc == -EINVAL);
 	fake_cmd_status_reg->err = 0;
 
 	/* Setup up our fake register to set the active bit. */
 	fake_cmd_status_reg->active = 1;
-	rc = idxd_wait_cmd(&user_idxd.idxd, timeout);
+	rc = idxd_wait_cmd(&user_idxd, timeout);
 	CU_ASSERT(rc == -EBUSY);
 
 	free(user_idxd.registers);

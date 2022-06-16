@@ -1,35 +1,7 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation.
  *   All rights reserved.
  *   Copyright (c) 2021, 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "vbdev_compress.h"
@@ -66,7 +38,7 @@ static int g_mbuf_offset;
 #define NUM_MAX_INFLIGHT_OPS 128
 #define DEFAULT_WINDOW_SIZE 15
 /* We need extra mbufs per operation to accommodate host buffers that
- *  span a 2MB boundary.
+ *  span a physical page boundary.
  */
 #define MAX_MBUFS_PER_OP (REDUCE_MAX_IOVECS * 2)
 #define CHUNK_SIZE (1024 * 16)
@@ -496,7 +468,7 @@ _setup_compress_mbuf(struct rte_mbuf **mbufs, int *mbuf_total, uint64_t *total_l
 			rte_pktmbuf_chain(mbufs[0], mbufs[mbuf_index]);
 		}
 
-		/* If we crossed 2 2MB boundary we need another mbuf for the remainder */
+		/* If we crossed 2 physical pages boundary we need another mbuf for the remainder */
 		if (remainder > 0) {
 			/* allocate an mbuf at the end of the array */
 			rc = rte_pktmbuf_alloc_bulk(g_mbuf_mp,
@@ -590,7 +562,7 @@ _compress_operation(struct spdk_reduce_backing_dev *backing_dev, struct iovec *s
 	}
 	if (!comp_bdev->backing_dev.sgl_in && src_mbufs[0]->next != NULL) {
 		if (src_iovcnt == 1) {
-			SPDK_ERRLOG("Src buffer crosses 2MB boundary but driver %s doesn't support SGL input\n",
+			SPDK_ERRLOG("Src buffer crosses physical page boundary but driver %s doesn't support SGL input\n",
 				    comp_bdev->drv_name);
 		} else {
 			SPDK_ERRLOG("Driver %s doesn't support SGL input\n", comp_bdev->drv_name);
@@ -610,7 +582,7 @@ _compress_operation(struct spdk_reduce_backing_dev *backing_dev, struct iovec *s
 	}
 	if (!comp_bdev->backing_dev.sgl_out && dst_mbufs[0]->next != NULL) {
 		if (dst_iovcnt == 1) {
-			SPDK_ERRLOG("Dst buffer crosses 2MB boundary but driver %s doesn't support SGL output\n",
+			SPDK_ERRLOG("Dst buffer crosses physical page boundary but driver %s doesn't support SGL output\n",
 				    comp_bdev->drv_name);
 		} else {
 			SPDK_ERRLOG("Driver %s doesn't support SGL output\n", comp_bdev->drv_name);

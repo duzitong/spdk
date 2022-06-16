@@ -1,34 +1,6 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright(c) Intel Corporation. All rights reserved.
  *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "spdk/stdinc.h"
@@ -47,6 +19,9 @@ static struct spdk_cpuset g_vhost_core_mask;
 static TAILQ_HEAD(, spdk_vhost_dev) g_vhost_devices = TAILQ_HEAD_INITIALIZER(
 			g_vhost_devices);
 static pthread_mutex_t g_vhost_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static TAILQ_HEAD(, spdk_virtio_blk_transport) g_virtio_blk_transports = TAILQ_HEAD_INITIALIZER(
+			g_virtio_blk_transports);
 
 struct spdk_vhost_dev *
 spdk_vhost_dev_next(struct spdk_vhost_dev *vdev)
@@ -114,8 +89,24 @@ vhost_parse_core_mask(const char *mask, struct spdk_cpuset *cpumask)
 	return 0;
 }
 
+TAILQ_HEAD(, virtio_blk_transport_ops_list_element)
+g_spdk_virtio_blk_transport_ops = TAILQ_HEAD_INITIALIZER(g_spdk_virtio_blk_transport_ops);
+
+const struct spdk_virtio_blk_transport_ops *
+virtio_blk_get_transport_ops(const char *transport_name)
+{
+	struct virtio_blk_transport_ops_list_element *ops;
+	TAILQ_FOREACH(ops, &g_spdk_virtio_blk_transport_ops, link) {
+		if (strcasecmp(transport_name, ops->ops.name) == 0) {
+			return &ops->ops;
+		}
+	}
+	return NULL;
+}
+
 int
 vhost_dev_register(struct spdk_vhost_dev *vdev, const char *name, const char *mask_str,
+		   const struct spdk_json_val *params,
 		   const struct spdk_vhost_dev_backend *backend,
 		   const struct spdk_vhost_user_dev_backend *user_backend)
 {
@@ -145,8 +136,11 @@ vhost_dev_register(struct spdk_vhost_dev *vdev, const char *name, const char *ma
 	}
 
 	vdev->backend = backend;
-
-	rc = vhost_user_dev_register(vdev, name, &cpumask, user_backend);
+	if (vdev->backend->type == VHOST_BACKEND_SCSI) {
+		rc = vhost_user_dev_register(vdev, name, &cpumask, user_backend);
+	} else {
+		rc = virtio_blk_construct_ctrlr(vdev, name, &cpumask, params, user_backend);
+	}
 	if (rc != 0) {
 		free(vdev->name);
 		return rc;
@@ -163,7 +157,11 @@ vhost_dev_unregister(struct spdk_vhost_dev *vdev)
 {
 	int rc;
 
-	rc = vhost_user_dev_unregister(vdev);
+	if (vdev->backend->type == VHOST_BACKEND_SCSI) {
+		rc = vhost_user_dev_unregister(vdev);
+	} else {
+		rc = virtio_blk_destroy_ctrlr(vdev);
+	}
 	if (rc != 0) {
 		return rc;
 	}
@@ -221,7 +219,7 @@ spdk_vhost_unlock(void)
 }
 
 void
-spdk_vhost_init(spdk_vhost_init_cb init_cb)
+spdk_vhost_scsi_init(spdk_vhost_init_cb init_cb)
 {
 	uint32_t i;
 	int ret = 0;
@@ -242,7 +240,7 @@ spdk_vhost_init(spdk_vhost_init_cb init_cb)
 static spdk_vhost_fini_cb g_fini_cb;
 
 static void
-vhost_fini(void *arg1)
+vhost_fini(void)
 {
 	struct spdk_vhost_dev *vdev, *tmp;
 
@@ -260,11 +258,51 @@ vhost_fini(void *arg1)
 }
 
 void
-spdk_vhost_fini(spdk_vhost_fini_cb fini_cb)
+spdk_vhost_blk_init(spdk_vhost_init_cb init_cb)
+{
+	uint32_t i;
+	int ret = 0;
+
+	ret = virtio_blk_transport_create("vhost_user_blk", NULL);
+	if (ret != 0) {
+		goto out;
+	}
+
+	spdk_cpuset_zero(&g_vhost_core_mask);
+	SPDK_ENV_FOREACH_CORE(i) {
+		spdk_cpuset_set_cpu(&g_vhost_core_mask, i, true);
+	}
+out:
+	init_cb(ret);
+}
+
+void
+spdk_vhost_scsi_fini(spdk_vhost_fini_cb fini_cb)
 {
 	g_fini_cb = fini_cb;
 
 	vhost_user_fini(vhost_fini);
+}
+
+static void
+virtio_blk_transports_destroy(void)
+{
+	struct spdk_virtio_blk_transport *transport = TAILQ_FIRST(&g_virtio_blk_transports);
+
+	if (transport == NULL) {
+		g_fini_cb();
+		return;
+	}
+	TAILQ_REMOVE(&g_virtio_blk_transports, transport, tailq);
+	virtio_blk_transport_destroy(transport, virtio_blk_transports_destroy);
+}
+
+void
+spdk_vhost_blk_fini(spdk_vhost_fini_cb fini_cb)
+{
+	g_fini_cb = fini_cb;
+
+	virtio_blk_transports_destroy();
 }
 
 static void
@@ -291,7 +329,7 @@ vhost_user_config_json(struct spdk_vhost_dev *vdev, struct spdk_json_write_ctx *
 }
 
 void
-spdk_vhost_config_json(struct spdk_json_write_ctx *w)
+spdk_vhost_scsi_config_json(struct spdk_json_write_ctx *w)
 {
 	struct spdk_vhost_dev *vdev;
 
@@ -300,11 +338,92 @@ spdk_vhost_config_json(struct spdk_json_write_ctx *w)
 	spdk_vhost_lock();
 	for (vdev = spdk_vhost_dev_next(NULL); vdev != NULL;
 	     vdev = spdk_vhost_dev_next(vdev)) {
-		vhost_user_config_json(vdev, w);
+		if (vdev->backend->type == VHOST_BACKEND_SCSI) {
+			vhost_user_config_json(vdev, w);
+		}
 	}
 	spdk_vhost_unlock();
 
 	spdk_json_write_array_end(w);
+}
+
+void
+spdk_vhost_blk_config_json(struct spdk_json_write_ctx *w)
+{
+	struct spdk_vhost_dev *vdev;
+
+	spdk_json_write_array_begin(w);
+
+	spdk_vhost_lock();
+	for (vdev = spdk_vhost_dev_next(NULL); vdev != NULL;
+	     vdev = spdk_vhost_dev_next(vdev)) {
+		if (vdev->backend->type == VHOST_BACKEND_BLK) {
+			vhost_user_config_json(vdev, w);
+		}
+	}
+	spdk_vhost_unlock();
+
+	spdk_json_write_array_end(w);
+}
+
+void
+virtio_blk_transport_register(const struct spdk_virtio_blk_transport_ops *ops)
+{
+	struct virtio_blk_transport_ops_list_element *new_ops;
+
+	if (virtio_blk_get_transport_ops(ops->name) != NULL) {
+		SPDK_ERRLOG("Double registering virtio blk transport type %s.\n", ops->name);
+		assert(false);
+		return;
+	}
+
+	new_ops = calloc(1, sizeof(*new_ops));
+	if (new_ops == NULL) {
+		SPDK_ERRLOG("Unable to allocate memory to register new transport type %s.\n", ops->name);
+		assert(false);
+		return;
+	}
+
+	new_ops->ops = *ops;
+
+	TAILQ_INSERT_TAIL(&g_spdk_virtio_blk_transport_ops, new_ops, link);
+}
+
+int
+virtio_blk_transport_create(const char *transport_name,
+			    const struct spdk_json_val *params)
+{
+	const struct spdk_virtio_blk_transport_ops *ops = NULL;
+	struct spdk_virtio_blk_transport *transport;
+
+	TAILQ_FOREACH(transport, &g_virtio_blk_transports, tailq) {
+		if (strcasecmp(transport->ops->name, transport_name) == 0) {
+			return -EEXIST;
+		}
+	}
+
+	ops = virtio_blk_get_transport_ops(transport_name);
+	if (!ops) {
+		SPDK_ERRLOG("Transport type '%s' unavailable.\n", transport_name);
+		return -ENOENT;
+	}
+
+	transport = ops->create(params);
+	if (!transport) {
+		SPDK_ERRLOG("Unable to create new transport of type %s\n", transport_name);
+		return -EPERM;
+	}
+
+	transport->ops = ops;
+	TAILQ_INSERT_TAIL(&g_virtio_blk_transports, transport, tailq);
+	return 0;
+}
+
+int
+virtio_blk_transport_destroy(struct spdk_virtio_blk_transport *transport,
+			     spdk_vhost_fini_cb cb_fn)
+{
+	return transport->ops->destroy(transport, cb_fn);
 }
 
 SPDK_LOG_REGISTER_COMPONENT(vhost)

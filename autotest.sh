@@ -28,8 +28,12 @@ fi
 if [ $(uname -s) = Linux ]; then
 	old_core_pattern=$(< /proc/sys/kernel/core_pattern)
 	mkdir -p "$output_dir/coredumps"
-	# set core_pattern to a known value to avoid ABRT, systemd-coredump, etc.
-	echo "|$rootdir/scripts/core-collector.sh %P %s %t %c $output_dir/coredumps" > /proc/sys/kernel/core_pattern
+	# Set core_pattern to a known value to avoid ABRT, systemd-coredump, etc.
+	# Dump the $output_dir path to a file so collector can pick it up while executing.
+	# We don't set in in the core_pattern command line because of the string length limitation
+	# of 128 bytes. See 'man core 5' for details.
+	echo "|$rootdir/scripts/core-collector.sh %P %s %t %c" > /proc/sys/kernel/core_pattern
+	echo "$output_dir/coredumps" > "$rootdir/.coredump_path"
 
 	# make sure nbd (network block device) driver is loaded if it is available
 	# this ensures that when tests need to use nbd, it will be fully initialized
@@ -209,6 +213,7 @@ if [ $SPDK_RUN_FUNCTIONAL_TEST -eq 1 ]; then
 		fi
 
 		run_test "nvme_rpc" test/nvme/nvme_rpc.sh
+		run_test "nvme_rpc_timeouts" test/nvme/nvme_rpc_timeouts.sh
 		# Only test hotplug without ASAN enabled. Since if it is
 		# enabled, it catches SEGV earlier than our handler which
 		# breaks the hotplug logic.
@@ -346,6 +351,7 @@ if hash lcov && ! [[ "$CC_TYPE" == *"clang"* ]]; then
 	$LCOV -q -a $out/cov_base.info -a $out/cov_test.info -o $out/cov_total.info
 	$LCOV -q -r $out/cov_total.info '*/dpdk/*' -o $out/cov_total.info
 	$LCOV -q -r $out/cov_total.info '/usr/*' -o $out/cov_total.info
-	git clean -f "*.gcda"
+	owner=$(stat -c "%U" .)
+	sudo -u $owner git clean -f "*.gcda"
 	rm -f cov_base.info cov_test.info OLD_STDOUT OLD_STDERR
 fi

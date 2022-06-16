@@ -58,6 +58,13 @@ run_test "nvmf_nmic" test/nvmf/target/nmic.sh "${TEST_ARGS[@]}"
 run_test "nvmf_fio_target" test/nvmf/target/fio.sh "${TEST_ARGS[@]}"
 run_test "nvmf_bdevio" test/nvmf/target/bdevio.sh "${TEST_ARGS[@]}"
 if [[ $NET_TYPE == phy ]]; then
+	if [ "$SPDK_TEST_NVMF_TRANSPORT" = "tcp" ]; then
+		gather_supported_nvmf_pci_devs
+		TCP_INTERFACE_LIST=("${net_devs[@]}")
+		if ((${#TCP_INTERFACE_LIST[@]} > 0)); then
+			run_test "nvmf_perf_adq" test/nvmf/target/perf_adq.sh "${TEST_ARGS[@]}"
+		fi
+	fi
 	run_test "nvmf_shutdown" test/nvmf/target/shutdown.sh "${TEST_ARGS[@]}"
 	#TODO: disabled due to intermittent failures. Need to triage.
 	# run_test "nvmf_srq_overwhelm" test/nvmf/target/srq_overwhelm.sh $TEST_ARGS
@@ -71,8 +78,15 @@ timing_enter host
 
 run_test "nvmf_identify" test/nvmf/host/identify.sh "${TEST_ARGS[@]}"
 run_test "nvmf_perf" test/nvmf/host/perf.sh "${TEST_ARGS[@]}"
+
 run_test "nvmf_failover" test/nvmf/host/failover.sh "${TEST_ARGS[@]}"
+if [[ $SPDK_TEST_USDT -eq 1 ]]; then
+	run_test "nvmf_multipath" test/nvmf/host/multipath.sh "${TEST_ARGS[@]}"
+fi
 run_test "nvmf_discovery" test/nvmf/host/discovery.sh "${TEST_ARGS[@]}"
+if [[ $SPDK_TEST_USDT -eq 1 ]]; then
+	run_test "nvmf_timeout" test/nvmf/host/timeout.sh "${TEST_ARGS[@]}"
+fi
 
 # TODO: disabled due to intermittent failures (RDMA_CM_EVENT_UNREACHABLE/ETIMEDOUT)
 #run_test test/nvmf/host/identify_kernel_nvmf.sh $TEST_ARGS
