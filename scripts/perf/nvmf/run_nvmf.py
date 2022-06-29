@@ -173,16 +173,19 @@ class Server:
             self.log_print(xps_cmd)
             self.exec_cmd(xps_cmd)
 
+    def reload_driver(self, driver):
+        try:
+            self.exec_cmd(["sudo", "rmmod", driver])
+            self.exec_cmd(["sudo", "modprobe", driver])
+        except CalledProcessError as e:
+            self.log_print("ERROR: failed to reload %s module!" % driver)
+            self.log_print("%s resulted in error: %s" % (e.cmd, e.output))
+
     def adq_configure_nic(self):
         self.log_print("Configuring NIC port settings for ADQ testing...")
 
         # Reload the driver first, to make sure any previous settings are re-set.
-        try:
-            self.exec_cmd(["sudo", "rmmod", "ice"])
-            self.exec_cmd(["sudo", "modprobe", "ice"])
-        except CalledProcessError as e:
-            self.log_print("ERROR: failed to reload ice module!")
-            self.log_print("%s resulted in error: %s" % (e.cmd, e.output))
+        self.reload_driver("ice")
 
         nic_names = [self.get_nic_name_by_ip(n) for n in self.nic_ips]
         for nic in nic_names:
@@ -357,6 +360,7 @@ class Target(Server):
         self.null_block = 0
         self._nics_json_obj = json.loads(self.exec_cmd(["ip", "-j", "address", "show"]))
         self.subsystem_info_list = []
+        self.initiator_info = []
 
         if "null_block_devices" in target_config:
             self.null_block = target_config["null_block_devices"]
@@ -415,6 +419,30 @@ class Target(Server):
                 fh.write(os.path.relpath(os.path.join(root, file)))
         fh.close()
         self.log_print("Done zipping")
+
+    @staticmethod
+    def _chunks(input_list, chunks_no):
+        div, rem = divmod(len(input_list), chunks_no)
+        for i in range(chunks_no):
+            si = (div + 1) * (i if i < rem else rem) + div * (0 if i < rem else i - rem)
+            yield input_list[si:si + (div + 1 if i < rem else div)]
+
+    def spread_bdevs(self, req_disks):
+        # Spread available block devices indexes:
+        # - evenly across available initiator systems
+        # - evenly across available NIC interfaces for
+        #   each initiator
+        # Not NUMA aware.
+        ip_bdev_map = []
+        initiator_chunks = self._chunks(range(0, req_disks), len(self.initiator_info))
+
+        for i, (init, init_chunk) in enumerate(zip(self.initiator_info, initiator_chunks)):
+            self.initiator_info[i]["bdev_range"] = init_chunk
+            init_chunks_list = list(self._chunks(init_chunk, len(init["target_nic_ips"])))
+            for ip, nic_chunk in zip(self.initiator_info[i]["target_nic_ips"], init_chunks_list):
+                for c in nic_chunk:
+                    ip_bdev_map.append((ip, c))
+        return ip_bdev_map
 
     @staticmethod
     def read_json_stats(file):
@@ -585,13 +613,18 @@ class Target(Server):
                 fh.write(row + "\n")
         self.log_print("You can find the test results in the file %s" % os.path.join(results_dir, csv_file))
 
-    def measure_sar(self, results_dir, sar_file_name):
-        self.log_print("Waiting %d delay before measuring SAR stats" % self.sar_delay)
+    def measure_sar(self, results_dir, sar_file_prefix):
         cpu_number = os.cpu_count()
         sar_idle_sum = 0
+        sar_output_file = os.path.join(results_dir, sar_file_prefix + ".txt")
+        sar_cpu_util_file = os.path.join(results_dir, ".".join([sar_file_prefix + "cpu_util", "txt"]))
+
+        self.log_print("Waiting %d seconds for ramp-up to finish before measuring SAR stats" % self.sar_delay)
         time.sleep(self.sar_delay)
+        self.log_print("Starting SAR measurements")
+
         out = self.exec_cmd(["sar", "-P", "ALL", "%s" % self.sar_interval, "%s" % self.sar_count])
-        with open(os.path.join(results_dir, sar_file_name), "w") as fh:
+        with open(os.path.join(results_dir, sar_output_file), "w") as fh:
             for line in out.split("\n"):
                 if "Average" in line:
                     if "CPU" in line:
@@ -603,8 +636,9 @@ class Target(Server):
                         sar_idle_sum += float(line.split()[7])
             fh.write(out)
         sar_cpu_usage = cpu_number * 100 - sar_idle_sum
-        with open(os.path.join(results_dir, sar_file_name), "a") as f:
-            f.write("Total CPU used: " + str(sar_cpu_usage))
+
+        with open(os.path.join(results_dir, sar_cpu_util_file), "w") as f:
+            f.write("%0.2f" % sar_cpu_usage)
 
     def ethtool_after_fio_ramp(self, fio_ramp_time):
         time.sleep(fio_ramp_time//2)
@@ -802,6 +836,7 @@ class Initiator(Server):
                                 r'traddr:\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})',  # get IP address
                                 nvme_discover_output)  # from nvme discovery output
         subsystems = filter(lambda x: x[-1] in address_list, subsystems)
+        subsystems = filter(lambda x: "discovery" not in x[1], subsystems)
         subsystems = list(set(subsystems))
         subsystems.sort(key=lambda x: x[1])
         self.log_print("Found matching subsystems on target side:")
@@ -962,7 +997,7 @@ class KernelTarget(Target):
     def stop(self):
         nvmet_command(self.nvmet_bin, "clear")
 
-    def kernel_tgt_gen_subsystem_conf(self, nvme_list, address_list):
+    def kernel_tgt_gen_subsystem_conf(self, nvme_list):
 
         nvmet_cfg = {
             "ports": [],
@@ -970,53 +1005,46 @@ class KernelTarget(Target):
             "subsystems": [],
         }
 
-        # Split disks between NIC IP's
-        disks_per_ip = int(len(nvme_list) / len(address_list))
-        disk_chunks = [nvme_list[i * disks_per_ip:disks_per_ip + disks_per_ip * i] for i in range(0, len(address_list))]
+        for ip, bdev_num in self.spread_bdevs(len(nvme_list)):
+            port = str(4420 + bdev_num)
+            nqn = "nqn.2018-09.io.spdk:cnode%s" % bdev_num
+            serial = "SPDK00%s" % bdev_num
+            bdev_name = nvme_list[bdev_num]
 
-        # Add remaining drives
-        for i, disk in enumerate(nvme_list[disks_per_ip * len(address_list):]):
-            disk_chunks[i].append(disk)
+            nvmet_cfg["subsystems"].append({
+                "allowed_hosts": [],
+                "attr": {
+                    "allow_any_host": "1",
+                    "serial": serial,
+                    "version": "1.3"
+                },
+                "namespaces": [
+                    {
+                        "device": {
+                            "path": bdev_name,
+                            "uuid": "%s" % uuid.uuid4()
+                        },
+                        "enable": 1,
+                        "nsid": port
+                    }
+                ],
+                "nqn": nqn
+            })
 
-        subsys_no = 1
-        port_no = 0
-        for ip, chunk in zip(address_list, disk_chunks):
-            for disk in chunk:
-                nqn = "nqn.2018-09.io.spdk:cnode%s" % subsys_no
-                nvmet_cfg["subsystems"].append({
-                    "allowed_hosts": [],
-                    "attr": {
-                        "allow_any_host": "1",
-                        "serial": "SPDK00%s" % subsys_no,
-                        "version": "1.3"
-                    },
-                    "namespaces": [
-                        {
-                            "device": {
-                                "path": disk,
-                                "uuid": "%s" % uuid.uuid4()
-                            },
-                            "enable": 1,
-                            "nsid": subsys_no
-                        }
-                    ],
-                    "nqn": nqn
-                })
+            nvmet_cfg["ports"].append({
+                "addr": {
+                    "adrfam": "ipv4",
+                    "traddr": ip,
+                    "trsvcid": port,
+                    "trtype": self.transport
+                },
+                "portid": bdev_num,
+                "referrals": [],
+                "subsystems": [nqn]
+            })
 
-                nvmet_cfg["ports"].append({
-                    "addr": {
-                        "adrfam": "ipv4",
-                        "traddr": ip,
-                        "trsvcid": "%s" % (4420 + port_no),
-                        "trtype": "%s" % self.transport
-                    },
-                    "portid": subsys_no,
-                    "referrals": [],
-                    "subsystems": [nqn]
-                })
-                subsys_no += 1
-                port_no += 1
-                self.subsystem_info_list.append([port_no, nqn, ip])
+            self.subsystem_info_list.append([port, nqn, ip])
+        self.subsys_no = len(self.subsystem_info_list)
 
         with open("kernel.conf", "w") as fh:
             fh.write(json.dumps(nvmet_cfg, indent=2))
@@ -1026,14 +1054,13 @@ class KernelTarget(Target):
 
         if self.null_block:
             print("Configuring with null block device.")
-            null_blk_list = ["/dev/nullb{}".format(x) for x in range(self.null_block)]
-            self.kernel_tgt_gen_subsystem_conf(null_blk_list, self.nic_ips)
-            self.subsys_no = len(null_blk_list)
+            nvme_list = ["/dev/nullb{}".format(x) for x in range(self.null_block)]
         else:
             print("Configuring with NVMe drives.")
             nvme_list = get_nvme_devices()
-            self.kernel_tgt_gen_subsystem_conf(nvme_list, self.nic_ips)
-            self.subsys_no = len(nvme_list)
+
+        self.kernel_tgt_gen_subsystem_conf(nvme_list)
+        self.subsys_no = len(nvme_list)
 
         nvmet_command(self.nvmet_bin, "clear")
         nvmet_command(self.nvmet_bin, "restore kernel.conf")
@@ -1059,7 +1086,8 @@ class SPDKTarget(Target):
         self.max_queue_depth = 128
         self.bpf_proc = None
         self.bpf_scripts = []
-        self.enable_idxd = False
+        self.enable_dsa = False
+        self.scheduler_core_limit = None
 
         if "num_shared_buffers" in target_config:
             self.num_shared_buffers = target_config["num_shared_buffers"]
@@ -1071,11 +1099,13 @@ class SPDKTarget(Target):
             self.dif_insert_strip = target_config["dif_insert_strip"]
         if "bpf_scripts" in target_config:
             self.bpf_scripts = target_config["bpf_scripts"]
-        if "idxd_settings" in target_config:
-            self.enable_idxd = target_config["idxd_settings"]
+        if "dsa_settings" in target_config:
+            self.enable_dsa = target_config["dsa_settings"]
+        if "scheduler_core_limit" in target_config:
+            self.scheduler_core_limit = target_config["scheduler_core_limit"]
 
-        self.log_print("====IDXD settings:====")
-        self.log_print("IDXD enabled: %s" % (self.enable_idxd))
+        self.log_print("====DSA settings:====")
+        self.log_print("DSA enabled: %s" % (self.enable_dsa))
 
     @staticmethod
     def get_num_cores(core_mask):
@@ -1152,40 +1182,28 @@ class SPDKTarget(Target):
 
     def spdk_tgt_add_subsystem_conf(self, ips=None, req_num_disks=None):
         self.log_print("Adding subsystems to config")
-        port = "4420"
         if not req_num_disks:
             req_num_disks = get_nvme_devices_count()
 
-        # Distribute bdevs between provided NICs
-        num_disks = range(0, req_num_disks)
-        if len(num_disks) == 1:
-            disks_per_ip = 1
-        else:
-            disks_per_ip = int(len(num_disks) / len(ips))
-        disk_chunks = [[*num_disks[i * disks_per_ip:disks_per_ip + disks_per_ip * i]] for i in range(0, len(ips))]
+        for ip, bdev_num in self.spread_bdevs(req_num_disks):
+            port = str(4420 + bdev_num)
+            nqn = "nqn.2018-09.io.spdk:cnode%s" % bdev_num
+            serial = "SPDK00%s" % bdev_num
+            bdev_name = "Nvme%sn1" % bdev_num
 
-        # Add remaining drives
-        for i, disk in enumerate(num_disks[disks_per_ip * len(ips):]):
-            disk_chunks[i].append(disk)
-
-        # Create subsystems, add bdevs to namespaces, add listeners
-        for ip, chunk in zip(ips, disk_chunks):
-            for c in chunk:
-                nqn = "nqn.2018-09.io.spdk:cnode%s" % c
-                serial = "SPDK00%s" % c
-                bdev_name = "Nvme%sn1" % c
-                rpc.nvmf.nvmf_create_subsystem(self.client, nqn, serial,
-                                               allow_any_host=True, max_namespaces=8)
-                rpc.nvmf.nvmf_subsystem_add_ns(self.client, nqn, bdev_name)
-
+            rpc.nvmf.nvmf_create_subsystem(self.client, nqn, serial,
+                                           allow_any_host=True, max_namespaces=8)
+            rpc.nvmf.nvmf_subsystem_add_ns(self.client, nqn, bdev_name)
+            for nqn_name in [nqn, "discovery"]:
                 rpc.nvmf.nvmf_subsystem_add_listener(self.client,
-                                                     nqn=nqn,
+                                                     nqn=nqn_name,
                                                      trtype=self.transport,
                                                      traddr=ip,
                                                      trsvcid=port,
                                                      adrfam="ipv4")
+            self.subsystem_info_list.append([port, nqn, ip])
+        self.subsys_no = len(self.subsystem_info_list)
 
-                self.subsystem_info_list.append([port, nqn, ip])
         self.log_print("SPDK NVMeOF subsystem configuration:")
         rpc_client.print_dict(rpc.nvmf.nvmf_get_subsystems(self.client))
 
@@ -1234,11 +1252,11 @@ class SPDKTarget(Target):
             rpc.bdev.bdev_nvme_set_options(self.client, timeout_us=0, action_on_timeout=None,
                                            nvme_adminq_poll_period_us=100000, retry_count=4)
 
-        if self.enable_idxd:
-            rpc.idxd.idxd_scan_accel_engine(self.client, config_kernel_mode=None)
-            self.log_print("Target IDXD accel engine enabled")
+        if self.enable_dsa:
+            rpc.dsa.dsa_scan_accel_engine(self.client, config_kernel_mode=None)
+            self.log_print("Target DSA accel engine enabled")
 
-        rpc.app.framework_set_scheduler(self.client, name=self.scheduler_name)
+        rpc.app.framework_set_scheduler(self.client, name=self.scheduler_name, core_limit=self.scheduler_core_limit)
         rpc.framework_start_init(self.client)
 
         if self.bpf_scripts:
@@ -1496,6 +1514,11 @@ if __name__ == "__main__":
     except FileExistsError:
         pass
 
+    for i in initiators:
+        target_obj.initiator_info.append(
+            {"name": i.name, "target_nic_ips": i.target_nic_ips, "initiator_nic_ips": i.nic_ips}
+        )
+
     # TODO: This try block is definietly too large. Need to break this up into separate
     # logical blocks to reduce size.
     try:
@@ -1523,9 +1546,8 @@ if __name__ == "__main__":
                 t = threading.Thread(target=i.run_fio, args=(cfg, fio_run_num))
                 threads.append(t)
             if target_obj.enable_sar:
-                sar_file_name = "_".join([str(block_size), str(rw), str(io_depth), "sar"])
-                sar_file_name = ".".join([sar_file_name, "txt"])
-                t = threading.Thread(target=target_obj.measure_sar, args=(args.results, sar_file_name))
+                sar_file_prefix = "%s_%s_%s_sar" % (block_size, rw, io_depth)
+                t = threading.Thread(target=target_obj.measure_sar, args=(args.results, sar_file_prefix))
                 threads.append(t)
 
             if target_obj.enable_pcm:
@@ -1567,11 +1589,15 @@ if __name__ == "__main__":
         target_obj.restore_tuned()
         target_obj.restore_services()
         target_obj.restore_sysctl()
+        if target_obj.enable_adq:
+            target_obj.reload_driver("ice")
         for i in initiators:
             i.restore_governor()
             i.restore_tuned()
             i.restore_services()
             i.restore_sysctl()
+            if i.enable_adq:
+                i.reload_driver("ice")
         target_obj.parse_results(args.results, args.csv_filename)
     finally:
         for i in initiators:

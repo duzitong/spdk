@@ -241,23 +241,24 @@ function get_used_bdf_block_devs() {
 }
 
 function collect_devices() {
-	# NVMe, IOAT, IDXD, VIRTIO, VMD
+	# NVMe, IOAT, DSA, IAA, VIRTIO, VMD
 
 	local ids dev_type dev_id bdf bdfs in_use driver
 
 	ids+="PCI_DEVICE_ID_INTEL_IOAT"
-	ids+="|PCI_DEVICE_ID_INTEL_IDXD"
+	ids+="|PCI_DEVICE_ID_INTEL_DSA"
+	ids+="|PCI_DEVICE_ID_INTEL_IAA"
 	ids+="|PCI_DEVICE_ID_VIRTIO"
 	ids+="|PCI_DEVICE_ID_INTEL_VMD"
 	ids+="|SPDK_PCI_CLASS_NVME"
 
-	local -gA nvme_d ioat_d idxd_d virtio_d vmd_d all_devices_d drivers_d
+	local -gA nvme_d ioat_d dsa_d iaa_d virtio_d vmd_d all_devices_d drivers_d
 
 	while read -r _ dev_type dev_id; do
 		bdfs=(${pci_bus_cache["0x8086:$dev_id"]})
 		[[ $dev_type == *NVME* ]] && bdfs=(${pci_bus_cache["$dev_id"]})
 		[[ $dev_type == *VIRT* ]] && bdfs=(${pci_bus_cache["0x1af4:$dev_id"]})
-		[[ $dev_type =~ (NVME|IOAT|IDXD|VIRTIO|VMD) ]] && dev_type=${BASH_REMATCH[1],,}
+		[[ $dev_type =~ (NVME|IOAT|DSA|IAA|VIRTIO|VMD) ]] && dev_type=${BASH_REMATCH[1],,}
 		for bdf in "${bdfs[@]}"; do
 			in_use=0
 			if [[ $1 != status ]]; then
@@ -310,7 +311,8 @@ function collect_driver() {
 	else
 		[[ -n ${nvme_d["$bdf"]} ]] && driver=nvme
 		[[ -n ${ioat_d["$bdf"]} ]] && driver=ioatdma
-		[[ -n ${idxd_d["$bdf"]} ]] && driver=idxd
+		[[ -n ${dsa_d["$bdf"]} ]] && driver=dsa
+		[[ -n ${iaa_d["$bdf"]} ]] && driver=iaa
 		[[ -n ${virtio_d["$bdf"]} ]] && driver=virtio-pci
 		[[ -n ${vmd_d["$bdf"]} ]] && driver=vmd
 	fi 2> /dev/null
@@ -568,11 +570,11 @@ function configure_linux() {
 		fi
 	fi
 
-	if [ ! -e /dev/cpu/0/msr ]; then
+	if [ $(uname -i) == "x86_64" ] && [ ! -e /dev/cpu/0/msr ]; then
 		# Some distros build msr as a module.  Make sure it's loaded to ensure
 		#  DPDK can easily figure out the TSC rate rather than relying on 100ms
 		#  sleeps.
-		modprobe msr || true
+		modprobe msr &> /dev/null || true
 	fi
 }
 
@@ -667,7 +669,8 @@ function status_linux() {
 		desc=""
 		desc=${desc:-${nvme_d["$bdf"]:+NVMe}}
 		desc=${desc:-${ioat_d["$bdf"]:+I/OAT}}
-		desc=${desc:-${idxd_d["$bdf"]:+IDXD}}
+		desc=${desc:-${dsa_d["$bdf"]:+DSA}}
+		desc=${desc:-${iaa_d["$bdf"]:+IAA}}
 		desc=${desc:-${virtio_d["$bdf"]:+virtio}}
 		desc=${desc:-${vmd_d["$bdf"]:+VMD}}
 
@@ -681,19 +684,19 @@ function status_freebsd() {
 	local pci
 
 	status_print() (
+		local type=$1
 		local dev driver
 
-		echo -e "BDF\t\tVendor\tDevice\tDriver"
+		shift
 
 		for pci; do
-			driver=$(pciconf -l "pci$pci")
-			driver=${driver%@*}
-			printf '%s\t%s\t%s\t%s\n' \
+			printf '%-8s %-15s %-6s %-6s %-16s\n' \
+				"$type" \
 				"$pci" \
 				"${pci_ids_vendor["$pci"]}" \
 				"${pci_ids_device["$pci"]}" \
-				"$driver"
-		done | sort -k1,1
+				"${pci_bus_driver["$pci"]}"
+		done | sort -k2,2
 	)
 
 	local contigmem=present
@@ -715,18 +718,16 @@ function status_freebsd() {
 		Buffer Size: $contigmem_buffer_size
 		Num Buffers: $contigmem_num_buffers
 
-		NVMe devices
-		$(status_print "${!nvme_d[@]}")
-
-		I/IOAT DMA
-		$(status_print "${!ioat_d[@]}")
-
-		IDXD DMA
-		$(status_print "${!idxd_d[@]}")
-
-		VMD
-		$(status_print "${!vmd_d[@]}")
 	BSD_INFO
+
+	printf '\n%-8s %-15s %-6s %-6s %-16s\n' \
+		"Type" "BDF" "Vendor" "Device" "Driver" >&2
+
+	status_print "NVMe" "${!nvme_d[@]}"
+	status_print "I/OAT" "${!ioat_d[@]}"
+	status_print "DSA" "${!dsa_d[@]}"
+	status_print "IAA" "${!iaa_d[@]}"
+	status_print "VMD" "${!vmd_d[@]}"
 }
 
 function configure_freebsd_pci() {
@@ -734,7 +735,8 @@ function configure_freebsd_pci() {
 
 	BDFS+=("${!nvme_d[@]}")
 	BDFS+=("${!ioat_d[@]}")
-	BDFS+=("${!idxd_d[@]}")
+	BDFS+=("${!dsa_d[@]}")
+	BDFS+=("${!iaa_d[@]}")
 	BDFS+=("${!vmd_d[@]}")
 
 	# Drop the domain part from all the addresses

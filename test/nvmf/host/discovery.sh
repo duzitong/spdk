@@ -62,6 +62,10 @@ function get_subsystem_paths() {
 	$rpc_py -s $HOST_SOCK bdev_nvme_get_controllers -n $1 | jq -r '.[].ctrlrs[].trid.trsvcid' | sort -n | xargs
 }
 
+function get_discovery_ctrlrs() {
+	$rpc_py -s $HOST_SOCK bdev_nvme_get_discovery_info | jq -r '.[].name' | sort | xargs
+}
+
 # Note that tests need to call get_notification_count and then check $notification_count,
 # because if we use $(get_notification_count), the notify_id gets updated in the subshell.
 notify_id=0
@@ -132,6 +136,25 @@ sleep 1 # Wait a bit to make sure the discovery service has a chance to detect t
 [[ "$(get_bdev_list)" == "" ]]
 get_notification_count
 [[ $notification_count == 2 ]]
+
+# Make sure that it's not possible to start two discovery services with the same name
+$rpc_py -s $HOST_SOCK bdev_nvme_start_discovery -b nvme -t $TEST_TRANSPORT \
+	-a $NVMF_FIRST_TARGET_IP -s $DISCOVERY_PORT -f ipv4 -q $HOST_NQN -w
+NOT $rpc_py -s $HOST_SOCK bdev_nvme_start_discovery -b nvme -t $TEST_TRANSPORT \
+	-a $NVMF_FIRST_TARGET_IP -s $DISCOVERY_PORT -f ipv4 -q $HOST_NQN -w
+[[ $(get_discovery_ctrlrs) == "nvme" ]]
+[[ $(get_bdev_list) == "nvme0n1 nvme0n2" ]]
+
+# Make sure that it's also impossible to start the discovery using the same trid
+NOT $rpc_py -s $HOST_SOCK bdev_nvme_start_discovery -b nvme_second -t $TEST_TRANSPORT \
+	-a $NVMF_FIRST_TARGET_IP -s $DISCOVERY_PORT -f ipv4 -q $HOST_NQN -w
+[[ $(get_discovery_ctrlrs) == "nvme" ]]
+[[ $(get_bdev_list) == "nvme0n1 nvme0n2" ]]
+
+# Try to connect to a non-existing discovery endpoint and verify that it'll timeout
+NOT $rpc_py -s $HOST_SOCK bdev_nvme_start_discovery -b nvme_second -t $TEST_TRANSPORT \
+	-a $NVMF_FIRST_TARGET_IP -s $((DISCOVERY_PORT + 1)) -f ipv4 -q $HOST_NQN -T 3000
+[[ $(get_discovery_ctrlrs) == "nvme" ]]
 
 trap - SIGINT SIGTERM EXIT
 

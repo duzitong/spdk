@@ -1,35 +1,7 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation. All rights reserved.
  *   Copyright (c) 2019-2021 Mellanox Technologies LTD. All rights reserved.
  *   Copyright (c) 2021, 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "spdk/stdinc.h"
@@ -1367,6 +1339,8 @@ nvme_ctrlr_state_string(enum nvme_ctrlr_state state)
 		return "disable and wait for CSTS.RDY = 0";
 	case NVME_CTRLR_STATE_DISABLE_WAIT_FOR_READY_0_WAIT_FOR_CSTS:
 		return "disable and wait for CSTS.RDY = 0 reg";
+	case NVME_CTRLR_STATE_DISABLED:
+		return "controller is disabled";
 	case NVME_CTRLR_STATE_ENABLE:
 		return "enable controller by writing CC.EN = 1";
 	case NVME_CTRLR_STATE_ENABLE_WAIT_FOR_CC:
@@ -1630,10 +1604,6 @@ nvme_ctrlr_abort_queued_aborts(struct spdk_nvme_ctrlr *ctrlr)
 static int
 nvme_ctrlr_disconnect(struct spdk_nvme_ctrlr *ctrlr)
 {
-	struct spdk_nvme_qpair	*qpair;
-
-	ctrlr->prepare_for_reset = false;
-
 	if (ctrlr->is_resetting || ctrlr->is_removed) {
 		/*
 		 * Controller is already resetting or has been removed. Return
@@ -1646,6 +1616,7 @@ nvme_ctrlr_disconnect(struct spdk_nvme_ctrlr *ctrlr)
 	ctrlr->is_resetting = true;
 	ctrlr->is_failed = false;
 	ctrlr->is_disconnecting = true;
+	ctrlr->prepare_for_reset = true;
 
 	NVME_CTRLR_NOTICELOG(ctrlr, "resetting controller\n");
 
@@ -1656,11 +1627,6 @@ nvme_ctrlr_disconnect(struct spdk_nvme_ctrlr *ctrlr)
 	nvme_ctrlr_abort_queued_aborts(ctrlr);
 
 	nvme_transport_admin_qpair_abort_aers(ctrlr->adminq);
-
-	/* Disable all queues before disabling the controller hardware. */
-	TAILQ_FOREACH(qpair, &ctrlr->active_io_qpairs, tailq) {
-		qpair->transport_failure_reason = SPDK_NVME_QPAIR_FAILURE_LOCAL;
-	}
 
 	ctrlr->adminq->transport_failure_reason = SPDK_NVME_QPAIR_FAILURE_LOCAL;
 	nvme_transport_ctrlr_disconnect_qpair(ctrlr, ctrlr->adminq);
@@ -1699,6 +1665,8 @@ void
 spdk_nvme_ctrlr_reconnect_async(struct spdk_nvme_ctrlr *ctrlr)
 {
 	nvme_robust_mutex_lock(&ctrlr->ctrlr_lock);
+
+	ctrlr->prepare_for_reset = false;
 
 	/* Set the state back to INIT to cause a full hardware reset. */
 	nvme_ctrlr_set_state(ctrlr, NVME_CTRLR_STATE_INIT, NVME_TIMEOUT_INFINITE);
@@ -1786,6 +1754,47 @@ spdk_nvme_ctrlr_reconnect_poll_async(struct spdk_nvme_ctrlr *ctrlr)
 	return rc;
 }
 
+/*
+ * For PCIe transport, spdk_nvme_ctrlr_disconnect() will do a Controller Level Reset
+ * (Change CC.EN from 1 to 0) as a operation to disconnect the admin qpair.
+ * The following two functions are added to do a Controller Level Reset. They have
+ * to be called under the nvme controller's lock.
+ */
+void
+nvme_ctrlr_disable(struct spdk_nvme_ctrlr *ctrlr)
+{
+	assert(ctrlr->is_disconnecting == true);
+
+	nvme_ctrlr_set_state(ctrlr, NVME_CTRLR_STATE_CHECK_EN, NVME_TIMEOUT_INFINITE);
+}
+
+int
+nvme_ctrlr_disable_poll(struct spdk_nvme_ctrlr *ctrlr)
+{
+	int rc = 0;
+
+	if (nvme_ctrlr_process_init(ctrlr) != 0) {
+		NVME_CTRLR_ERRLOG(ctrlr, "failed to disable controller\n");
+		rc = -1;
+	}
+
+	if (ctrlr->state != NVME_CTRLR_STATE_DISABLED && rc != -1) {
+		return -EAGAIN;
+	}
+
+	return rc;
+}
+
+static void
+nvme_ctrlr_fail_io_qpairs(struct spdk_nvme_ctrlr *ctrlr)
+{
+	struct spdk_nvme_qpair	*qpair;
+
+	TAILQ_FOREACH(qpair, &ctrlr->active_io_qpairs, tailq) {
+		qpair->transport_failure_reason = SPDK_NVME_QPAIR_FAILURE_LOCAL;
+	}
+}
+
 int
 spdk_nvme_ctrlr_reset(struct spdk_nvme_ctrlr *ctrlr)
 {
@@ -1794,6 +1803,9 @@ spdk_nvme_ctrlr_reset(struct spdk_nvme_ctrlr *ctrlr)
 	nvme_robust_mutex_lock(&ctrlr->ctrlr_lock);
 
 	rc = nvme_ctrlr_disconnect(ctrlr);
+	if (rc == 0) {
+		nvme_ctrlr_fail_io_qpairs(ctrlr);
+	}
 
 	nvme_robust_mutex_unlock(&ctrlr->ctrlr_lock);
 
@@ -1939,7 +1951,7 @@ nvme_ctrlr_identify_done(void *arg, const struct spdk_nvme_cpl *cpl)
 		}
 	}
 
-	if (ctrlr->cdata.sgls.supported) {
+	if (ctrlr->cdata.sgls.supported && !(ctrlr->quirks & NVME_QUIRK_NOT_USE_SGL)) {
 		assert(ctrlr->cdata.sgls.supported != 0x3);
 		ctrlr->flags |= SPDK_NVME_CTRLR_SGL_SUPPORTED;
 		if (ctrlr->cdata.sgls.supported == 0x2) {
@@ -3676,13 +3688,8 @@ nvme_ctrlr_process_init_wait_for_ready_0(void *ctx, uint64_t value, const struct
 	csts.raw = (uint32_t)value;
 	if (csts.bits.rdy == 0) {
 		NVME_CTRLR_DEBUGLOG(ctrlr, "CC.EN = 0 && CSTS.RDY = 0\n");
-		nvme_ctrlr_set_state(ctrlr, NVME_CTRLR_STATE_ENABLE,
+		nvme_ctrlr_set_state(ctrlr, NVME_CTRLR_STATE_DISABLED,
 				     nvme_ctrlr_get_ready_timeout(ctrlr));
-		/*
-		 * Delay 100us before setting CC.EN = 1.  Some NVMe SSDs miss CC.EN getting
-		 *  set to 1 if it is too soon after CSTS.RDY is reported as 0.
-		 */
-		spdk_delay_us(100);
 	} else {
 		nvme_ctrlr_set_state_quiet(ctrlr, NVME_CTRLR_STATE_DISABLE_WAIT_FOR_READY_0,
 					   NVME_TIMEOUT_KEEP_EXISTING);
@@ -3854,6 +3861,20 @@ nvme_ctrlr_process_init(struct spdk_nvme_ctrlr *ctrlr)
 		rc = nvme_ctrlr_get_csts_async(ctrlr, nvme_ctrlr_process_init_wait_for_ready_0, ctrlr);
 		break;
 
+	case NVME_CTRLR_STATE_DISABLED:
+		if (ctrlr->is_disconnecting) {
+			NVME_CTRLR_DEBUGLOG(ctrlr, "Ctrlr was disabled.\n");
+		} else {
+			nvme_ctrlr_set_state(ctrlr, NVME_CTRLR_STATE_ENABLE, ready_timeout_in_ms);
+
+			/*
+			 * Delay 100us before setting CC.EN = 1.  Some NVMe SSDs miss CC.EN getting
+			 *  set to 1 if it is too soon after CSTS.RDY is reported as 0.
+			 */
+			spdk_delay_us(100);
+		}
+		break;
+
 	case NVME_CTRLR_STATE_ENABLE:
 		NVME_CTRLR_DEBUGLOG(ctrlr, "Setting CC.EN = 1\n");
 		nvme_ctrlr_set_state(ctrlr, NVME_CTRLR_STATE_ENABLE_WAIT_FOR_CC, ready_timeout_in_ms);
@@ -3967,7 +3988,13 @@ nvme_ctrlr_process_init(struct spdk_nvme_ctrlr *ctrlr)
 	case NVME_CTRLR_STATE_WAIT_FOR_SUPPORTED_INTEL_LOG_PAGES:
 	case NVME_CTRLR_STATE_WAIT_FOR_DB_BUF_CFG:
 	case NVME_CTRLR_STATE_WAIT_FOR_HOST_ID:
-		spdk_nvme_qpair_process_completions(ctrlr->adminq, 0);
+		/*
+		 * nvme_ctrlr_process_init() may be called from the completion context
+		 * for the admin qpair. Avoid recursive calls for this case.
+		 */
+		if (!ctrlr->adminq->in_completion_context) {
+			spdk_nvme_qpair_process_completions(ctrlr->adminq, 0);
+		}
 		break;
 
 	default:
@@ -4109,6 +4136,7 @@ nvme_ctrlr_destruct_async(struct spdk_nvme_ctrlr *ctrlr,
 
 	NVME_CTRLR_DEBUGLOG(ctrlr, "Prepare to destruct SSD\n");
 
+	ctrlr->prepare_for_reset = false;
 	ctrlr->is_destructed = true;
 
 	spdk_nvme_qpair_process_completions(ctrlr->adminq, 0);

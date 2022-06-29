@@ -1,34 +1,7 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation.
  *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *   Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #include "spdk/stdinc.h"
@@ -43,6 +16,7 @@
 #include "spdk/util.h"
 #include "spdk/string.h"
 
+#include "bdev_internal.h"
 #include "CUnit/Basic.h"
 
 #define BUFFER_IOVS		1024
@@ -216,6 +190,15 @@ quick_test_complete(struct spdk_bdev_io *bdev_io, bool success, void *arg)
 	wake_ut_thread();
 }
 
+static uint64_t
+bdev_bytes_to_blocks(struct spdk_bdev *bdev, uint64_t bytes)
+{
+	uint32_t block_size = spdk_bdev_get_block_size(bdev);
+
+	CU_ASSERT(bytes % block_size == 0);
+	return bytes / block_size;
+}
+
 static void
 __blockdev_write(void *arg)
 {
@@ -257,10 +240,12 @@ __blockdev_compare_and_write(void *arg)
 {
 	struct bdevio_request *req = arg;
 	struct io_target *target = req->target;
+	struct spdk_bdev *bdev = target->bdev;
 	int rc;
 
 	rc = spdk_bdev_comparev_and_writev_blocks(target->bdev_desc, target->ch, req->iov, req->iovcnt,
-			req->fused_iov, req->fused_iovcnt, req->offset, req->data_len, quick_test_complete, NULL);
+			req->fused_iov, req->fused_iovcnt, bdev_bytes_to_blocks(bdev, req->offset),
+			bdev_bytes_to_blocks(bdev, req->data_len), quick_test_complete, NULL);
 
 	if (rc) {
 		g_completion_success = false;
@@ -423,18 +408,6 @@ blockdev_write_read_data_match(char *rx_buf, char *tx_buf, int data_length)
 	return rc;
 }
 
-static bool
-blockdev_io_valid_blocks(struct spdk_bdev *bdev, uint64_t data_length)
-{
-	if (data_length < spdk_bdev_get_block_size(bdev) ||
-	    data_length % spdk_bdev_get_block_size(bdev) ||
-	    data_length / spdk_bdev_get_block_size(bdev) > spdk_bdev_get_num_blocks(bdev)) {
-		return false;
-	}
-
-	return true;
-}
-
 static void
 blockdev_write_read(uint32_t data_length, uint32_t iov_len, int pattern, uint64_t offset,
 		    int expected_rc, bool write_zeroes)
@@ -445,10 +418,6 @@ blockdev_write_read(uint32_t data_length, uint32_t iov_len, int pattern, uint64_
 	int	rc;
 
 	target = g_current_io_target;
-
-	if (!blockdev_io_valid_blocks(target->bdev, data_length)) {
-		return;
-	}
 
 	if (!write_zeroes) {
 		initialize_buffer(&tx_buf, pattern, data_length);
@@ -495,10 +464,6 @@ blockdev_compare_and_write(uint32_t data_length, uint32_t iov_len, uint64_t offs
 
 	target = g_current_io_target;
 
-	if (!blockdev_io_valid_blocks(target->bdev, data_length)) {
-		return;
-	}
-
 	initialize_buffer(&tx_buf, 0xAA, data_length);
 	initialize_buffer(&rx_buf, 0, data_length);
 	initialize_buffer(&write_buf, 0xBB, data_length);
@@ -521,15 +486,17 @@ blockdev_compare_and_write(uint32_t data_length, uint32_t iov_len, uint64_t offs
 }
 
 static void
-blockdev_write_read_4k(void)
+blockdev_write_read_block(void)
 {
 	uint32_t data_length;
 	uint64_t offset;
 	int pattern;
 	int expected_rc;
+	struct io_target *target = g_current_io_target;
+	struct spdk_bdev *bdev = target->bdev;
 
-	/* Data size = 4K */
-	data_length = 4096;
+	/* Data size = 1 block */
+	data_length = spdk_bdev_get_block_size(bdev);
 	CU_ASSERT_TRUE(data_length < BUFFER_SIZE);
 	offset = 0;
 	pattern = 0xA3;
@@ -541,15 +508,17 @@ blockdev_write_read_4k(void)
 }
 
 static void
-blockdev_write_zeroes_read_4k(void)
+blockdev_write_zeroes_read_block(void)
 {
 	uint32_t data_length;
 	uint64_t offset;
 	int pattern;
 	int expected_rc;
+	struct io_target *target = g_current_io_target;
+	struct spdk_bdev *bdev = target->bdev;
 
-	/* Data size = 4K */
-	data_length = 4096;
+	/* Data size = 1 block */
+	data_length = spdk_bdev_get_block_size(bdev);
 	offset = 0;
 	pattern = 0xA3;
 	/* Params are valid, hence the expected return value
@@ -563,15 +532,18 @@ blockdev_write_zeroes_read_4k(void)
  * This i/o will not have to split at the bdev layer.
  */
 static void
-blockdev_write_zeroes_read_1m(void)
+blockdev_write_zeroes_read_no_split(void)
 {
 	uint32_t data_length;
 	uint64_t offset;
 	int pattern;
 	int expected_rc;
+	struct io_target *target = g_current_io_target;
+	struct spdk_bdev *bdev = target->bdev;
 
-	/* Data size = 1M */
-	data_length = 1048576;
+	/* Data size = block size aligned ZERO_BUFFER_SIZE */
+	data_length = ZERO_BUFFER_SIZE; /* from bdev_internal.h */
+	data_length -= ZERO_BUFFER_SIZE % spdk_bdev_get_block_size(bdev);
 	offset = 0;
 	pattern = 0xA3;
 	/* Params are valid, hence the expected return value
@@ -586,15 +558,18 @@ blockdev_write_zeroes_read_1m(void)
  * write-zeroes is not supported by the bdev.
  */
 static void
-blockdev_write_zeroes_read_3m(void)
+blockdev_write_zeroes_read_split(void)
 {
 	uint32_t data_length;
 	uint64_t offset;
 	int pattern;
 	int expected_rc;
+	struct io_target *target = g_current_io_target;
+	struct spdk_bdev *bdev = target->bdev;
 
-	/* Data size = 3M */
-	data_length = 3145728;
+	/* Data size = block size aligned 3 * ZERO_BUFFER_SIZE */
+	data_length = 3 * ZERO_BUFFER_SIZE; /* from bdev_internal.h */
+	data_length -= data_length % spdk_bdev_get_block_size(bdev);
 	offset = 0;
 	pattern = 0xA3;
 	/* Params are valid, hence the expected return value
@@ -611,15 +586,19 @@ blockdev_write_zeroes_read_3m(void)
  * the bdev layer zero buffer size.
  */
 static void
-blockdev_write_zeroes_read_3m_500k(void)
+blockdev_write_zeroes_read_split_partial(void)
 {
 	uint32_t data_length;
 	uint64_t offset;
 	int pattern;
 	int expected_rc;
+	struct io_target *target = g_current_io_target;
+	struct spdk_bdev *bdev = target->bdev;
+	uint32_t block_size = spdk_bdev_get_block_size(bdev);
 
-	/* Data size = 3.5M */
-	data_length = 3670016;
+	/* Data size = block size aligned 7 * ZERO_BUFFER_SIZE / 2 */
+	data_length = ZERO_BUFFER_SIZE * 7 / 2;
+	data_length -= data_length % block_size;
 	offset = 0;
 	pattern = 0xA3;
 	/* Params are valid, hence the expected return value
@@ -630,16 +609,18 @@ blockdev_write_zeroes_read_3m_500k(void)
 }
 
 static void
-blockdev_writev_readv_4k(void)
+blockdev_writev_readv_block(void)
 {
 	uint32_t data_length, iov_len;
 	uint64_t offset;
 	int pattern;
 	int expected_rc;
+	struct io_target *target = g_current_io_target;
+	struct spdk_bdev *bdev = target->bdev;
 
-	/* Data size = 4K */
-	data_length = 4096;
-	iov_len = 4096;
+	/* Data size = 1 block */
+	data_length = spdk_bdev_get_block_size(bdev);
+	iov_len = data_length;
 	CU_ASSERT_TRUE(data_length < BUFFER_SIZE);
 	offset = 0;
 	pattern = 0xA3;
@@ -655,9 +636,12 @@ blockdev_comparev_and_writev(void)
 {
 	uint32_t data_length, iov_len;
 	uint64_t offset;
+	struct io_target *target = g_current_io_target;
+	struct spdk_bdev *bdev = target->bdev;
 
-	data_length = 1;
-	iov_len = 1;
+	/* Data size = acwu size */
+	data_length = spdk_bdev_get_block_size(bdev) * spdk_bdev_get_acwu(bdev);
+	iov_len = data_length;
 	CU_ASSERT_TRUE(data_length < BUFFER_SIZE);
 	offset = 0;
 
@@ -665,16 +649,19 @@ blockdev_comparev_and_writev(void)
 }
 
 static void
-blockdev_writev_readv_30x4k(void)
+blockdev_writev_readv_30x1block(void)
 {
 	uint32_t data_length, iov_len;
 	uint64_t offset;
 	int pattern;
 	int expected_rc;
+	struct io_target *target = g_current_io_target;
+	struct spdk_bdev *bdev = target->bdev;
+	uint32_t block_size = spdk_bdev_get_block_size(bdev);
 
-	/* Data size = 4K */
-	data_length = 4096 * 30;
-	iov_len = 4096;
+	/* Data size = 30 * block size */
+	data_length = block_size * 30;
+	iov_len = block_size;
 	CU_ASSERT_TRUE(data_length < BUFFER_SIZE);
 	offset = 0;
 	pattern = 0xA3;
@@ -686,17 +673,19 @@ blockdev_writev_readv_30x4k(void)
 }
 
 static void
-blockdev_write_read_512Bytes(void)
+blockdev_write_read_8blocks(void)
 {
 	uint32_t data_length;
 	uint64_t offset;
 	int pattern;
 	int expected_rc;
+	struct io_target *target = g_current_io_target;
+	struct spdk_bdev *bdev = target->bdev;
 
-	/* Data size = 512 */
-	data_length = 512;
+	/* Data size = 8 * block size */
+	data_length = spdk_bdev_get_block_size(bdev) * 8;
 	CU_ASSERT_TRUE(data_length < BUFFER_SIZE);
-	offset = 8192;
+	offset = data_length;
 	pattern = 0xA3;
 	/* Params are valid, hence the expected return value
 	 * of write and read for all blockdevs is 0. */
@@ -706,18 +695,20 @@ blockdev_write_read_512Bytes(void)
 }
 
 static void
-blockdev_writev_readv_512Bytes(void)
+blockdev_writev_readv_8blocks(void)
 {
 	uint32_t data_length, iov_len;
 	uint64_t offset;
 	int pattern;
 	int expected_rc;
+	struct io_target *target = g_current_io_target;
+	struct spdk_bdev *bdev = target->bdev;
 
-	/* Data size = 512 */
-	data_length = 512;
-	iov_len = 512;
+	/* Data size = 8 * block size */
+	data_length = spdk_bdev_get_block_size(bdev) * 8;
+	iov_len = data_length;
 	CU_ASSERT_TRUE(data_length < BUFFER_SIZE);
-	offset = 8192;
+	offset = data_length;
 	pattern = 0xA3;
 	/* Params are valid, hence the expected return value
 	 * of write and read for all blockdevs is 0. */
@@ -733,11 +724,16 @@ blockdev_write_read_size_gt_128k(void)
 	uint64_t offset;
 	int pattern;
 	int expected_rc;
+	struct io_target *target = g_current_io_target;
+	struct spdk_bdev *bdev = target->bdev;
+	uint32_t block_size = spdk_bdev_get_block_size(bdev);
 
-	/* Data size = 132K */
-	data_length = 135168;
+	/* Data size = block size aligned 128K + 1 block */
+	data_length = 128 * 1024;
+	data_length -= data_length % block_size;
+	data_length += block_size;
 	CU_ASSERT_TRUE(data_length < BUFFER_SIZE);
-	offset = 8192;
+	offset = block_size * 2;
 	pattern = 0xA3;
 	/* Params are valid, hence the expected return value
 	 * of write and read for all blockdevs is 0. */
@@ -753,12 +749,17 @@ blockdev_writev_readv_size_gt_128k(void)
 	uint64_t offset;
 	int pattern;
 	int expected_rc;
+	struct io_target *target = g_current_io_target;
+	struct spdk_bdev *bdev = target->bdev;
+	uint32_t block_size = spdk_bdev_get_block_size(bdev);
 
-	/* Data size = 132K */
-	data_length = 135168;
-	iov_len = 135168;
+	/* Data size = block size aligned 128K + 1 block */
+	data_length = 128 * 1024;
+	data_length -= data_length % block_size;
+	data_length += block_size;
+	iov_len = data_length;
 	CU_ASSERT_TRUE(data_length < BUFFER_SIZE);
-	offset = 8192;
+	offset = block_size * 2;
 	pattern = 0xA3;
 	/* Params are valid, hence the expected return value
 	 * of write and read for all blockdevs is 0. */
@@ -774,12 +775,17 @@ blockdev_writev_readv_size_gt_128k_two_iov(void)
 	uint64_t offset;
 	int pattern;
 	int expected_rc;
+	struct io_target *target = g_current_io_target;
+	struct spdk_bdev *bdev = target->bdev;
+	uint32_t block_size = spdk_bdev_get_block_size(bdev);
 
-	/* Data size = 132K */
-	data_length = 135168;
-	iov_len = 128 * 1024;
+	/* Data size = block size aligned 128K + 1 block */
+	data_length = 128 * 1024;
+	data_length -= data_length % block_size;
+	iov_len = data_length;
+	data_length += block_size;
 	CU_ASSERT_TRUE(data_length < BUFFER_SIZE);
-	offset = 8192;
+	offset = block_size * 2;
 	pattern = 0xA3;
 	/* Params are valid, hence the expected return value
 	 * of write and read for all blockdevs is 0. */
@@ -795,11 +801,14 @@ blockdev_write_read_invalid_size(void)
 	uint64_t offset;
 	int pattern;
 	int expected_rc;
+	struct io_target *target = g_current_io_target;
+	struct spdk_bdev *bdev = target->bdev;
+	uint32_t block_size = spdk_bdev_get_block_size(bdev);
 
 	/* Data size is not a multiple of the block size */
-	data_length = 0x1015;
+	data_length = block_size - 1;
 	CU_ASSERT_TRUE(data_length < BUFFER_SIZE);
-	offset = 8192;
+	offset = block_size * 2;
 	pattern = 0xA3;
 	/* Params are invalid, hence the expected return value
 	 * of write and read for all blockdevs is < 0 */
@@ -847,16 +856,17 @@ blockdev_write_read_offset_plus_nbytes_equals_bdev_size(void)
 static void
 blockdev_write_read_offset_plus_nbytes_gt_bdev_size(void)
 {
-	struct io_target *target;
-	struct spdk_bdev *bdev;
+	struct io_target *target = g_current_io_target;
+	struct spdk_bdev *bdev = target->bdev;
 	char	*tx_buf = NULL;
 	char	*rx_buf = NULL;
 	int	data_length;
 	uint64_t offset;
 	int pattern;
+	uint32_t block_size = spdk_bdev_get_block_size(bdev);
 
 	/* Tests the overflow condition of the blockdevs. */
-	data_length = 4096;
+	data_length = block_size * 2;
 	CU_ASSERT_TRUE(data_length < BUFFER_SIZE);
 	pattern = 0xA3;
 
@@ -866,7 +876,7 @@ blockdev_write_read_offset_plus_nbytes_gt_bdev_size(void)
 	/* The start offset has been set to a valid value
 	 * but offset + nbytes is greater than the Total size
 	 * of the blockdev. The test should fail. */
-	offset = ((spdk_bdev_get_num_blocks(bdev) * spdk_bdev_get_block_size(bdev)) - 1024);
+	offset = (spdk_bdev_get_num_blocks(bdev) - 1) * block_size;
 
 	initialize_buffer(&tx_buf, pattern, data_length);
 	initialize_buffer(&rx_buf, 0, data_length);
@@ -885,8 +895,10 @@ blockdev_write_read_max_offset(void)
 	uint64_t offset;
 	int pattern;
 	int expected_rc;
+	struct io_target *target = g_current_io_target;
+	struct spdk_bdev *bdev = target->bdev;
 
-	data_length = 4096;
+	data_length = spdk_bdev_get_block_size(bdev);
 	CU_ASSERT_TRUE(data_length < BUFFER_SIZE);
 	/* The start offset has been set to UINT64_MAX such that
 	 * adding nbytes wraps around and points to an invalid address. */
@@ -900,15 +912,17 @@ blockdev_write_read_max_offset(void)
 }
 
 static void
-blockdev_overlapped_write_read_8k(void)
+blockdev_overlapped_write_read_2blocks(void)
 {
 	int	data_length;
 	uint64_t offset;
 	int pattern;
 	int expected_rc;
+	struct io_target *target = g_current_io_target;
+	struct spdk_bdev *bdev = target->bdev;
 
-	/* Data size = 8K */
-	data_length = 8192;
+	/* Data size = 2 blocks */
+	data_length = spdk_bdev_get_block_size(bdev) * 2;
 	CU_ASSERT_TRUE(data_length < BUFFER_SIZE);
 	offset = 0;
 	pattern = 0xA3;
@@ -919,13 +933,13 @@ blockdev_overlapped_write_read_8k(void)
 	 * from the same offset for each blockdev */
 	blockdev_write_read(data_length, 0, pattern, offset, expected_rc, 0);
 
-	/* Overwrite the pattern 0xbb of size 8K on an address offset overlapping
-	 * with the address written above and assert the new value in
+	/* Overwrite the pattern 0xbb of size 2*block size on an address offset
+	 * overlapping with the address written above and assert the new value in
 	 * the overlapped address range */
-	/* Populate 8k with value 0xBB */
+	/* Populate 2*block size with value 0xBB */
 	pattern = 0xBB;
-	/* Offset = 6144; Overlap offset addresses and write value 0xbb */
-	offset = 4096;
+	/* Offset = 1 block; Overlap offset addresses and write value 0xbb */
+	offset = spdk_bdev_get_block_size(bdev);
 	/* Assert the write by comparing it with values read
 	 * from the overlapped offset for each blockdev */
 	blockdev_write_read(data_length, 0, pattern, offset, expected_rc, 0);
@@ -950,15 +964,17 @@ blockdev_test_reset(void)
 {
 	struct bdevio_request req;
 	struct io_target *target;
+	bool reset_supported;
 
 	target = g_current_io_target;
 	req.target = target;
 
+	reset_supported = spdk_bdev_io_type_supported(target->bdev, SPDK_BDEV_IO_TYPE_RESET);
 	g_completion_success = false;
 
 	execute_spdk_function(__blockdev_reset, &req);
 
-	CU_ASSERT_EQUAL(g_completion_success, true);
+	CU_ASSERT_EQUAL(g_completion_success, reset_supported);
 }
 
 struct bdevio_passthrough_request {
@@ -1170,15 +1186,20 @@ __setup_ut_on_single_target(struct io_target *target)
 	}
 
 	if (
-		CU_add_test(suite, "blockdev write read 4k", blockdev_write_read_4k) == NULL
-		|| CU_add_test(suite, "blockdev write zeroes read 4k", blockdev_write_zeroes_read_4k) == NULL
-		|| CU_add_test(suite, "blockdev write zeroes read 1m", blockdev_write_zeroes_read_1m) == NULL
-		|| CU_add_test(suite, "blockdev write zeroes read 3m", blockdev_write_zeroes_read_3m) == NULL
-		|| CU_add_test(suite, "blockdev write zeroes read 3.5m", blockdev_write_zeroes_read_3m_500k) == NULL
+		CU_add_test(suite, "blockdev write read block",
+			    blockdev_write_read_block) == NULL
+		|| CU_add_test(suite, "blockdev write zeroes read block",
+			       blockdev_write_zeroes_read_block) == NULL
+		|| CU_add_test(suite, "blockdev write zeroes read no split",
+			       blockdev_write_zeroes_read_no_split) == NULL
+		|| CU_add_test(suite, "blockdev write zeroes read split",
+			       blockdev_write_zeroes_read_split) == NULL
+		|| CU_add_test(suite, "blockdev write zeroes read split partial",
+			       blockdev_write_zeroes_read_split_partial) == NULL
 		|| CU_add_test(suite, "blockdev reset",
 			       blockdev_test_reset) == NULL
-		|| CU_add_test(suite, "blockdev write read 512 bytes",
-			       blockdev_write_read_512Bytes) == NULL
+		|| CU_add_test(suite, "blockdev write read 8 blocks",
+			       blockdev_write_read_8blocks) == NULL
 		|| CU_add_test(suite, "blockdev write read size > 128k",
 			       blockdev_write_read_size_gt_128k) == NULL
 		|| CU_add_test(suite, "blockdev write read invalid size",
@@ -1189,18 +1210,20 @@ __setup_ut_on_single_target(struct io_target *target)
 			       blockdev_write_read_offset_plus_nbytes_gt_bdev_size) == NULL
 		|| CU_add_test(suite, "blockdev write read max offset",
 			       blockdev_write_read_max_offset) == NULL
-		|| CU_add_test(suite, "blockdev write read 8k on overlapped address offset",
-			       blockdev_overlapped_write_read_8k) == NULL
-		|| CU_add_test(suite, "blockdev writev readv 4k", blockdev_writev_readv_4k) == NULL
-		|| CU_add_test(suite, "blockdev writev readv 30 x 4k",
-			       blockdev_writev_readv_30x4k) == NULL
-		|| CU_add_test(suite, "blockdev writev readv 512 bytes",
-			       blockdev_writev_readv_512Bytes) == NULL
+		|| CU_add_test(suite, "blockdev write read 2 blocks on overlapped address offset",
+			       blockdev_overlapped_write_read_2blocks) == NULL
+		|| CU_add_test(suite, "blockdev writev readv 8 blocks",
+			       blockdev_writev_readv_8blocks) == NULL
+		|| CU_add_test(suite, "blockdev writev readv 30 x 1block",
+			       blockdev_writev_readv_30x1block) == NULL
+		|| CU_add_test(suite, "blockdev writev readv block",
+			       blockdev_writev_readv_block) == NULL
 		|| CU_add_test(suite, "blockdev writev readv size > 128k",
 			       blockdev_writev_readv_size_gt_128k) == NULL
 		|| CU_add_test(suite, "blockdev writev readv size > 128k in two iovs",
 			       blockdev_writev_readv_size_gt_128k_two_iov) == NULL
-		|| CU_add_test(suite, "blockdev comparev and writev", blockdev_comparev_and_writev) == NULL
+		|| CU_add_test(suite, "blockdev comparev and writev",
+			       blockdev_comparev_and_writev) == NULL
 		|| CU_add_test(suite, "blockdev nvme passthru rw",
 			       blockdev_test_nvme_passthru_rw) == NULL
 		|| CU_add_test(suite, "blockdev nvme passthru vendor specific",

@@ -1,35 +1,7 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation. All rights reserved.
  *   Copyright (c) 2019 Mellanox Technologies LTD. All rights reserved.
  *   Copyright (c) 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "spdk_cunit.h"
@@ -81,6 +53,8 @@ int g_status;
 int g_count;
 enum spdk_bdev_event_type g_event_type1;
 enum spdk_bdev_event_type g_event_type2;
+enum spdk_bdev_event_type g_event_type3;
+enum spdk_bdev_event_type g_event_type4;
 struct spdk_histogram_data *g_histogram;
 void *g_unregister_arg;
 int g_unregister_rc;
@@ -566,6 +540,18 @@ bdev_open_cb2(enum spdk_bdev_event_type type, struct spdk_bdev *bdev, void *even
 	if (SPDK_BDEV_EVENT_REMOVE == type) {
 		spdk_bdev_close(desc);
 	}
+}
+
+static void
+bdev_open_cb3(enum spdk_bdev_event_type type, struct spdk_bdev *bdev, void *event_ctx)
+{
+	g_event_type3 = type;
+}
+
+static void
+bdev_open_cb4(enum spdk_bdev_event_type type, struct spdk_bdev *bdev, void *event_ctx)
+{
+	g_event_type4 = type;
 }
 
 static void
@@ -3770,6 +3756,8 @@ bdev_open_while_hotremove(void)
 	CU_ASSERT(bdev == spdk_bdev_desc_get_bdev(desc[0]));
 
 	spdk_bdev_unregister(bdev, NULL, NULL);
+	/* Bdev unregister is handled asynchronously. Poll thread to complete. */
+	poll_threads();
 
 	rc = spdk_bdev_open_ext("bdev", false, bdev_ut_event_cb, NULL, &desc[1]);
 	CU_ASSERT(rc == -ENODEV);
@@ -3845,6 +3833,87 @@ bdev_open_ext(void)
 	/* Check if correct events have been triggered in event callback fn */
 	CU_ASSERT_EQUAL(g_event_type1, SPDK_BDEV_EVENT_REMOVE);
 	CU_ASSERT_EQUAL(g_event_type2, SPDK_BDEV_EVENT_REMOVE);
+
+	free_bdev(bdev);
+	poll_threads();
+}
+
+static void
+bdev_open_ext_unregister(void)
+{
+	struct spdk_bdev *bdev;
+	struct spdk_bdev_desc *desc1 = NULL;
+	struct spdk_bdev_desc *desc2 = NULL;
+	struct spdk_bdev_desc *desc3 = NULL;
+	struct spdk_bdev_desc *desc4 = NULL;
+	int rc = 0;
+
+	bdev = allocate_bdev("bdev");
+
+	rc = spdk_bdev_open_ext("bdev", true, NULL, NULL, &desc1);
+	CU_ASSERT_EQUAL(rc, -EINVAL);
+
+	rc = spdk_bdev_open_ext("bdev", true, bdev_open_cb1, &desc1, &desc1);
+	CU_ASSERT_EQUAL(rc, 0);
+
+	rc = spdk_bdev_open_ext("bdev", true, bdev_open_cb2, &desc2, &desc2);
+	CU_ASSERT_EQUAL(rc, 0);
+
+	rc = spdk_bdev_open_ext("bdev", true, bdev_open_cb3, &desc3, &desc3);
+	CU_ASSERT_EQUAL(rc, 0);
+
+	rc = spdk_bdev_open_ext("bdev", true, bdev_open_cb4, &desc4, &desc4);
+	CU_ASSERT_EQUAL(rc, 0);
+
+	g_event_type1 = 0xFF;
+	g_event_type2 = 0xFF;
+	g_event_type3 = 0xFF;
+	g_event_type4 = 0xFF;
+
+	g_unregister_arg = NULL;
+	g_unregister_rc = -1;
+
+	/* Simulate hot-unplug by unregistering bdev */
+	spdk_bdev_unregister(bdev, bdev_unregister_cb, (void *)0x12345678);
+
+	/*
+	 * Unregister is handled asynchronously and event callback
+	 * (i.e., above bdev_open_cbN) will be called.
+	 * For bdev_open_cb3 and bdev_open_cb4, it is intended to not
+	 * close the desc3 and desc4 so that the bdev is not closed.
+	 */
+	poll_threads();
+
+	/* Check if correct events have been triggered in event callback fn */
+	CU_ASSERT_EQUAL(g_event_type1, SPDK_BDEV_EVENT_REMOVE);
+	CU_ASSERT_EQUAL(g_event_type2, SPDK_BDEV_EVENT_REMOVE);
+	CU_ASSERT_EQUAL(g_event_type3, SPDK_BDEV_EVENT_REMOVE);
+	CU_ASSERT_EQUAL(g_event_type4, SPDK_BDEV_EVENT_REMOVE);
+
+	/* Check that unregister callback is delayed */
+	CU_ASSERT(g_unregister_arg == NULL);
+	CU_ASSERT(g_unregister_rc == -1);
+
+	/*
+	 * Explicitly close desc3. As desc4 is still opened there, the
+	 * unergister callback is still delayed to execute.
+	 */
+	spdk_bdev_close(desc3);
+	CU_ASSERT(g_unregister_arg == NULL);
+	CU_ASSERT(g_unregister_rc == -1);
+
+	/*
+	 * Explicitly close desc4 to trigger the ongoing bdev unregister
+	 * operation after last desc is closed.
+	 */
+	spdk_bdev_close(desc4);
+
+	/* Poll the thread for the async unregister operation */
+	poll_threads();
+
+	/* Check that unregister callback is executed */
+	CU_ASSERT(g_unregister_arg == (void *)0x12345678);
+	CU_ASSERT(g_unregister_rc == 0);
 
 	free_bdev(bdev);
 	poll_threads();
@@ -4997,6 +5066,13 @@ bdev_writev_readv_ext(void)
 	rc = spdk_bdev_writev_blocks_ext(desc, io_ch, &iov, 1, 32, 14, io_done, NULL, &ext_io_opts);
 	CU_ASSERT(rc != 0);
 
+	ext_io_opts.size = offsetof(struct spdk_bdev_ext_io_opts, metadata) +
+			   sizeof(ext_io_opts.metadata) - 1;
+	rc = spdk_bdev_readv_blocks_ext(desc, io_ch, &iov, 1, 32, 14, io_done, NULL, &ext_io_opts);
+	CU_ASSERT(rc != 0);
+	rc = spdk_bdev_writev_blocks_ext(desc, io_ch, &iov, 1, 32, 14, io_done, NULL, &ext_io_opts);
+	CU_ASSERT(rc != 0);
+
 	/* Test 3, Check that IO request with ext_opts and metadata is split correctly
 	 * Offset 14, length 8, payload 0xF000
 	 *  Child - Offset 14, length 2, payload 0xF000
@@ -5043,63 +5119,6 @@ bdev_writev_readv_ext(void)
 
 	expected_io = ut_alloc_expected_io(SPDK_BDEV_IO_TYPE_WRITE, 16, 6, 1);
 	expected_io->md_buf = ext_io_opts.metadata + 2 * 8;
-	ut_expected_io_set_iov(expected_io, 0, (void *)(0xF000 + 2 * 512), 6 * 512);
-	TAILQ_INSERT_TAIL(&g_bdev_ut_channel->expected_io, expected_io, link);
-
-	rc = spdk_bdev_writev_blocks_ext(desc, io_ch, &iov, 1, 14, 8, io_done, NULL, &ext_io_opts);
-	CU_ASSERT(rc == 0);
-	CU_ASSERT(g_io_done == false);
-
-	CU_ASSERT(g_bdev_ut_channel->outstanding_io_count == 2);
-	stub_complete_io(2);
-	CU_ASSERT(g_io_done == true);
-	CU_ASSERT(g_bdev_ut_channel->outstanding_io_count == 0);
-
-	/* ext_opts contains metadata but ext_opts::size doesn't cover metadata pointer.
-	 * Check that IO request with ext_opts and metadata is split correctly - metadata pointer is not copied, so split
-	 * requests do not have metadata
-	 * Offset 14, length 8, payload 0xF000
-	 *  Child - Offset 14, length 2, payload 0xF000
-	 *  Child - Offset 16, length 6, payload 0xF000 + 2 * 512
-	 */
-	iov.iov_base = (void *)0xF000;
-	iov.iov_len = 4096;
-	memset(&ext_io_opts, 0, sizeof(ext_io_opts));
-	ext_io_opts.metadata = (void *)0xFF000000;
-	ext_io_opts.size = offsetof(struct spdk_bdev_ext_io_opts, metadata);;
-	g_io_done = false;
-
-	/* read */
-	expected_io = ut_alloc_expected_io(SPDK_BDEV_IO_TYPE_READ, 14, 2, 1);
-	/* Split request must not contain metadata pointer */
-	expected_io->md_buf = NULL;
-	ut_expected_io_set_iov(expected_io, 0, (void *)0xF000, 2 * 512);
-	TAILQ_INSERT_TAIL(&g_bdev_ut_channel->expected_io, expected_io, link);
-
-	expected_io = ut_alloc_expected_io(SPDK_BDEV_IO_TYPE_READ, 16, 6, 1);
-	expected_io->md_buf = NULL;
-	ut_expected_io_set_iov(expected_io, 0, (void *)(0xF000 + 2 * 512), 6 * 512);
-	TAILQ_INSERT_TAIL(&g_bdev_ut_channel->expected_io, expected_io, link);
-
-	rc = spdk_bdev_readv_blocks_ext(desc, io_ch, &iov, 1, 14, 8, io_done, NULL, &ext_io_opts);
-	CU_ASSERT(rc == 0);
-	CU_ASSERT(g_io_done == false);
-
-	CU_ASSERT(g_bdev_ut_channel->outstanding_io_count == 2);
-	stub_complete_io(2);
-	CU_ASSERT(g_io_done == true);
-	CU_ASSERT(g_bdev_ut_channel->outstanding_io_count == 0);
-
-	/* write */
-	g_io_done = false;
-	expected_io = ut_alloc_expected_io(SPDK_BDEV_IO_TYPE_WRITE, 14, 2, 1);
-	expected_io->md_buf = NULL;
-	ut_expected_io_set_iov(expected_io, 0, (void *)0xF000, 2 * 512);
-	TAILQ_INSERT_TAIL(&g_bdev_ut_channel->expected_io, expected_io, link);
-
-	expected_io = ut_alloc_expected_io(SPDK_BDEV_IO_TYPE_WRITE, 16, 6, 1);
-	/* Split request must not contain metadata pointer */
-	expected_io->md_buf = NULL;
 	ut_expected_io_set_iov(expected_io, 0, (void *)(0xF000 + 2 * 512), 6 * 512);
 	TAILQ_INSERT_TAIL(&g_bdev_ut_channel->expected_io, expected_io, link);
 
@@ -5350,6 +5369,7 @@ main(int argc, char **argv)
 	CU_ADD_TEST(suite, bdev_open_while_hotremove);
 	CU_ADD_TEST(suite, bdev_close_while_hotremove);
 	CU_ADD_TEST(suite, bdev_open_ext);
+	CU_ADD_TEST(suite, bdev_open_ext_unregister);
 	CU_ADD_TEST(suite, bdev_set_io_timeout);
 	CU_ADD_TEST(suite, lba_range_overlap);
 	CU_ADD_TEST(suite, lock_lba_range_check_ranges);

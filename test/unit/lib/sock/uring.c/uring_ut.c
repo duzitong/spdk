@@ -1,34 +1,6 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation.
  *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "spdk/stdinc.h"
@@ -212,9 +184,9 @@ flush_server(void)
 	 * that is fully completed. */
 	spdk_sock_request_queue(sock, req1);
 	cb_arg1 = false;
-	rc = spdk_sock_prep_reqs(sock, usock.write_task.iovs, 0, NULL);
+	rc = spdk_sock_prep_reqs(sock, usock.write_task.iovs, 0, NULL, NULL);
 	CU_ASSERT(rc == 2);
-	sock_complete_reqs(sock, 128);
+	sock_complete_reqs(sock, 128, 0);
 	CU_ASSERT(cb_arg1 == true);
 	CU_ASSERT(TAILQ_EMPTY(&sock->queued_reqs));
 
@@ -223,9 +195,9 @@ flush_server(void)
 	spdk_sock_request_queue(sock, req2);
 	cb_arg1 = false;
 	cb_arg2 = false;
-	rc = spdk_sock_prep_reqs(sock, usock.write_task.iovs, 0, NULL);
+	rc = spdk_sock_prep_reqs(sock, usock.write_task.iovs, 0, NULL, NULL);
 	CU_ASSERT(rc == 4);
-	sock_complete_reqs(sock, 192);
+	sock_complete_reqs(sock, 192, 0);
 	CU_ASSERT(cb_arg1 == true);
 	CU_ASSERT(cb_arg2 == true);
 	CU_ASSERT(TAILQ_EMPTY(&sock->queued_reqs));
@@ -234,20 +206,20 @@ flush_server(void)
 	/* One request that is partially sent. */
 	spdk_sock_request_queue(sock, req1);
 	cb_arg1 = false;
-	rc = spdk_sock_prep_reqs(sock, usock.write_task.iovs, 0, NULL);
+	rc = spdk_sock_prep_reqs(sock, usock.write_task.iovs, 0, NULL, NULL);
 	CU_ASSERT(rc == 2);
-	sock_complete_reqs(sock, 92);
+	sock_complete_reqs(sock, 92, 0);
 	CU_ASSERT(rc == 2);
 	CU_ASSERT(cb_arg1 == false);
 	CU_ASSERT(TAILQ_FIRST(&sock->queued_reqs) == req1);
 
 	/* Get the second time partial sent result. */
-	sock_complete_reqs(sock, 10);
+	sock_complete_reqs(sock, 10, 0);
 	CU_ASSERT(cb_arg1 == false);
 	CU_ASSERT(TAILQ_FIRST(&sock->queued_reqs) == req1);
 
 	/* Data is finally sent. */
-	sock_complete_reqs(sock, 26);
+	sock_complete_reqs(sock, 26, 0);
 	CU_ASSERT(cb_arg1 == true);
 	CU_ASSERT(TAILQ_EMPTY(&sock->queued_reqs));
 

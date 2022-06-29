@@ -36,8 +36,8 @@ def get_bdev_delete_method(bdev):
                          'bdev_pmem_create': "bdev_pmem_delete",
                          'bdev_aio_create': "bdev_aio_delete",
                          'bdev_error_create': "bdev_error_delete",
-                         'construct_split_vbdev': "destruct_split_vbdev",
-                         'bdev_virtio_attach_controller': "remove_virtio_bdev",
+                         'bdev_split_create': "bdev_split_delete",
+                         'bdev_virtio_attach_controller': "bdev_virtio_detach_controller",
                          'bdev_crypto_create': "bdev_crypto_delete",
                          'bdev_delay_create': "bdev_delay_delete",
                          'bdev_passthru_create': "bdev_passthru_delete",
@@ -139,7 +139,7 @@ def clear_interface_subsystem(args, interface_config):
     pass
 
 
-def clear_vhost_subsystem(args, vhost_config):
+def clear_vhost_scsi_subsystem(args, vhost_config):
     for vhost in reversed(vhost_config):
         if 'method' in vhost:
             method = vhost['method']
@@ -147,8 +147,15 @@ def clear_vhost_subsystem(args, vhost_config):
                 args.client.call("vhost_scsi_controller_remove_target",
                                  {"ctrlr": vhost['params']['ctrlr'],
                                   "scsi_target_num": vhost['params']['scsi_target_num']})
-            elif method in ['vhost_create_scsi_controller', 'vhost_create_blk_controller',
-                            'vhost_create_nvme_controller']:
+            elif method in ['vhost_create_scsi_controller']:
+                args.client.call("vhost_delete_controller", {'ctrlr': vhost['params']['ctrlr']})
+
+
+def clear_vhost_blk_subsystem(args, vhost_config):
+    for vhost in reversed(vhost_config):
+        if 'method' in vhost:
+            method = vhost['method']
+            if method in ['vhost_create_blk_controller']:
                 args.client.call("vhost_delete_controller", {'ctrlr': vhost['params']['ctrlr']})
 
 

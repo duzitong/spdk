@@ -1,13 +1,16 @@
 function install_spdk() {
 	mkdir -p "$GIT_REPOS/spdk_repo/output" || echo "Can not create spdk_repo/output directory."
 
-	if [[ -d $GIT_REPOS/spdk_repo/spdk ]]; then
+	if [[ -d $GIT_REPOS/spdk_repo/spdk/.git ]]; then
 		echo "spdk source already present, not cloning"
+		if [[ $OSID != freebsd ]]; then
+			chown -R "$USER:$USER" "$GIT_REPOS/spdk_repo/spdk"
+		fi
 	else
 		git -C "$GIT_REPOS/spdk_repo" clone "${GIT_REPO_SPDK}"
 	fi
-	git -C "$GIT_REPOS/spdk_repo/spdk" config submodule.dpdk.url "${GIT_REPO_DPDK}"
-	git -C "$GIT_REPOS/spdk_repo/spdk" config submodule.intel-ipsec-mb.url "${GIT_REPO_INTEL_IPSEC_MB}"
+	git --git-dir=$GIT_REPOS/spdk_repo/spdk/.git config submodule.dpdk.url ${GIT_REPO_DPDK}
+	git --git-dir=$GIT_REPOS/spdk_repo/spdk/.git config submodule.intel-ipsec-mb.url ${GIT_REPO_INTEL_IPSEC_MB}
 	git -C "$GIT_REPOS/spdk_repo/spdk" submodule update --init --recursive
 }
 
@@ -555,8 +558,8 @@ function install_sources() {
 
 GIT_VERSION=2.25.1
 IRDMA_VERSION=1.7.72
-ICE_VERSION=1.8.3
-VFIO_QEMU_BRANCH=${VFIO_QEMU_BRANCH:-vfio-user-v0.93}
+ICE_VERSION=1.8.8
+VFIO_QEMU_BRANCH=${VFIO_QEMU_BRANCH:-vfio-user-dbfix}
 VANILLA_QEMU_BRANCH=${VANILLA_QEMU_BRANCH:-v6.2.0}
 
 : ${GIT_REPO_SPDK=https://github.com/spdk/spdk.git}

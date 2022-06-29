@@ -106,6 +106,8 @@ function usage() {
 	echo "                           Path to clang_rt.fuzzer_no_main library required."
 	echo "                           Requires setting CC and CXX to clang."
 	echo "                           (Typically /usr/lib/llvm-VER/lib/clang/VER/lib/linux/libclang_rt.fuzzer_no_main-ARCH.a)"
+	echo " --with-sma                Generate Storage Management Agent's protobuf interface"
+	echo " --without-sma             No path required."
 	echo ""
 	echo "Environment variables:"
 	echo ""
@@ -125,6 +127,9 @@ sed -r 's/CONFIG_([[:alnum:]_]+)=(.*)/CONFIG[\1]=\2/g' $rootdir/CONFIG > $rootdi
 declare -A CONFIG
 source $rootdir/CONFIG.sh
 rm $rootdir/CONFIG.sh
+
+# Try to expand literal ~ that might have been passed as an option via --long-opt=~/dir.
+set -- "${@//\~/~}"
 
 for i in "$@"; do
 	case "$i" in
@@ -398,8 +403,9 @@ for i in "$@"; do
 			# Can we use pkg-config?
 			if command -v "pkg-config" > /dev/null 2>&1 && PKG_CONFIG_PATH="$PKG_CONFIG_PATH:$dpdk_libdir/pkgconfig" pkg-config --exists libdpdk; then
 				echo "Using $dpdk_libdir/pkgconfig for additional libs..."
+				sysroot_dir=$(PKG_CONFIG_PATH="$PKG_CONFIG_PATH:$dpdk_libdir/pkgconfig" pkg-config --variable=pc_sysrootdir libdpdk)
 				dpdk_libdir=$(PKG_CONFIG_PATH="$PKG_CONFIG_PATH:$dpdk_libdir/pkgconfig" pkg-config --variable=libdir libdpdk)
-				dpdk_libdir=$(readlink -f $dpdk_libdir)
+				dpdk_libdir=$(readlink -f "${sysroot_dir}$dpdk_libdir")
 				if ! echo $dpdk_libdir | grep $dpdk_dir > /dev/null 2>&1; then
 					echo "ERROR: pkg-config reported DPDK libdir $dpdk_libdir is out of the directory specified with --with-dpdk="
 					echo "ERROR: do you have another DPDK installed in the system?"
@@ -410,7 +416,7 @@ for i in "$@"; do
 					CONFIG[HAVE_LIBBSD]=y
 				fi
 				CFLAGS="${CFLAGS:+$CFLAGS }$(PKG_CONFIG_PATH="$PKG_CONFIG_PATH:$dpdk_libdir/pkgconfig" pkg-config --cflags libdpdk)"
-				dpdk_incdir=$(PKG_CONFIG_PATH="$PKG_CONFIG_PATH:$dpdk_libdir/pkgconfig" pkg-config --variable=includedir libdpdk)
+				dpdk_incdir="${sysroot_dir}$(PKG_CONFIG_PATH="$PKG_CONFIG_PATH:$dpdk_libdir/pkgconfig" pkg-config --variable=includedir libdpdk)"
 				check_IPSec_mb "pkg-config" "$dpdk_libdir" "$dpdk_incdir"
 			else
 				echo "Using $dpdk_incdir/rte_build_config.h for additional libs..."
@@ -532,9 +538,10 @@ for i in "$@"; do
 		--with-fio) ;&
 		--with-fio=*)
 			if [[ ${i#*=} != "$i" ]]; then
-				CONFIG[FIO_SOURCE_DIR]=$(readlink -f "${i#*=}")
+				CONFIG[FIO_SOURCE_DIR]=${i#*=}
 			fi
 			check_dir "--with-fio=${CONFIG[FIO_SOURCE_DIR]}"
+			CONFIG[FIO_SOURCE_DIR]=$(readlink -f "${CONFIG[FIO_SOURCE_DIR]}")
 			CONFIG[FIO_PLUGIN]=y
 			;;
 		--without-fio)
@@ -623,6 +630,12 @@ for i in "$@"; do
 			CONFIG[FUZZER]=n
 			CONFIG[FUZZER_LIB]=
 			;;
+		--with-sma)
+			CONFIG[SMA]=y
+			;;
+		--without-sma)
+			CONFIG[SMA]=n
+			;;
 		--)
 			break
 			;;
@@ -635,19 +648,14 @@ for i in "$@"; do
 done
 
 if [[ $arch == x86_64* ]]; then
-	BUILD_CMD=("$CC" -o /dev/null -x c $CPPFLAGS $CFLAGS $LDFLAGS "-march=native")
+	BUILD_CMD=($CC -o /dev/null -x c $CPPFLAGS $CFLAGS $LDFLAGS "-march=native")
 else
-	BUILD_CMD=("$CC" -o /dev/null -x c $CPPFLAGS $CFLAGS $LDFLAGS)
+	BUILD_CMD=($CC -o /dev/null -x c $CPPFLAGS $CFLAGS $LDFLAGS)
 fi
 BUILD_CMD+=(-I/usr/local/include -L/usr/local/lib)
 
 if [[ "${CONFIG[VFIO_USER]}" = "y" ]]; then
 
-	if ! bash -c "command -v cmake3 cmake" > /dev/null; then
-		echo "ERROR: --with-vfio-user requires cmake"
-		echo "Please install then re-run this script"
-		exit 1
-	fi
 	if [[ ! -d /usr/include/json-c ]] && [[ ! -d /usr/local/include/json-c ]]; then
 		echo "ERROR: --with-vfio-user requires json-c-devel"
 		echo "Please install then re-run this script"
@@ -1107,6 +1115,14 @@ if [[ "${CONFIG[ISAL]}" = "y" ]]; then
 	./configure CFLAGS="-fPIC -g -O2" "${ISAL_OPTS[@]}" --enable-shared=no >> $ISAL_LOG 2>&1
 	echo "done."
 	cd $rootdir
+fi
+
+if [[ "${CONFIG[SMA]}" = "y" ]]; then
+	if ! python3 -c 'import grpc; import grpc_tools' 2> /dev/null; then
+		echo "--with-sma requires grpcio and grpcio-tools python packages."
+		echo "Please install then re-run this script."
+		exit 1
+	fi
 fi
 
 # For ARM Neoverse-N1 platform, debug build needs gcc version newer than 8.4

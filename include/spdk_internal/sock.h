@@ -1,34 +1,6 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation. All rights reserved.
  *   Copyright (c) 2020 Mellanox Technologies LTD. All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /** \file
@@ -66,6 +38,7 @@ struct spdk_sock {
 	int				cb_cnt;
 	spdk_sock_cb			cb_fn;
 	void				*cb_arg;
+	uint32_t			zerocopy_threshold;
 	struct {
 		uint8_t		closed		: 1;
 		uint8_t		reserved	: 7;
@@ -174,6 +147,7 @@ spdk_sock_request_put(struct spdk_sock *sock, struct spdk_sock_request *req, int
 #endif
 
 	req->internal.offset = 0;
+	req->internal.is_zcopy = 0;
 
 	closed = sock->flags.closed;
 	sock->cb_cnt++;
@@ -245,11 +219,12 @@ spdk_sock_abort_requests(struct spdk_sock *sock)
 
 static inline int
 spdk_sock_prep_reqs(struct spdk_sock *_sock, struct iovec *iovs, int index,
-		    struct spdk_sock_request **last_req)
+		    struct spdk_sock_request **last_req, int *flags)
 {
 	int iovcnt, i;
 	struct spdk_sock_request *req;
 	unsigned int offset;
+	uint64_t total = 0;
 
 	/* Gather an iov */
 	iovcnt = index;
@@ -275,8 +250,9 @@ spdk_sock_prep_reqs(struct spdk_sock *_sock, struct iovec *iovs, int index,
 
 			iovs[iovcnt].iov_base = SPDK_SOCK_REQUEST_IOV(req, i)->iov_base + offset;
 			iovs[iovcnt].iov_len = SPDK_SOCK_REQUEST_IOV(req, i)->iov_len - offset;
-			iovcnt++;
 
+			total += iovs[iovcnt].iov_len;
+			iovcnt++;
 			offset = 0;
 
 			if (iovcnt >= IOV_BATCH_SIZE) {
@@ -294,6 +270,14 @@ spdk_sock_prep_reqs(struct spdk_sock *_sock, struct iovec *iovs, int index,
 	}
 
 end:
+
+#if defined(MSG_ZEROCOPY)
+	/* if data size < zerocopy_threshold, remove MSG_ZEROCOPY flag */
+	if (total < _sock->zerocopy_threshold && flags != NULL) {
+		*flags = *flags & (~MSG_ZEROCOPY);
+	}
+#endif
+
 	return iovcnt;
 }
 

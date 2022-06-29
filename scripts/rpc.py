@@ -58,15 +58,13 @@ if __name__ == "__main__":
     def framework_start_init(args):
         rpc.framework_start_init(args.client)
 
-    p = subparsers.add_parser('framework_start_init', aliases=['start_subsystem_init'],
-                              help='Start initialization of subsystems')
+    p = subparsers.add_parser('framework_start_init', help='Start initialization of subsystems')
     p.set_defaults(func=framework_start_init)
 
     def framework_wait_init(args):
         rpc.framework_wait_init(args.client)
 
-    p = subparsers.add_parser('framework_wait_init', aliases=['wait_subsystem_init'],
-                              help='Block until subsystems have been initialized')
+    p = subparsers.add_parser('framework_wait_init', help='Block until subsystems have been initialized')
     p.set_defaults(func=framework_wait_init)
 
     def rpc_get_methods(args):
@@ -74,8 +72,7 @@ if __name__ == "__main__":
                                        current=args.current,
                                        include_aliases=args.include_aliases))
 
-    p = subparsers.add_parser('rpc_get_methods', aliases=['get_rpc_methods'],
-                              help='Get list of supported RPC methods')
+    p = subparsers.add_parser('rpc_get_methods', help='Get list of supported RPC methods')
     p.add_argument('-c', '--current', help='Get list of RPC methods only callable in the current state.', action='store_true')
     p.add_argument('-i', '--include-aliases', help='include RPC aliases', action='store_true')
     p.set_defaults(func=rpc_get_methods)
@@ -83,8 +80,7 @@ if __name__ == "__main__":
     def spdk_get_version(args):
         print_json(rpc.spdk_get_version(args.client))
 
-    p = subparsers.add_parser('spdk_get_version', aliases=['get_spdk_version'],
-                              help='Get SPDK version')
+    p = subparsers.add_parser('spdk_get_version', help='Get SPDK version')
     p.set_defaults(func=spdk_get_version)
 
     def save_config(args):
@@ -133,8 +129,7 @@ if __name__ == "__main__":
         rpc.app.spdk_kill_instance(args.client,
                                    sig_name=args.sig_name)
 
-    p = subparsers.add_parser('spdk_kill_instance', aliases=['kill_instance'],
-                              help='Send signal to instance')
+    p = subparsers.add_parser('spdk_kill_instance', help='Send signal to instance')
     p.add_argument('sig_name', help='signal will be sent to server.')
     p.set_defaults(func=spdk_kill_instance)
 
@@ -147,7 +142,7 @@ if __name__ == "__main__":
         print_dict(rpc.app.framework_monitor_context_switch(args.client,
                                                             enabled=enabled))
 
-    p = subparsers.add_parser('framework_monitor_context_switch', aliases=['context_switch_monitor'],
+    p = subparsers.add_parser('framework_monitor_context_switch',
                               help='Control whether the context switch monitor is enabled')
     p.add_argument('-e', '--enable', action='store_true', help='Enable context switch monitoring')
     p.add_argument('-d', '--disable', action='store_true', help='Disable context switch monitoring')
@@ -193,7 +188,7 @@ if __name__ == "__main__":
                                   small_buf_pool_size=args.small_buf_pool_size,
                                   large_buf_pool_size=args.large_buf_pool_size)
 
-    p = subparsers.add_parser('bdev_set_options', aliases=['set_bdev_options'],
+    p = subparsers.add_parser('bdev_set_options',
                               help="""Set options of bdev subsystem""")
     p.add_argument('-p', '--bdev-io-pool-size', help='Number of bdev_io structures in shared buffer pool', type=int)
     p.add_argument('-c', '--bdev-io-cache-size', help='Maximum number of bdev_io structures cached per thread', type=int)
@@ -227,8 +222,7 @@ if __name__ == "__main__":
                                                  pm_path=args.pm_path,
                                                  lb_size=args.lb_size))
 
-    p = subparsers.add_parser('bdev_compress_create', aliases=['construct_compress_bdev'],
-                              help='Add a compress vbdev')
+    p = subparsers.add_parser('bdev_compress_create', help='Add a compress vbdev')
     p.add_argument('-b', '--base-bdev-name', help="Name of the base bdev")
     p.add_argument('-p', '--pm-path', help="Path to persistent memory")
     p.add_argument('-l', '--lb-size', help="Compressed vol logical block size (optional, if used must be 512 or 4096)", type=int, default=0)
@@ -238,16 +232,14 @@ if __name__ == "__main__":
         rpc.bdev.bdev_compress_delete(args.client,
                                       name=args.name)
 
-    p = subparsers.add_parser('bdev_compress_delete', aliases=['delete_compress_bdev'],
-                              help='Delete a compress disk')
+    p = subparsers.add_parser('bdev_compress_delete', help='Delete a compress disk')
     p.add_argument('name', help='compress bdev name')
     p.set_defaults(func=bdev_compress_delete)
 
     def bdev_compress_set_pmd(args):
         rpc.bdev.bdev_compress_set_pmd(args.client,
                                        pmd=args.pmd)
-    p = subparsers.add_parser('bdev_compress_set_pmd', aliases=['set_compress_pmd', 'compress_set_pmd'],
-                              help='Set pmd option for a compress disk')
+    p = subparsers.add_parser('bdev_compress_set_pmd', help='Set pmd option for a compress disk')
     p.add_argument('-p', '--pmd', type=int, help='0 = auto-select, 1= QAT only, 2 = ISAL only, 3 = mlx5_pci only')
     p.set_defaults(func=bdev_compress_set_pmd)
 
@@ -267,8 +259,7 @@ if __name__ == "__main__":
                                                key=args.key,
                                                cipher=args.cipher,
                                                key2=args.key2))
-    p = subparsers.add_parser('bdev_crypto_create', aliases=['construct_crypto_bdev'],
-                              help='Add a crypto vbdev')
+    p = subparsers.add_parser('bdev_crypto_create', help='Add a crypto vbdev')
     p.add_argument('base_bdev_name', help="Name of the base bdev")
     p.add_argument('name', help="Name of the crypto vbdev")
     p.add_argument('crypto_pmd', help="Name of the crypto device driver")
@@ -281,8 +272,7 @@ if __name__ == "__main__":
         rpc.bdev.bdev_crypto_delete(args.client,
                                     name=args.name)
 
-    p = subparsers.add_parser('bdev_crypto_delete', aliases=['delete_crypto_bdev'],
-                              help='Delete a crypto disk')
+    p = subparsers.add_parser('bdev_crypto_delete', help='Delete a crypto disk')
     p.add_argument('name', help='crypto bdev name')
     p.set_defaults(func=bdev_crypto_delete)
 
@@ -293,8 +283,7 @@ if __name__ == "__main__":
                                             cache_line_size=args.cache_line_size,
                                             cache_bdev_name=args.cache_bdev_name,
                                             core_bdev_name=args.core_bdev_name))
-    p = subparsers.add_parser('bdev_ocf_create', aliases=['construct_ocf_bdev'],
-                              help='Add an OCF block device')
+    p = subparsers.add_parser('bdev_ocf_create', help='Add an OCF block device')
     p.add_argument('name', help='Name of resulting OCF bdev')
     p.add_argument('mode', help='OCF cache mode', choices=['wb', 'wt', 'pt', 'wa', 'wi', 'wo'])
     p.add_argument(
@@ -313,24 +302,21 @@ if __name__ == "__main__":
         rpc.bdev.bdev_ocf_delete(args.client,
                                  name=args.name)
 
-    p = subparsers.add_parser('bdev_ocf_delete', aliases=['delete_ocf_bdev'],
-                              help='Delete an OCF block device')
+    p = subparsers.add_parser('bdev_ocf_delete', help='Delete an OCF block device')
     p.add_argument('name', help='Name of OCF bdev')
     p.set_defaults(func=bdev_ocf_delete)
 
     def bdev_ocf_get_stats(args):
         print_dict(rpc.bdev.bdev_ocf_get_stats(args.client,
                                                name=args.name))
-    p = subparsers.add_parser('bdev_ocf_get_stats', aliases=['get_ocf_stats'],
-                              help='Get statistics of chosen OCF block device')
+    p = subparsers.add_parser('bdev_ocf_get_stats', help='Get statistics of chosen OCF block device')
     p.add_argument('name', help='Name of OCF bdev')
     p.set_defaults(func=bdev_ocf_get_stats)
 
     def bdev_ocf_get_bdevs(args):
         print_dict(rpc.bdev.bdev_ocf_get_bdevs(args.client,
                                                name=args.name))
-    p = subparsers.add_parser('bdev_ocf_get_bdevs', aliases=['get_ocf_bdevs'],
-                              help='Get list of OCF devices including unregistered ones')
+    p = subparsers.add_parser('bdev_ocf_get_bdevs', help='Get list of OCF devices including unregistered ones')
     p.add_argument('name', nargs='?', default=None, help='name of OCF vbdev or name of cache device or name of core device (optional)')
     p.set_defaults(func=bdev_ocf_get_bdevs)
 
@@ -369,8 +355,7 @@ if __name__ == "__main__":
                                                name=args.name,
                                                uuid=args.uuid,
                                                optimal_io_boundary=args.optimal_io_boundary))
-    p = subparsers.add_parser('bdev_malloc_create', aliases=['construct_malloc_bdev'],
-                              help='Create a bdev with malloc backend')
+    p = subparsers.add_parser('bdev_malloc_create', help='Create a bdev with malloc backend')
     p.add_argument('-b', '--name', help="Name of the bdev")
     p.add_argument('-u', '--uuid', help="UUID of the bdev")
     p.add_argument(
@@ -384,8 +369,7 @@ if __name__ == "__main__":
         rpc.bdev.bdev_malloc_delete(args.client,
                                     name=args.name)
 
-    p = subparsers.add_parser('bdev_malloc_delete', aliases=['delete_malloc_bdev'],
-                              help='Delete a malloc disk')
+    p = subparsers.add_parser('bdev_malloc_delete', help='Delete a malloc disk')
     p.add_argument('name', help='malloc bdev name')
     p.set_defaults(func=bdev_malloc_delete)
 
@@ -403,8 +387,7 @@ if __name__ == "__main__":
                                              dif_type=args.dif_type,
                                              dif_is_head_of_md=args.dif_is_head_of_md))
 
-    p = subparsers.add_parser('bdev_null_create', aliases=['construct_null_bdev'],
-                              help='Add a bdev with null backend')
+    p = subparsers.add_parser('bdev_null_create', help='Add a bdev with null backend')
     p.add_argument('name', help='Block device name')
     p.add_argument('-u', '--uuid', help='UUID of the bdev')
     p.add_argument('total_size', help='Size of null bdev in MB (int > 0). Includes only data blocks.', type=int)
@@ -423,8 +406,7 @@ if __name__ == "__main__":
         rpc.bdev.bdev_null_delete(args.client,
                                   name=args.name)
 
-    p = subparsers.add_parser('bdev_null_delete', aliases=['delete_null_bdev'],
-                              help='Delete a null bdev')
+    p = subparsers.add_parser('bdev_null_delete', help='Delete a null bdev')
     p.add_argument('name', help='null bdev name')
     p.set_defaults(func=bdev_null_delete)
 
@@ -445,8 +427,7 @@ if __name__ == "__main__":
                                             name=args.name,
                                             block_size=args.block_size))
 
-    p = subparsers.add_parser('bdev_aio_create', aliases=['construct_aio_bdev'],
-                              help='Add a bdev with aio backend')
+    p = subparsers.add_parser('bdev_aio_create', help='Add a bdev with aio backend')
     p.add_argument('filename', help='Path to device or file (ex: /dev/sda)')
     p.add_argument('name', help='Block device name')
     p.add_argument('block_size', help='Block size for this bdev', type=int, nargs='?', default=0)
@@ -464,8 +445,7 @@ if __name__ == "__main__":
         rpc.bdev.bdev_aio_delete(args.client,
                                  name=args.name)
 
-    p = subparsers.add_parser('bdev_aio_delete', aliases=['delete_aio_bdev'],
-                              help='Delete an aio disk')
+    p = subparsers.add_parser('bdev_aio_delete', help='Delete an aio disk')
     p.add_argument('name', help='aio bdev name')
     p.set_defaults(func=bdev_aio_delete)
 
@@ -509,9 +489,10 @@ if __name__ == "__main__":
                                        transport_ack_timeout=args.transport_ack_timeout,
                                        ctrlr_loss_timeout_sec=args.ctrlr_loss_timeout_sec,
                                        reconnect_delay_sec=args.reconnect_delay_sec,
-                                       fast_io_fail_timeout_sec=args.fast_io_fail_timeout_sec)
+                                       fast_io_fail_timeout_sec=args.fast_io_fail_timeout_sec,
+                                       disable_auto_failback=args.disable_auto_failback)
 
-    p = subparsers.add_parser('bdev_nvme_set_options', aliases=['set_bdev_nvme_options'],
+    p = subparsers.add_parser('bdev_nvme_set_options',
                               help='Set options for the bdev nvme type. This is startup command.')
     p.add_argument('-a', '--action-on-timeout',
                    help="Action to take on command time out. Valid values are: none, reset, abort")
@@ -545,7 +526,7 @@ if __name__ == "__main__":
     p.add_argument('-r', '--bdev-retry-count',
                    help='the number of attempts per I/O in the bdev layer when an I/O fails. -1 means infinite retries.', type=int)
     p.add_argument('-e', '--transport-ack-timeout',
-                   help="""Time to wait ack until packet retransmission. RDMA specific.
+                   help="""Time to wait ack until packet retransmission for RDMA or until closes connection for TCP.
                    Range 0-31 where 0 is driver-specific default value.""", type=int)
     p.add_argument('-l', '--ctrlr-loss-timeout-sec',
                    help="""Time to wait until ctrlr is reconnected before deleting ctrlr.
@@ -570,14 +551,17 @@ if __name__ == "__main__":
                    less than ctrlr_loss_timeout_sec if ctrlr_loss_timeout_sec is not -1.
                    This can be overridden by bdev_nvme_attach_controller.""",
                    type=int)
+    p.add_argument('-f', '--disable-auto-failback',
+                   help="""Disable automatic failback. bdev_nvme_set_preferred_path can be used to do manual failback.
+                   By default, immediately failback to the preferred I/O path if it restored.""",
+                   action='store_true')
 
     p.set_defaults(func=bdev_nvme_set_options)
 
     def bdev_nvme_set_hotplug(args):
         rpc.bdev.bdev_nvme_set_hotplug(args.client, enable=args.enable, period_us=args.period_us)
 
-    p = subparsers.add_parser('bdev_nvme_set_hotplug', aliases=['set_bdev_nvme_hotplug'],
-                              help='Set hotplug options for bdev nvme type.')
+    p = subparsers.add_parser('bdev_nvme_set_hotplug', help='Set hotplug options for bdev nvme type.')
     p.add_argument('-d', '--disable', dest='enable', default=False, action='store_false', help="Disable hotplug (default)")
     p.add_argument('-e', '--enable', dest='enable', action='store_true', help="Enable hotplug")
     p.add_argument('-r', '--period-us',
@@ -607,8 +591,7 @@ if __name__ == "__main__":
                                                          reconnect_delay_sec=args.reconnect_delay_sec,
                                                          fast_io_fail_timeout_sec=args.fast_io_fail_timeout_sec))
 
-    p = subparsers.add_parser('bdev_nvme_attach_controller', aliases=['construct_nvme_bdev'],
-                              help='Add bdevs with nvme backend')
+    p = subparsers.add_parser('bdev_nvme_attach_controller', help='Add bdevs with nvme backend')
     p.add_argument('-b', '--name', help="Name of the NVMe controller, prefix for each bdev name", required=True)
     p.add_argument('-t', '--trtype',
                    help='NVMe-oF target trtype: e.g., rdma, pcie', required=True)
@@ -664,8 +647,7 @@ if __name__ == "__main__":
                                                       name=args.name))
 
     p = subparsers.add_parser(
-        'bdev_nvme_get_controllers', aliases=['get_nvme_controllers'],
-        help='Display current NVMe controllers list or required NVMe controller')
+        'bdev_nvme_get_controllers', help='Display current NVMe controllers list or required NVMe controller')
     p.add_argument('-n', '--name', help="Name of the NVMe controller. Example: Nvme0", required=False)
     p.set_defaults(func=bdev_nvme_get_controllers)
 
@@ -680,7 +662,7 @@ if __name__ == "__main__":
                                              hostaddr=args.hostaddr,
                                              hostsvcid=args.hostsvcid)
 
-    p = subparsers.add_parser('bdev_nvme_detach_controller', aliases=['delete_nvme_controller'],
+    p = subparsers.add_parser('bdev_nvme_detach_controller',
                               help='Detach an NVMe controller and delete any associated bdevs')
     p.add_argument('name', help="Name of the controller")
     p.add_argument('-t', '--trtype',
@@ -715,6 +697,7 @@ if __name__ == "__main__":
                                            trsvcid=args.trsvcid,
                                            hostnqn=args.hostnqn,
                                            wait_for_attach=args.wait_for_attach,
+                                           attach_timeout_ms=args.attach_timeout_ms,
                                            ctrlr_loss_timeout_sec=args.ctrlr_loss_timeout_sec,
                                            reconnect_delay_sec=args.reconnect_delay_sec,
                                            fast_io_fail_timeout_sec=args.fast_io_fail_timeout_sec)
@@ -732,6 +715,10 @@ if __name__ == "__main__":
     p.add_argument('-q', '--hostnqn', help='NVMe-oF host subnqn')
     p.add_argument('-w', '--wait-for-attach', action='store_true',
                    help='Do not complete RPC until all discovered NVM subsystems are attached')
+    p.add_argument('-T', '--attach-timeout-ms', type=int, required=False,
+                   help="""Time to wait until the discovery and all discovered NVM subsystems
+                        are attached (default: 0, meaning wait indefinitely).  Automatically
+                        selects the --wait-for-attach option.""")
     p.add_argument('-l', '--ctrlr-loss-timeout-sec',
                    help="""Time to wait until ctrlr is reconnected before deleting ctrlr.
                    -1 means infinite reconnect retries. 0 means no reconnect retry.
@@ -760,6 +747,41 @@ if __name__ == "__main__":
     p = subparsers.add_parser('bdev_nvme_stop_discovery', help='Stop automatic discovery')
     p.add_argument('-b', '--name', help="Name of the service to stop", required=True)
     p.set_defaults(func=bdev_nvme_stop_discovery)
+
+    def bdev_nvme_get_discovery_info(args):
+        print_dict(rpc.bdev.bdev_nvme_get_discovery_info(args.client))
+
+    p = subparsers.add_parser('bdev_nvme_get_discovery_info', help='Get information about the automatic discovery')
+    p.set_defaults(func=bdev_nvme_get_discovery_info)
+
+    def bdev_nvme_get_io_paths(args):
+        print_dict(rpc.bdev.bdev_nvme_get_io_paths(args.client, name=args.name))
+
+    p = subparsers.add_parser('bdev_nvme_get_io_paths', help='Display active I/O paths')
+    p.add_argument('-n', '--name', help="Name of the NVMe bdev", required=False)
+    p.set_defaults(func=bdev_nvme_get_io_paths)
+
+    def bdev_nvme_set_preferred_path(args):
+        rpc.bdev.bdev_nvme_set_preferred_path(args.client,
+                                              name=args.name,
+                                              cntlid=args.cntlid)
+
+    p = subparsers.add_parser('bdev_nvme_set_preferred_path',
+                              help="""Set the preferred I/O path for an NVMe bdev when in multipath mode""")
+    p.add_argument('-b', '--name', help='Name of the NVMe bdev', required=True)
+    p.add_argument('-c', '--cntlid', help='NVMe-oF controller ID', type=int, required=True)
+    p.set_defaults(func=bdev_nvme_set_preferred_path)
+
+    def bdev_nvme_set_multipath_policy(args):
+        rpc.bdev.bdev_nvme_set_multipath_policy(args.client,
+                                                name=args.name,
+                                                policy=args.policy)
+
+    p = subparsers.add_parser('bdev_nvme_set_multipath_policy',
+                              help="""Set multipath policy of the NVMe bdev""")
+    p.add_argument('-b', '--name', help='Name of the NVMe bdev', required=True)
+    p.add_argument('-p', '--policy', help='Multipath policy (active_passive or active_active)', required=True)
+    p.set_defaults(func=bdev_nvme_set_multipath_policy)
 
     def bdev_nvme_cuse_register(args):
         rpc.bdev.bdev_nvme_cuse_register(args.client,
@@ -865,8 +887,7 @@ if __name__ == "__main__":
                                             cluster_name=args.cluster_name,
                                             uuid=args.uuid))
 
-    p = subparsers.add_parser('bdev_rbd_create', aliases=['construct_rbd_bdev'],
-                              help='Add a bdev with ceph rbd backend')
+    p = subparsers.add_parser('bdev_rbd_create', help='Add a bdev with ceph rbd backend')
     p.add_argument('-b', '--name', help="Name of the bdev", required=False)
     p.add_argument('--user', help="Ceph user name (i.e. admin, not client.admin)", required=False)
     p.add_argument('--config', action='append', metavar='key=value',
@@ -882,8 +903,7 @@ if __name__ == "__main__":
         rpc.bdev.bdev_rbd_delete(args.client,
                                  name=args.name)
 
-    p = subparsers.add_parser('bdev_rbd_delete', aliases=['delete_rbd_bdev'],
-                              help='Delete a rbd bdev')
+    p = subparsers.add_parser('bdev_rbd_delete', help='Delete a rbd bdev')
     p.add_argument('name', help='rbd bdev name')
     p.set_defaults(func=bdev_rbd_delete)
 
@@ -891,9 +911,6 @@ if __name__ == "__main__":
         print_json(rpc.bdev.bdev_rbd_resize(args.client,
                                             name=args.name,
                                             new_size=int(args.new_size)))
-        rpc.bdev.bdev_rbd_resize(args.client,
-                                 name=args.name,
-                                 new_size=int(args.new_size))
 
     p = subparsers.add_parser('bdev_rbd_resize',
                               help='Resize a rbd bdev')
@@ -948,8 +965,7 @@ if __name__ == "__main__":
         print_json(rpc.bdev.bdev_error_create(args.client,
                                               base_name=args.base_name))
 
-    p = subparsers.add_parser('bdev_error_create', aliases=['construct_error_bdev'],
-                              help='Add bdev with error injection backend')
+    p = subparsers.add_parser('bdev_error_create', help='Add bdev with error injection backend')
     p.add_argument('base_name', help='base bdev name')
     p.set_defaults(func=bdev_error_create)
 
@@ -957,8 +973,7 @@ if __name__ == "__main__":
         rpc.bdev.bdev_error_delete(args.client,
                                    name=args.name)
 
-    p = subparsers.add_parser('bdev_error_delete', aliases=['delete_error_bdev'],
-                              help='Delete an error bdev')
+    p = subparsers.add_parser('bdev_error_delete', help='Delete an error bdev')
     p.add_argument('name', help='error bdev name')
     p.set_defaults(func=bdev_error_delete)
 
@@ -968,7 +983,7 @@ if __name__ == "__main__":
                                               url=args.url,
                                               initiator_iqn=args.initiator_iqn))
 
-    p = subparsers.add_parser('bdev_iscsi_create', aliases=['construct_iscsi_bdev'],
+    p = subparsers.add_parser('bdev_iscsi_create',
                               help='Add bdev with iSCSI initiator backend')
     p.add_argument('-b', '--name', help="Name of the bdev", required=True)
     p.add_argument('-i', '--initiator-iqn', help="Initiator IQN", required=True)
@@ -979,8 +994,7 @@ if __name__ == "__main__":
         rpc.bdev.bdev_iscsi_delete(args.client,
                                    name=args.name)
 
-    p = subparsers.add_parser('bdev_iscsi_delete', aliases=['delete_iscsi_bdev'],
-                              help='Delete an iSCSI bdev')
+    p = subparsers.add_parser('bdev_iscsi_delete', help='Delete an iSCSI bdev')
     p.add_argument('name', help='iSCSI bdev name')
     p.set_defaults(func=bdev_iscsi_delete)
 
@@ -989,8 +1003,7 @@ if __name__ == "__main__":
                                              pmem_file=args.pmem_file,
                                              name=args.name))
 
-    p = subparsers.add_parser('bdev_pmem_create', aliases=['construct_pmem_bdev'],
-                              help='Add a bdev with pmem backend')
+    p = subparsers.add_parser('bdev_pmem_create', help='Add a bdev with pmem backend')
     p.add_argument('pmem_file', help='Path to pmemblk pool file')
     p.add_argument('-n', '--name', help='Block device name', required=True)
     p.set_defaults(func=bdev_pmem_create)
@@ -999,8 +1012,7 @@ if __name__ == "__main__":
         rpc.bdev.bdev_pmem_delete(args.client,
                                   name=args.name)
 
-    p = subparsers.add_parser('bdev_pmem_delete', aliases=['delete_pmem_bdev'],
-                              help='Delete a pmem bdev')
+    p = subparsers.add_parser('bdev_pmem_delete', help='Delete a pmem bdev')
     p.add_argument('name', help='pmem bdev name')
     p.set_defaults(func=bdev_pmem_delete)
 
@@ -1009,8 +1021,7 @@ if __name__ == "__main__":
                                                  base_bdev_name=args.base_bdev_name,
                                                  name=args.name))
 
-    p = subparsers.add_parser('bdev_passthru_create', aliases=['construct_passthru_bdev'],
-                              help='Add a pass through bdev on existing bdev')
+    p = subparsers.add_parser('bdev_passthru_create', help='Add a pass through bdev on existing bdev')
     p.add_argument('-b', '--base-bdev-name', help="Name of the existing bdev", required=True)
     p.add_argument('-p', '--name', help="Name of the pass through bdev", required=True)
     p.set_defaults(func=bdev_passthru_create)
@@ -1019,8 +1030,7 @@ if __name__ == "__main__":
         rpc.bdev.bdev_passthru_delete(args.client,
                                       name=args.name)
 
-    p = subparsers.add_parser('bdev_passthru_delete', aliases=['delete_passthru_bdev'],
-                              help='Delete a pass through bdev')
+    p = subparsers.add_parser('bdev_passthru_delete', help='Delete a pass through bdev')
     p.add_argument('name', help='pass through bdev name')
     p.set_defaults(func=bdev_passthru_delete)
 
@@ -1028,7 +1038,7 @@ if __name__ == "__main__":
         print_dict(rpc.bdev.bdev_get_bdevs(args.client,
                                            name=args.name, timeout=args.timeout_ms))
 
-    p = subparsers.add_parser('bdev_get_bdevs', aliases=['get_bdevs'],
+    p = subparsers.add_parser('bdev_get_bdevs',
                               help='Display current blockdev list or required blockdev')
     p.add_argument('-b', '--name', help="Name of the Blockdev. Example: Nvme0n1", required=False)
     p.add_argument('-t', '--timeout-ms', help="""Time in ms to wait for the bdev to appear (only used
@@ -1041,7 +1051,7 @@ if __name__ == "__main__":
         print_dict(rpc.bdev.bdev_get_iostat(args.client,
                                             name=args.name))
 
-    p = subparsers.add_parser('bdev_get_iostat', aliases=['get_bdevs_iostat'],
+    p = subparsers.add_parser('bdev_get_iostat',
                               help='Display current I/O statistics of all the blockdevs or required blockdev.')
     p.add_argument('-b', '--name', help="Name of the Blockdev. Example: Nvme0n1", required=False)
     p.set_defaults(func=bdev_get_iostat)
@@ -1049,7 +1059,7 @@ if __name__ == "__main__":
     def bdev_enable_histogram(args):
         rpc.bdev.bdev_enable_histogram(args.client, name=args.name, enable=args.enable)
 
-    p = subparsers.add_parser('bdev_enable_histogram', aliases=['enable_bdev_histogram'],
+    p = subparsers.add_parser('bdev_enable_histogram',
                               help='Enable or disable histogram for specified bdev')
     p.add_argument('-e', '--enable', default=True, dest='enable', action='store_true', help='Enable histograms on specified device')
     p.add_argument('-d', '--disable', dest='enable', action='store_false', help='Disable histograms on specified device')
@@ -1059,7 +1069,7 @@ if __name__ == "__main__":
     def bdev_get_histogram(args):
         print_dict(rpc.bdev.bdev_get_histogram(args.client, name=args.name))
 
-    p = subparsers.add_parser('bdev_get_histogram', aliases=['get_bdev_histogram'],
+    p = subparsers.add_parser('bdev_get_histogram',
                               help='Get histogram for specified bdev')
     p.add_argument('name', help='bdev name')
     p.set_defaults(func=bdev_get_histogram)
@@ -1069,7 +1079,7 @@ if __name__ == "__main__":
                                              name=args.name,
                                              period=args.period)
 
-    p = subparsers.add_parser('bdev_set_qd_sampling_period', aliases=['set_bdev_qd_sampling_period'],
+    p = subparsers.add_parser('bdev_set_qd_sampling_period',
                               help="Enable or disable tracking of a bdev's queue depth.")
     p.add_argument('name', help='Blockdev name. Example: Malloc0')
     p.add_argument('period', help='Period with which to poll the block device queue depth in microseconds.'
@@ -1085,7 +1095,7 @@ if __name__ == "__main__":
                                     r_mbytes_per_sec=args.r_mbytes_per_sec,
                                     w_mbytes_per_sec=args.w_mbytes_per_sec)
 
-    p = subparsers.add_parser('bdev_set_qos_limit', aliases=['set_bdev_qos_limit'],
+    p = subparsers.add_parser('bdev_set_qos_limit',
                               help='Set QoS rate limit on a blockdev')
     p.add_argument('name', help='Blockdev name to set QoS. Example: Malloc0')
     p.add_argument('--rw-ios-per-sec',
@@ -1109,8 +1119,7 @@ if __name__ == "__main__":
                                          error_type=args.error_type,
                                          num=args.num)
 
-    p = subparsers.add_parser('bdev_error_inject_error', aliases=['bdev_inject_error'],
-                              help='bdev inject error')
+    p = subparsers.add_parser('bdev_error_inject_error', help='bdev inject error')
     p.add_argument('name', help="""the name of the error injection bdev""")
     p.add_argument('io_type', help="""io_type: 'clear' 'read' 'write' 'unmap' 'flush' 'all'""")
     p.add_argument('error_type', help="""error_type: 'failure' 'pending'""")
@@ -1123,8 +1132,7 @@ if __name__ == "__main__":
                                                      bdev_name=args.bdev_name,
                                                      filename=args.filename))
 
-    p = subparsers.add_parser('bdev_nvme_apply_firmware', aliases=['apply_firmware'],
-                              help='Download and commit firmware to NVMe device')
+    p = subparsers.add_parser('bdev_nvme_apply_firmware', help='Download and commit firmware to NVMe device')
     p.add_argument('filename', help='filename of the firmware to download')
     p.add_argument('bdev_name', help='name of the NVMe device')
     p.set_defaults(func=bdev_nvme_apply_firmware)
@@ -1172,7 +1180,7 @@ if __name__ == "__main__":
             immediate_data_pool_size=args.immediate_data_pool_size,
             data_out_pool_size=args.data_out_pool_size)
 
-    p = subparsers.add_parser('iscsi_set_options', aliases=['set_iscsi_options'],
+    p = subparsers.add_parser('iscsi_set_options',
                               help="""Set options of iSCSI subsystem""")
     p.add_argument('-f', '--auth-file', help='Path to CHAP shared secret file')
     p.add_argument('-b', '--node-base', help='Prefix of the name of iSCSI target node')
@@ -1209,7 +1217,7 @@ if __name__ == "__main__":
             mutual_chap=args.mutual_chap,
             chap_group=args.chap_group)
 
-    p = subparsers.add_parser('iscsi_set_discovery_auth', aliases=['set_iscsi_discovery_auth'],
+    p = subparsers.add_parser('iscsi_set_discovery_auth',
                               help="""Set CHAP authentication for discovery session.""")
     p.add_argument('-d', '--disable-chap', help="""CHAP for discovery session should be disabled.
     *** Mutually exclusive with --require-chap""", action='store_true')
@@ -1227,7 +1235,7 @@ if __name__ == "__main__":
 
         rpc.iscsi.iscsi_create_auth_group(args.client, tag=args.tag, secrets=secrets)
 
-    p = subparsers.add_parser('iscsi_create_auth_group', aliases=['add_iscsi_auth_group'],
+    p = subparsers.add_parser('iscsi_create_auth_group',
                               help='Create authentication group for CHAP authentication.')
     p.add_argument('tag', help='Authentication group tag (unique, integer > 0).', type=int)
     p.add_argument('-c', '--secrets', help="""Comma-separated list of CHAP secrets
@@ -1238,7 +1246,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def iscsi_delete_auth_group(args):
         rpc.iscsi.iscsi_delete_auth_group(args.client, tag=args.tag)
 
-    p = subparsers.add_parser('iscsi_delete_auth_group', aliases=['delete_iscsi_auth_group'],
+    p = subparsers.add_parser('iscsi_delete_auth_group',
                               help='Delete an authentication group.')
     p.add_argument('tag', help='Authentication group tag', type=int)
     p.set_defaults(func=iscsi_delete_auth_group)
@@ -1252,7 +1260,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
             muser=args.muser,
             msecret=args.msecret)
 
-    p = subparsers.add_parser('iscsi_auth_group_add_secret', aliases=['add_secret_to_iscsi_auth_group'],
+    p = subparsers.add_parser('iscsi_auth_group_add_secret',
                               help='Add a secret to an authentication group.')
     p.add_argument('tag', help='Authentication group tag', type=int)
     p.add_argument('-u', '--user', help='User name for one-way CHAP authentication', required=True)
@@ -1264,7 +1272,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def iscsi_auth_group_remove_secret(args):
         rpc.iscsi.iscsi_auth_group_remove_secret(args.client, tag=args.tag, user=args.user)
 
-    p = subparsers.add_parser('iscsi_auth_group_remove_secret', aliases=['delete_secret_from_iscsi_auth_group'],
+    p = subparsers.add_parser('iscsi_auth_group_remove_secret',
                               help='Remove a secret from an authentication group.')
     p.add_argument('tag', help='Authentication group tag', type=int)
     p.add_argument('-u', '--user', help='User name for one-way CHAP authentication', required=True)
@@ -1273,31 +1281,27 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def iscsi_get_auth_groups(args):
         print_dict(rpc.iscsi.iscsi_get_auth_groups(args.client))
 
-    p = subparsers.add_parser('iscsi_get_auth_groups', aliases=['get_iscsi_auth_groups'],
+    p = subparsers.add_parser('iscsi_get_auth_groups',
                               help='Display current authentication group configuration')
     p.set_defaults(func=iscsi_get_auth_groups)
 
     def iscsi_get_portal_groups(args):
         print_dict(rpc.iscsi.iscsi_get_portal_groups(args.client))
 
-    p = subparsers.add_parser(
-        'iscsi_get_portal_groups', aliases=['get_portal_groups'],
-        help='Display current portal group configuration')
+    p = subparsers.add_parser('iscsi_get_portal_groups', help='Display current portal group configuration')
     p.set_defaults(func=iscsi_get_portal_groups)
 
     def iscsi_get_initiator_groups(args):
         print_dict(rpc.iscsi.iscsi_get_initiator_groups(args.client))
 
     p = subparsers.add_parser('iscsi_get_initiator_groups',
-                              aliases=['get_initiator_groups'],
                               help='Display current initiator group configuration')
     p.set_defaults(func=iscsi_get_initiator_groups)
 
     def iscsi_get_target_nodes(args):
         print_dict(rpc.iscsi.iscsi_get_target_nodes(args.client))
 
-    p = subparsers.add_parser('iscsi_get_target_nodes', aliases=['get_target_nodes'],
-                              help='Display target nodes')
+    p = subparsers.add_parser('iscsi_get_target_nodes', help='Display target nodes')
     p.set_defaults(func=iscsi_get_target_nodes)
 
     def iscsi_create_target_node(args):
@@ -1325,8 +1329,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
             header_digest=args.header_digest,
             data_digest=args.data_digest)
 
-    p = subparsers.add_parser('iscsi_create_target_node', aliases=['construct_target_node'],
-                              help='Add a target node')
+    p = subparsers.add_parser('iscsi_create_target_node', help='Add a target node')
     p.add_argument('name', help='Target node name (ASCII)')
     p.add_argument('alias_name', help='Target node alias name (ASCII)')
     p.add_argument('bdev_name_id_pairs', help="""Whitespace-separated list of <bdev name:LUN ID> pairs enclosed
@@ -1362,7 +1365,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
             bdev_name=args.bdev_name,
             lun_id=args.lun_id)
 
-    p = subparsers.add_parser('iscsi_target_node_add_lun', aliases=['target_node_add_lun'],
+    p = subparsers.add_parser('iscsi_target_node_add_lun',
                               help='Add LUN to the target node')
     p.add_argument('name', help='Target node name (ASCII)')
     p.add_argument('bdev_name', help="""bdev name enclosed in quotes.
@@ -1380,7 +1383,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
             require_chap=args.require_chap,
             mutual_chap=args.mutual_chap)
 
-    p = subparsers.add_parser('iscsi_target_node_set_auth', aliases=['set_iscsi_target_node_auth'],
+    p = subparsers.add_parser('iscsi_target_node_set_auth',
                               help='Set CHAP authentication for the target node')
     p.add_argument('name', help='Target node name (ASCII)')
     p.add_argument('-g', '--chap-group', help="""Authentication group ID for this target node.
@@ -1404,7 +1407,6 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
             name=args.name)
 
     p = subparsers.add_parser('iscsi_target_node_add_pg_ig_maps',
-                              aliases=['add_pg_ig_maps'],
                               help='Add PG-IG maps to the target node')
     p.add_argument('name', help='Target node name (ASCII)')
     p.add_argument('pg_ig_mappings', help="""List of (Portal_Group_Tag:Initiator_Group_Tag) mappings
@@ -1423,7 +1425,6 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
             args.client, pg_ig_maps=pg_ig_maps, name=args.name)
 
     p = subparsers.add_parser('iscsi_target_node_remove_pg_ig_maps',
-                              aliases=['delete_pg_ig_maps'],
                               help='Delete PG-IG maps from the target node')
     p.add_argument('name', help='Target node name (ASCII)')
     p.add_argument('pg_ig_mappings', help="""List of (Portal_Group_Tag:Initiator_Group_Tag) mappings
@@ -1483,7 +1484,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
             private=args.private,
             wait=args.wait)
 
-    p = subparsers.add_parser('iscsi_create_portal_group', aliases=['add_portal_group'],
+    p = subparsers.add_parser('iscsi_create_portal_group',
                               help='Add a portal group')
     p.add_argument(
         'tag', help='Portal group tag (unique, integer > 0)', type=int)
@@ -1520,7 +1521,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
             initiators=initiators,
             netmasks=netmasks)
 
-    p = subparsers.add_parser('iscsi_create_initiator_group', aliases=['add_initiator_group'],
+    p = subparsers.add_parser('iscsi_create_initiator_group',
                               help='Add an initiator group')
     p.add_argument(
         'tag', help='Initiator group tag (unique, integer > 0)', type=int)
@@ -1548,7 +1549,6 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
             netmasks=netmasks)
 
     p = subparsers.add_parser('iscsi_initiator_group_add_initiators',
-                              aliases=['add_initiators_to_initiator_group'],
                               help='Add initiators to an existing initiator group')
     p.add_argument(
         'tag', help='Initiator group tag (unique, integer > 0)', type=int)
@@ -1577,7 +1577,6 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
             netmasks=netmasks)
 
     p = subparsers.add_parser('iscsi_initiator_group_remove_initiators',
-                              aliases=['delete_initiators_from_initiator_group'],
                               help='Delete initiators from an existing initiator group')
     p.add_argument(
         'tag', help='Initiator group tag (unique, integer > 0)', type=int)
@@ -1592,7 +1591,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
         rpc.iscsi.iscsi_delete_target_node(
             args.client, target_node_name=args.target_node_name)
 
-    p = subparsers.add_parser('iscsi_delete_target_node', aliases=['delete_target_node'],
+    p = subparsers.add_parser('iscsi_delete_target_node',
                               help='Delete a target node')
     p.add_argument('target_node_name',
                    help='Target node name to be deleted. Example: iqn.2016-06.io.spdk:disk1.')
@@ -1602,7 +1601,6 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
         rpc.iscsi.iscsi_delete_portal_group(args.client, tag=args.tag)
 
     p = subparsers.add_parser('iscsi_delete_portal_group',
-                              aliases=['delete_portal_group'],
                               help='Delete a portal group')
     p.add_argument(
         'tag', help='Portal group tag (unique, integer > 0)', type=int)
@@ -1612,7 +1610,6 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
         rpc.iscsi.iscsi_delete_initiator_group(args.client, tag=args.tag)
 
     p = subparsers.add_parser('iscsi_delete_initiator_group',
-                              aliases=['delete_initiator_group'],
                               help='Delete an initiator group')
     p.add_argument(
         'tag', help='Initiator group tag (unique, integer > 0)', type=int)
@@ -1643,29 +1640,28 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def iscsi_get_connections(args):
         print_dict(rpc.iscsi.iscsi_get_connections(args.client))
 
-    p = subparsers.add_parser('iscsi_get_connections', aliases=['get_iscsi_connections'],
+    p = subparsers.add_parser('iscsi_get_connections',
                               help='Display iSCSI connections')
     p.set_defaults(func=iscsi_get_connections)
 
     def iscsi_get_options(args):
         print_dict(rpc.iscsi.iscsi_get_options(args.client))
 
-    p = subparsers.add_parser('iscsi_get_options', aliases=['get_iscsi_global_params'],
+    p = subparsers.add_parser('iscsi_get_options',
                               help='Display iSCSI global parameters')
     p.set_defaults(func=iscsi_get_options)
 
     def scsi_get_devices(args):
         print_dict(rpc.iscsi.scsi_get_devices(args.client))
 
-    p = subparsers.add_parser('scsi_get_devices', aliases=['get_scsi_devices'],
-                              help='Display SCSI devices')
+    p = subparsers.add_parser('scsi_get_devices', help='Display SCSI devices')
     p.set_defaults(func=scsi_get_devices)
 
     # trace
     def trace_enable_tpoint_group(args):
         rpc.trace.trace_enable_tpoint_group(args.client, name=args.name)
 
-    p = subparsers.add_parser('trace_enable_tpoint_group', aliases=['enable_tpoint_group'],
+    p = subparsers.add_parser('trace_enable_tpoint_group',
                               help='enable trace on a specific tpoint group')
     p.add_argument(
         'name', help="""trace group name we want to enable in tpoint_group_mask.
@@ -1675,7 +1671,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def trace_disable_tpoint_group(args):
         rpc.trace.trace_disable_tpoint_group(args.client, name=args.name)
 
-    p = subparsers.add_parser('trace_disable_tpoint_group', aliases=['disable_tpoint_group'],
+    p = subparsers.add_parser('trace_disable_tpoint_group',
                               help='disable trace on a specific tpoint group')
     p.add_argument(
         'name', help="""trace group name we want to disable in tpoint_group_mask.
@@ -1713,15 +1709,14 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def trace_get_tpoint_group_mask(args):
         print_dict(rpc.trace.trace_get_tpoint_group_mask(args.client))
 
-    p = subparsers.add_parser('trace_get_tpoint_group_mask', aliases=['get_tpoint_group_mask'],
-                              help='get trace point group mask')
+    p = subparsers.add_parser('trace_get_tpoint_group_mask', help='get trace point group mask')
     p.set_defaults(func=trace_get_tpoint_group_mask)
 
     # log
     def log_set_flag(args):
         rpc.log.log_set_flag(args.client, flag=args.flag)
 
-    p = subparsers.add_parser('log_set_flag', help='set log flag', aliases=['set_log_flag'])
+    p = subparsers.add_parser('log_set_flag', help='set log flag')
     p.add_argument(
         'flag', help='log flag we want to set. (for example "nvme").')
     p.set_defaults(func=log_set_flag)
@@ -1729,7 +1724,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def log_clear_flag(args):
         rpc.log.log_clear_flag(args.client, flag=args.flag)
 
-    p = subparsers.add_parser('log_clear_flag', help='clear log flag', aliases=['clear_log_flag'])
+    p = subparsers.add_parser('log_clear_flag', help='clear log flag')
     p.add_argument(
         'flag', help='log flag we want to clear. (for example "nvme").')
     p.set_defaults(func=log_clear_flag)
@@ -1737,37 +1732,33 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def log_get_flags(args):
         print_dict(rpc.log.log_get_flags(args.client))
 
-    p = subparsers.add_parser('log_get_flags', help='get log flags', aliases=['get_log_flags'])
+    p = subparsers.add_parser('log_get_flags', help='get log flags')
     p.set_defaults(func=log_get_flags)
 
     def log_set_level(args):
         rpc.log.log_set_level(args.client, level=args.level)
 
-    p = subparsers.add_parser('log_set_level', aliases=['set_log_level'],
-                              help='set log level')
+    p = subparsers.add_parser('log_set_level', help='set log level')
     p.add_argument('level', help='log level we want to set. (for example "DEBUG").')
     p.set_defaults(func=log_set_level)
 
     def log_get_level(args):
         print_dict(rpc.log.log_get_level(args.client))
 
-    p = subparsers.add_parser('log_get_level', aliases=['get_log_level'],
-                              help='get log level')
+    p = subparsers.add_parser('log_get_level', help='get log level')
     p.set_defaults(func=log_get_level)
 
     def log_set_print_level(args):
         rpc.log.log_set_print_level(args.client, level=args.level)
 
-    p = subparsers.add_parser('log_set_print_level', aliases=['set_log_print_level'],
-                              help='set log print level')
+    p = subparsers.add_parser('log_set_print_level', help='set log print level')
     p.add_argument('level', help='log print level we want to set. (for example "DEBUG").')
     p.set_defaults(func=log_set_print_level)
 
     def log_get_print_level(args):
         print_dict(rpc.log.log_get_print_level(args.client))
 
-    p = subparsers.add_parser('log_get_print_level', aliases=['get_log_print_level'],
-                              help='get log print level')
+    p = subparsers.add_parser('log_get_print_level', help='get log print level')
     p.set_defaults(func=log_get_print_level)
 
     # lvol
@@ -1778,8 +1769,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                                      cluster_sz=args.cluster_sz,
                                                      clear_method=args.clear_method))
 
-    p = subparsers.add_parser('bdev_lvol_create_lvstore', aliases=['construct_lvol_store'],
-                              help='Add logical volume store on base bdev')
+    p = subparsers.add_parser('bdev_lvol_create_lvstore', help='Add logical volume store on base bdev')
     p.add_argument('bdev_name', help='base bdev name')
     p.add_argument('lvs_name', help='name for lvol store')
     p.add_argument('-c', '--cluster-sz', help='size of cluster (in bytes)', type=int, required=False)
@@ -1792,8 +1782,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                           old_name=args.old_name,
                                           new_name=args.new_name)
 
-    p = subparsers.add_parser('bdev_lvol_rename_lvstore', aliases=['rename_lvol_store'],
-                              help='Change logical volume store name')
+    p = subparsers.add_parser('bdev_lvol_rename_lvstore', help='Change logical volume store name')
     p.add_argument('old_name', help='old name')
     p.add_argument('new_name', help='new name')
     p.set_defaults(func=bdev_lvol_rename_lvstore)
@@ -1807,8 +1796,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                              uuid=args.uuid,
                                              lvs_name=args.lvs_name))
 
-    p = subparsers.add_parser('bdev_lvol_create', aliases=['construct_lvol_bdev'],
-                              help='Add a bdev with an logical volume backend')
+    p = subparsers.add_parser('bdev_lvol_create', help='Add a bdev with an logical volume backend')
     p.add_argument('-u', '--uuid', help='lvol store UUID', required=False)
     p.add_argument('-l', '--lvs-name', help='lvol store name', required=False)
     p.add_argument('-t', '--thin-provision', action='store_true', help='create lvol bdev as thin provisioned')
@@ -1823,8 +1811,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                                lvol_name=args.lvol_name,
                                                snapshot_name=args.snapshot_name))
 
-    p = subparsers.add_parser('bdev_lvol_snapshot', aliases=['snapshot_lvol_bdev'],
-                              help='Create a snapshot of an lvol bdev')
+    p = subparsers.add_parser('bdev_lvol_snapshot', help='Create a snapshot of an lvol bdev')
     p.add_argument('lvol_name', help='lvol bdev name')
     p.add_argument('snapshot_name', help='lvol snapshot name')
     p.set_defaults(func=bdev_lvol_snapshot)
@@ -1834,8 +1821,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                             snapshot_name=args.snapshot_name,
                                             clone_name=args.clone_name))
 
-    p = subparsers.add_parser('bdev_lvol_clone', aliases=['clone_lvol_bdev'],
-                              help='Create a clone of an lvol snapshot')
+    p = subparsers.add_parser('bdev_lvol_clone', help='Create a clone of an lvol snapshot')
     p.add_argument('snapshot_name', help='lvol snapshot name')
     p.add_argument('clone_name', help='lvol clone name')
     p.set_defaults(func=bdev_lvol_clone)
@@ -1845,8 +1831,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                   old_name=args.old_name,
                                   new_name=args.new_name)
 
-    p = subparsers.add_parser('bdev_lvol_rename', aliases=['rename_lvol_bdev'],
-                              help='Change lvol bdev name')
+    p = subparsers.add_parser('bdev_lvol_rename', help='Change lvol bdev name')
     p.add_argument('old_name', help='lvol bdev name')
     p.add_argument('new_name', help='new lvol name')
     p.set_defaults(func=bdev_lvol_rename)
@@ -1855,8 +1840,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
         rpc.lvol.bdev_lvol_inflate(args.client,
                                    name=args.name)
 
-    p = subparsers.add_parser('bdev_lvol_inflate', aliases=['inflate_lvol_bdev'],
-                              help='Make thin provisioned lvol a thick provisioned lvol')
+    p = subparsers.add_parser('bdev_lvol_inflate', help='Make thin provisioned lvol a thick provisioned lvol')
     p.add_argument('name', help='lvol bdev name')
     p.set_defaults(func=bdev_lvol_inflate)
 
@@ -1864,8 +1848,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
         rpc.lvol.bdev_lvol_decouple_parent(args.client,
                                            name=args.name)
 
-    p = subparsers.add_parser('bdev_lvol_decouple_parent', aliases=['decouple_parent_lvol_bdev'],
-                              help='Decouple parent of lvol')
+    p = subparsers.add_parser('bdev_lvol_decouple_parent', help='Decouple parent of lvol')
     p.add_argument('name', help='lvol bdev name')
     p.set_defaults(func=bdev_lvol_decouple_parent)
 
@@ -1874,8 +1857,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                   name=args.name,
                                   size=args.size * 1024 * 1024)
 
-    p = subparsers.add_parser('bdev_lvol_resize', aliases=['resize_lvol_bdev'],
-                              help='Resize existing lvol bdev')
+    p = subparsers.add_parser('bdev_lvol_resize', help='Resize existing lvol bdev')
     p.add_argument('name', help='lvol bdev name')
     p.add_argument('size', help='new size in MiB for this bdev', type=int)
     p.set_defaults(func=bdev_lvol_resize)
@@ -1884,8 +1866,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
         rpc.lvol.bdev_lvol_set_read_only(args.client,
                                          name=args.name)
 
-    p = subparsers.add_parser('bdev_lvol_set_read_only', aliases=['set_read_only_lvol_bdev'],
-                              help='Mark lvol bdev as read only')
+    p = subparsers.add_parser('bdev_lvol_set_read_only', help='Mark lvol bdev as read only')
     p.add_argument('name', help='lvol bdev name')
     p.set_defaults(func=bdev_lvol_set_read_only)
 
@@ -1893,8 +1874,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
         rpc.lvol.bdev_lvol_delete(args.client,
                                   name=args.name)
 
-    p = subparsers.add_parser('bdev_lvol_delete', aliases=['destroy_lvol_bdev'],
-                              help='Destroy a logical volume')
+    p = subparsers.add_parser('bdev_lvol_delete', help='Destroy a logical volume')
     p.add_argument('name', help='lvol bdev name')
     p.set_defaults(func=bdev_lvol_delete)
 
@@ -1903,8 +1883,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                           uuid=args.uuid,
                                           lvs_name=args.lvs_name)
 
-    p = subparsers.add_parser('bdev_lvol_delete_lvstore', aliases=['destroy_lvol_store'],
-                              help='Destroy an logical volume store')
+    p = subparsers.add_parser('bdev_lvol_delete_lvstore', help='Destroy an logical volume store')
     p.add_argument('-u', '--uuid', help='lvol store UUID', required=False)
     p.add_argument('-l', '--lvs-name', help='lvol store name', required=False)
     p.set_defaults(func=bdev_lvol_delete_lvstore)
@@ -1914,8 +1893,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                                    uuid=args.uuid,
                                                    lvs_name=args.lvs_name))
 
-    p = subparsers.add_parser('bdev_lvol_get_lvstores', aliases=['get_lvol_stores'],
-                              help='Display current logical volume store list')
+    p = subparsers.add_parser('bdev_lvol_get_lvstores', help='Display current logical volume store list')
     p.add_argument('-u', '--uuid', help='lvol store UUID', required=False)
     p.add_argument('-l', '--lvs-name', help='lvol store name', required=False)
     p.set_defaults(func=bdev_lvol_get_lvstores)
@@ -1924,7 +1902,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
         print_array(rpc.bdev.bdev_raid_get_bdevs(args.client,
                                                  category=args.category))
 
-    p = subparsers.add_parser('bdev_raid_get_bdevs', aliases=['get_raid_bdevs'],
+    p = subparsers.add_parser('bdev_raid_get_bdevs',
                               help="""This is used to list all the raid bdev names based on the input category
     requested. Category should be one of 'all', 'online', 'configuring' or 'offline'. 'all' means all the raid bdevs whether
     they are online or configuring or offline. 'online' is the raid bdev which is registered with bdev layer. 'configuring'
@@ -1943,8 +1921,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                   strip_size_kb=args.strip_size_kb,
                                   raid_level=args.raid_level,
                                   base_bdevs=base_bdevs)
-    p = subparsers.add_parser('bdev_raid_create', aliases=['construct_raid_bdev'],
-                              help='Create new raid bdev')
+    p = subparsers.add_parser('bdev_raid_create', help='Create new raid bdev')
     p.add_argument('-n', '--name', help='raid bdev name', required=True)
     p.add_argument('-z', '--strip-size-kb', help='strip size in KB', type=int)
     p.add_argument('-r', '--raid-level', help='raid level, raid0 and a special level concat are supported', required=True)
@@ -1954,8 +1931,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def bdev_raid_delete(args):
         rpc.bdev.bdev_raid_delete(args.client,
                                   name=args.name)
-    p = subparsers.add_parser('bdev_raid_delete', aliases=['destroy_raid_bdev'],
-                              help='Delete existing raid bdev')
+    p = subparsers.add_parser('bdev_raid_delete', help='Delete existing raid bdev')
     p.add_argument('name', help='raid bdev name')
     p.set_defaults(func=bdev_raid_delete)
 
@@ -2002,7 +1978,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                                split_count=args.split_count,
                                                split_size_mb=args.split_size_mb))
 
-    p = subparsers.add_parser('bdev_split_create', aliases=['construct_split_vbdev'],
+    p = subparsers.add_parser('bdev_split_create',
                               help="""Add given disk name to split config. If bdev with base_name
     name exist the split bdevs will be created right away, if not split bdevs will be created when base bdev became
     available (during examination process).""")
@@ -2016,8 +1992,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
         rpc.bdev.bdev_split_delete(args.client,
                                    base_bdev=args.base_bdev)
 
-    p = subparsers.add_parser('bdev_split_delete', aliases=['destruct_split_vbdev'],
-                              help="""Delete split config with all created splits.""")
+    p = subparsers.add_parser('bdev_split_delete', help="""Delete split config with all created splits.""")
     p.add_argument('base_bdev', help='base bdev name')
     p.set_defaults(func=bdev_split_delete)
 
@@ -2051,7 +2026,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                             use_append=args.use_append,
                                             **arg_limits))
 
-    p = subparsers.add_parser('bdev_ftl_create', aliases=['construct_ftl_bdev'], help='Add FTL bdev')
+    p = subparsers.add_parser('bdev_ftl_create', help='Add FTL bdev')
     p.add_argument('-b', '--name', help="Name of the bdev", required=True)
     p.add_argument('-d', '--base-bdev', help='Name of zoned bdev used as underlying device',
                    required=True)
@@ -2077,8 +2052,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def bdev_ftl_delete(args):
         print_dict(rpc.bdev.bdev_ftl_delete(args.client, name=args.name))
 
-    p = subparsers.add_parser('bdev_ftl_delete', aliases=['delete_ftl_bdev'],
-                              help='Delete FTL bdev')
+    p = subparsers.add_parser('bdev_ftl_delete', help='Delete FTL bdev')
     p.add_argument('-b', '--name', help="Name of the bdev", required=True)
     p.set_defaults(func=bdev_ftl_delete)
 
@@ -2095,7 +2069,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                      bdev_name=args.bdev_name,
                                      nbd_device=args.nbd_device))
 
-    p = subparsers.add_parser('nbd_start_disk', aliases=['start_nbd_disk'],
+    p = subparsers.add_parser('nbd_start_disk',
                               help='Export a bdev as an nbd disk')
     p.add_argument('bdev_name', help='Blockdev name to be exported. Example: Malloc0.')
     p.add_argument('nbd_device', help='Nbd device name to be assigned. Example: /dev/nbd0.', nargs='?')
@@ -2105,7 +2079,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
         rpc.nbd.nbd_stop_disk(args.client,
                               nbd_device=args.nbd_device)
 
-    p = subparsers.add_parser('nbd_stop_disk', aliases=['stop_nbd_disk'],
+    p = subparsers.add_parser('nbd_stop_disk',
                               help='Stop an nbd disk')
     p.add_argument('nbd_device', help='Nbd device name to be stopped. Example: /dev/nbd0.')
     p.set_defaults(func=nbd_stop_disk)
@@ -2114,7 +2088,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
         print_dict(rpc.nbd.nbd_get_disks(args.client,
                                          nbd_device=args.nbd_device))
 
-    p = subparsers.add_parser('nbd_get_disks', aliases=['get_nbd_disks'],
+    p = subparsers.add_parser('nbd_get_disks',
                               help='Display full or specified nbd device list')
     p.add_argument('-n', '--nbd-device', help="Path of the nbd device. Example: /dev/nbd0", required=False)
     p.set_defaults(func=nbd_get_disks)
@@ -2124,7 +2098,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
         rpc.nvmf.nvmf_set_max_subsystems(args.client,
                                          max_subsystems=args.max_subsystems)
 
-    p = subparsers.add_parser('nvmf_set_max_subsystems', aliases=['set_nvmf_target_max_subsystems'],
+    p = subparsers.add_parser('nvmf_set_max_subsystems',
                               help='Set the maximum number of NVMf target subsystems')
     p.add_argument('-x', '--max-subsystems', help='Max number of NVMf subsystems', type=int, required=True)
     p.set_defaults(func=nvmf_set_max_subsystems)
@@ -2135,8 +2109,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                  poll_groups_mask=args.poll_groups_mask,
                                  discovery_filter=args.discovery_filter)
 
-    p = subparsers.add_parser('nvmf_set_config', aliases=['set_nvmf_target_config'],
-                              help='Set NVMf target config')
+    p = subparsers.add_parser('nvmf_set_config', help='Set NVMf target config')
     p.add_argument('-i', '--passthru-identify-ctrlr', help="""Passthrough fields like serial number and model number
     when the controller has a single namespace that is an NVMe bdev""", action='store_true')
     p.add_argument('-m', '--poll-groups-mask', help='Set cpumask for NVMf poll groups (optional)', type=str)
@@ -2176,14 +2149,15 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     Relevant only for VFIO-USER transport""")
     p.add_argument('-I', '--disable-adaptive-irq', action='store_true', help="""Disable adaptive interrupt feature.
     Relevant only for VFIO-USER transport""")
+    p.add_argument('-S', '--disable-shadow-doorbells', action='store_true', help="""Disable shadow doorbell support.
+    Relevant only for VFIO-USER transport""")
     p.add_argument('--acceptor-poll-rate', help='Polling interval of the acceptor for incoming connections (usec)', type=int)
     p.set_defaults(func=nvmf_create_transport)
 
     def nvmf_get_transports(args):
         print_dict(rpc.nvmf.nvmf_get_transports(args.client, trtype=args.trtype, tgt_name=args.tgt_name))
 
-    p = subparsers.add_parser('nvmf_get_transports', aliases=['get_nvmf_transports'],
-                              help='Display nvmf transports or required transport')
+    p = subparsers.add_parser('nvmf_get_transports', help='Display nvmf transports or required transport')
     p.add_argument('--trtype', help='Transport type (optional)')
     p.add_argument('-t', '--tgt-name', help='The name of the parent NVMe-oF target (optional)', type=str)
     p.set_defaults(func=nvmf_get_transports)
@@ -2191,8 +2165,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def nvmf_get_subsystems(args):
         print_dict(rpc.nvmf.nvmf_get_subsystems(args.client, nqn=args.nqn, tgt_name=args.tgt_name))
 
-    p = subparsers.add_parser('nvmf_get_subsystems', aliases=['get_nvmf_subsystems'],
-                              help='Display nvmf subsystems or required subsystem')
+    p = subparsers.add_parser('nvmf_get_subsystems', help='Display nvmf subsystems or required subsystem')
     p.add_argument('nqn', help='Subsystem NQN (optional)', nargs="?", default=None)
     p.add_argument('-t', '--tgt-name', help='The name of the parent NVMe-oF target (optional)', type=str)
     p.set_defaults(func=nvmf_get_subsystems)
@@ -2209,8 +2182,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                        min_cntlid=args.min_cntlid,
                                        max_cntlid=args.max_cntlid)
 
-    p = subparsers.add_parser('nvmf_create_subsystem', aliases=['nvmf_subsystem_create'],
-                              help='Create an NVMe-oF subsystem')
+    p = subparsers.add_parser('nvmf_create_subsystem', help='Create an NVMe-oF subsystem')
     p.add_argument('nqn', help='Subsystem NQN (ASCII)')
     p.add_argument('-t', '--tgt-name', help='The name of the parent NVMe-oF target (optional)', type=str)
     p.add_argument("-s", "--serial-number", help="""
@@ -2232,8 +2204,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                        nqn=args.subsystem_nqn,
                                        tgt_name=args.tgt_name)
 
-    p = subparsers.add_parser('nvmf_delete_subsystem', aliases=['delete_nvmf_subsystem'],
-                              help='Delete a nvmf subsystem')
+    p = subparsers.add_parser('nvmf_delete_subsystem', help='Delete a nvmf subsystem')
     p.add_argument('subsystem_nqn',
                    help='subsystem nqn to be deleted. Example: nqn.2016-06.io.spdk:cnode1.')
     p.add_argument('-t', '--tgt-name', help='The name of the parent NVMe-oF target (optional)', type=str)
@@ -2425,8 +2396,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                        num_blocks=num_blocks,
                                        block_size=args.block_size)
 
-    p = subparsers.add_parser('bdev_pmem_create_pool', aliases=['create_pmem_pool'],
-                              help='Create pmem pool')
+    p = subparsers.add_parser('bdev_pmem_create_pool', help='Create pmem pool')
     p.add_argument('pmem_file', help='Path to pmemblk pool file')
     p.add_argument('total_size', help='Size of pmem bdev in MB (int > 0)', type=int)
     p.add_argument('block_size', help='Block size for this pmem pool', type=int)
@@ -2436,8 +2406,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
         print_dict(rpc.pmem.bdev_pmem_get_pool_info(args.client,
                                                     pmem_file=args.pmem_file))
 
-    p = subparsers.add_parser('bdev_pmem_get_pool_info', aliases=['pmem_pool_info'],
-                              help='Display pmem pool info and check consistency')
+    p = subparsers.add_parser('bdev_pmem_get_pool_info', help='Display pmem pool info and check consistency')
     p.add_argument('pmem_file', help='Path to pmemblk pool file')
     p.set_defaults(func=bdev_pmem_get_pool_info)
 
@@ -2445,8 +2414,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
         rpc.pmem.bdev_pmem_delete_pool(args.client,
                                        pmem_file=args.pmem_file)
 
-    p = subparsers.add_parser('bdev_pmem_delete_pool', aliases=['delete_pmem_pool'],
-                              help='Delete pmem pool')
+    p = subparsers.add_parser('bdev_pmem_delete_pool', help='Delete pmem pool')
     p.add_argument('pmem_file', help='Path to pmemblk pool file')
     p.set_defaults(func=bdev_pmem_delete_pool)
 
@@ -2454,7 +2422,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def framework_get_subsystems(args):
         print_dict(rpc.subsystem.framework_get_subsystems(args.client))
 
-    p = subparsers.add_parser('framework_get_subsystems', aliases=['get_subsystems'],
+    p = subparsers.add_parser('framework_get_subsystems',
                               help="""Print subsystems array in initialization order. Each subsystem
     entry contain (unsorted) array of subsystems it depends on.""")
     p.set_defaults(func=framework_get_subsystems)
@@ -2462,8 +2430,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def framework_get_config(args):
         print_dict(rpc.subsystem.framework_get_config(args.client, args.name))
 
-    p = subparsers.add_parser('framework_get_config', aliases=['get_subsystem_config'],
-                              help="""Print subsystem configuration""")
+    p = subparsers.add_parser('framework_get_config', help="""Print subsystem configuration""")
     p.add_argument('name', help='Name of subsystem to query')
     p.set_defaults(func=framework_get_config)
 
@@ -2474,21 +2441,26 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                                   delay_base_us=args.delay_base_us,
                                                   iops_threshold=args.iops_threshold)
 
-    p = subparsers.add_parser('vhost_controller_set_coalescing', aliases=['set_vhost_controller_coalescing'],
-                              help='Set vhost controller coalescing')
+    p = subparsers.add_parser('vhost_controller_set_coalescing', help='Set vhost controller coalescing')
     p.add_argument('ctrlr', help='controller name')
     p.add_argument('delay_base_us', help='Base delay time', type=int)
     p.add_argument('iops_threshold', help='IOPS threshold when coalescing is enabled', type=int)
     p.set_defaults(func=vhost_controller_set_coalescing)
+
+    def virtio_blk_create_transport(args):
+        rpc.vhost.virtio_blk_create_transport(**vars(args))
+
+    p = subparsers.add_parser('virtio_blk_create_transport',
+                              help='Create virtio blk transport')
+    p.add_argument('name', help='transport name')
+    p.set_defaults(func=virtio_blk_create_transport)
 
     def vhost_create_scsi_controller(args):
         rpc.vhost.vhost_create_scsi_controller(args.client,
                                                ctrlr=args.ctrlr,
                                                cpumask=args.cpumask)
 
-    p = subparsers.add_parser(
-        'vhost_create_scsi_controller', aliases=['construct_vhost_scsi_controller'],
-        help='Add new vhost controller')
+    p = subparsers.add_parser('vhost_create_scsi_controller', help='Add new vhost controller')
     p.add_argument('ctrlr', help='controller name')
     p.add_argument('--cpumask', help='cpu mask for this controller')
     p.set_defaults(func=vhost_create_scsi_controller)
@@ -2499,9 +2471,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                                               scsi_target_num=args.scsi_target_num,
                                                               bdev_name=args.bdev_name))
 
-    p = subparsers.add_parser('vhost_scsi_controller_add_target',
-                              aliases=['add_vhost_scsi_lun'],
-                              help='Add lun to vhost controller')
+    p = subparsers.add_parser('vhost_scsi_controller_add_target', help='Add lun to vhost controller')
     p.add_argument('ctrlr', help='controller name where add lun')
     p.add_argument('scsi_target_num', help='scsi_target_num', type=int)
     p.add_argument('bdev_name', help='bdev name')
@@ -2513,27 +2483,19 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                                       scsi_target_num=args.scsi_target_num)
 
     p = subparsers.add_parser('vhost_scsi_controller_remove_target',
-                              aliases=['remove_vhost_scsi_target'],
                               help='Remove target from vhost controller')
     p.add_argument('ctrlr', help='controller name to remove target from')
     p.add_argument('scsi_target_num', help='scsi_target_num', type=int)
     p.set_defaults(func=vhost_scsi_controller_remove_target)
 
     def vhost_create_blk_controller(args):
-        rpc.vhost.vhost_create_blk_controller(args.client,
-                                              ctrlr=args.ctrlr,
-                                              dev_name=args.dev_name,
-                                              cpumask=args.cpumask,
-                                              readonly=args.readonly,
-                                              packed_ring=args.packed_ring,
-                                              packed_ring_recovery=args.packed_ring_recovery)
+        rpc.vhost.vhost_create_blk_controller(**vars(args))
 
-    p = subparsers.add_parser('vhost_create_blk_controller',
-                              aliases=['construct_vhost_blk_controller'],
-                              help='Add a new vhost block controller')
+    p = subparsers.add_parser('vhost_create_blk_controller', help='Add a new vhost block controller')
     p.add_argument('ctrlr', help='controller name')
     p.add_argument('dev_name', help='device name')
     p.add_argument('--cpumask', help='cpu mask for this controller')
+    p.add_argument('--transport', help='virtio blk transport name (default: vhost_user_blk)')
     p.add_argument("-r", "--readonly", action='store_true', help='Set controller as read-only')
     p.add_argument("-p", "--packed_ring", action='store_true', help='Set controller as packed ring supported')
     p.add_argument("-l", "--packed_ring_recovery", action='store_true', help='Enable packed ring live recovery')
@@ -2542,8 +2504,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def vhost_get_controllers(args):
         print_dict(rpc.vhost.vhost_get_controllers(args.client, args.name))
 
-    p = subparsers.add_parser('vhost_get_controllers', aliases=['get_vhost_controllers'],
-                              help='List all or specific vhost controller(s)')
+    p = subparsers.add_parser('vhost_get_controllers', help='List all or specific vhost controller(s)')
     p.add_argument('-n', '--name', help="Name of vhost controller", required=False)
     p.set_defaults(func=vhost_get_controllers)
 
@@ -2551,8 +2512,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
         rpc.vhost.vhost_delete_controller(args.client,
                                           ctrlr=args.ctrlr)
 
-    p = subparsers.add_parser('vhost_delete_controller', aliases=['remove_vhost_controller'],
-                              help='Delete a vhost controller')
+    p = subparsers.add_parser('vhost_delete_controller', help='Delete a vhost controller')
     p.add_argument('ctrlr', help='controller name')
     p.set_defaults(func=vhost_delete_controller)
 
@@ -2565,7 +2525,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                                             vq_count=args.vq_count,
                                                             vq_size=args.vq_size))
 
-    p = subparsers.add_parser('bdev_virtio_attach_controller', aliases=['construct_virtio_dev'],
+    p = subparsers.add_parser('bdev_virtio_attach_controller',
                               help="""Attach virtio controller using provided
     transport type and device type. This will also create bdevs for any block devices connected to the
     controller (for example, SCSI devices for a virtio-scsi controller).
@@ -2584,16 +2544,14 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def bdev_virtio_scsi_get_devices(args):
         print_dict(rpc.vhost.bdev_virtio_scsi_get_devices(args.client))
 
-    p = subparsers.add_parser('bdev_virtio_scsi_get_devices', aliases=['get_virtio_scsi_devs'],
-                              help='List all Virtio-SCSI devices.')
+    p = subparsers.add_parser('bdev_virtio_scsi_get_devices', help='List all Virtio-SCSI devices.')
     p.set_defaults(func=bdev_virtio_scsi_get_devices)
 
     def bdev_virtio_detach_controller(args):
         rpc.vhost.bdev_virtio_detach_controller(args.client,
                                                 name=args.name)
 
-    p = subparsers.add_parser('bdev_virtio_detach_controller', aliases=['remove_virtio_bdev'],
-                              help="""Remove a Virtio device
+    p = subparsers.add_parser('bdev_virtio_detach_controller', help="""Remove a Virtio device
     This will delete all bdevs exposed by this device""")
     p.add_argument('name', help='Virtio device name. E.g. VirtioUser0')
     p.set_defaults(func=bdev_virtio_detach_controller)
@@ -2612,20 +2570,26 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def ioat_scan_accel_engine(args):
         rpc.ioat.ioat_scan_accel_engine(args.client)
 
-    p = subparsers.add_parser('ioat_scan_accel_engine',
-                              aliases=['ioat_scan_copy_engine', 'scan_ioat_copy_engine'],
-                              help='Enable IOAT accel engine offload.')
+    p = subparsers.add_parser('ioat_scan_accel_engine', help='Enable IOAT accel engine offload.')
     p.set_defaults(func=ioat_scan_accel_engine)
 
-    # idxd
-    def idxd_scan_accel_engine(args):
-        rpc.idxd.idxd_scan_accel_engine(args.client, config_kernel_mode=args.config_kernel_mode)
+    # dsa
+    def dsa_scan_accel_engine(args):
+        rpc.dsa.dsa_scan_accel_engine(args.client, config_kernel_mode=args.config_kernel_mode)
 
-    p = subparsers.add_parser('idxd_scan_accel_engine',
-                              help='Set config and enable idxd accel engine offload.')
-    p.add_argument('-k', '--config-kernel-mode', help='Use Kernel mode idxd',
+    p = subparsers.add_parser('dsa_scan_accel_engine',
+                              help='Set config and enable dsa accel engine offload.')
+    p.add_argument('-k', '--config-kernel-mode', help='Use Kernel mode dsa',
                    action='store_true', dest='config_kernel_mode')
-    p.set_defaults(func=idxd_scan_accel_engine, config_kernel_mode=None)
+    p.set_defaults(func=dsa_scan_accel_engine, config_kernel_mode=None)
+
+    # iaa
+    def iaa_scan_accel_engine(args):
+        rpc.iaa.iaa_scan_accel_engine(args.client)
+
+    p = subparsers.add_parser('iaa_scan_accel_engine',
+                              help='Set config and enable iaa accel engine offload.')
+    p.set_defaults(func=iaa_scan_accel_engine)
 
     # opal
     def bdev_nvme_opal_init(args):
@@ -2727,8 +2691,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                                metadata_len=args.metadata_length,
                                                timeout_ms=args.timeout_ms))
 
-    p = subparsers.add_parser('bdev_nvme_send_cmd', aliases=['send_nvme_cmd'],
-                              help='NVMe passthrough cmd.')
+    p = subparsers.add_parser('bdev_nvme_send_cmd', help='NVMe passthrough cmd.')
     p.add_argument('-n', '--nvme-name', help="""Name of the operating NVMe controller""")
     p.add_argument('-t', '--cmd-type', help="""Type of nvme cmd. Valid values are: admin, io""")
     p.add_argument('-r', '--data-direction', help="""Direction of data transfer. Valid values are: c2h, h2c""")
@@ -2745,8 +2708,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def notify_get_types(args):
         print_dict(rpc.notify.notify_get_types(args.client))
 
-    p = subparsers.add_parser('notify_get_types', aliases=['get_notification_types'],
-                              help='List available notifications that user can subscribe to.')
+    p = subparsers.add_parser('notify_get_types', help='List available notifications that user can subscribe to.')
     p.set_defaults(func=notify_get_types)
 
     def notify_get_notifications(args):
@@ -2755,8 +2717,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                                   max=args.max)
         print_dict(ret)
 
-    p = subparsers.add_parser('notify_get_notifications', aliases=['get_notifications'],
-                              help='Get notifications')
+    p = subparsers.add_parser('notify_get_notifications', help='Get notifications')
     p.add_argument('-i', '--id', help="""First ID to start fetching from""", type=int)
     p.add_argument('-n', '--max', help="""Maximum number of notifications to return in response""", type=int)
     p.set_defaults(func=notify_get_notifications)
@@ -2865,7 +2826,8 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                        enable_quickack=args.enable_quickack,
                                        enable_placement_id=args.enable_placement_id,
                                        enable_zerocopy_send_server=args.enable_zerocopy_send_server,
-                                       enable_zerocopy_send_client=args.enable_zerocopy_send_client)
+                                       enable_zerocopy_send_client=args.enable_zerocopy_send_client,
+                                       zerocopy_threshold=args.zerocopy_threshold)
 
     p = subparsers.add_parser('sock_impl_set_options', help="""Set options of socket layer implementation""")
     p.add_argument('-i', '--impl', help='Socket implementation name, e.g. posix', required=True)
@@ -2888,8 +2850,11 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                    action='store_true', dest='enable_zerocopy_send_client')
     p.add_argument('--disable-zerocopy-send-client', help='Disable zerocopy on send for client sockets',
                    action='store_false', dest='enable_zerocopy_send_client')
+    p.add_argument('--zerocopy-threshold', help='Set zerocopy_threshold in bytes',
+                   action='store_true', dest='zerocopy_threshold')
     p.set_defaults(func=sock_impl_set_options, enable_recv_pipe=None, enable_quickack=None,
-                   enable_placement_id=None, enable_zerocopy_send_server=None, enable_zerocopy_send_client=None)
+                   enable_placement_id=None, enable_zerocopy_send_server=None, enable_zerocopy_send_client=None,
+                   zerocopy_threshold=None)
 
     def sock_set_default_impl(args):
         print_json(rpc.sock.sock_set_default_impl(args.client,

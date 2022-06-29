@@ -1,34 +1,7 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation.
  *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *   Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #include "spdk/stdinc.h"
@@ -741,21 +714,21 @@ test_nvme_get_sgl_print_info(void)
 	cmd.dptr.sgl1.generic.type = SPDK_NVME_SGL_TYPE_DATA_BLOCK;
 	cmd.dptr.sgl1.generic.subtype = 0;
 	cmd.dptr.sgl1.address = 0xdeadbeef;
-	cmd.dptr.sgl1.keyed.length = 0x1000;
-	cmd.dptr.sgl1.keyed.key = 0xababccdd;
+	cmd.dptr.sgl1.unkeyed.length = 0x1000;
 
 	nvme_get_sgl(buf, NVME_CMD_DPTR_STR_SIZE, &cmd);
-	CU_ASSERT(!strncmp(buf, "SGL DATA BLOCK ADDRESS 0xdeadbeef len:0x1000 key:0xababccdd",
+	CU_ASSERT(!strncmp(buf, "SGL DATA BLOCK ADDRESS 0xdeadbeef len:0x1000",
 			   NVME_CMD_DPTR_STR_SIZE));
 
 	memset(&cmd.dptr.sgl1, 0, sizeof(cmd.dptr.sgl1));
 	cmd.dptr.sgl1.generic.type = SPDK_NVME_SGL_TYPE_KEYED_DATA_BLOCK;
 	cmd.dptr.sgl1.generic.subtype = 0;
 	cmd.dptr.sgl1.address = 0xdeadbeef;
-	cmd.dptr.sgl1.unkeyed.length = 0x1000;
+	cmd.dptr.sgl1.keyed.length = 0x1000;
+	cmd.dptr.sgl1.keyed.key = 0xababccdd;
 
 	nvme_get_sgl(buf, NVME_CMD_DPTR_STR_SIZE, &cmd);
-	CU_ASSERT(!strncmp(buf, "SGL RESERVED ADDRESS 0xdeadbeef len:0x1000",
+	CU_ASSERT(!strncmp(buf, "SGL KEYED DATA BLOCK ADDRESS 0xdeadbeef len:0x1000 key:0xababccdd",
 			   NVME_CMD_DPTR_STR_SIZE));
 }
 

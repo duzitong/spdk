@@ -8,7 +8,8 @@ from . import app
 from . import bdev
 from . import blobfs
 from . import env_dpdk
-from . import idxd
+from . import dsa
+from . import iaa
 from . import ioat
 from . import iscsi
 from . import log
@@ -24,22 +25,18 @@ from . import vhost
 from . import vmd
 from . import sock
 from . import client as rpc_client
-from .helpers import deprecated_alias
 
 
-@deprecated_alias('start_subsystem_init')
 def framework_start_init(client):
     """Start initialization of subsystems"""
     return client.call('framework_start_init')
 
 
-@deprecated_alias('wait_subsystem_init')
 def framework_wait_init(client):
     """Block until subsystems have been initialized"""
     return client.call('framework_wait_init')
 
 
-@deprecated_alias("get_rpc_methods")
 def rpc_get_methods(client, current=None, include_aliases=None):
     """Get list of supported RPC methods.
     Args:
@@ -56,7 +53,6 @@ def rpc_get_methods(client, current=None, include_aliases=None):
     return client.call('rpc_get_methods', params)
 
 
-@deprecated_alias("get_spdk_version")
 def spdk_get_version(client):
     """Get SPDK version"""
     return client.call('spdk_get_version')

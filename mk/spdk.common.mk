@@ -1,36 +1,8 @@
-#
-#  BSD LICENSE
-#
+#  SPDX-License-Identifier: BSD-3-Clause
 #  Copyright (c) Intel Corporation.
 #  Copyright (c) 2017, IBM Corporation.
 #  Copyright (c) 2019, 2021 Mellanox Corporation.
 #  All rights reserved.
-#
-#  Redistribution and use in source and binary forms, with or without
-#  modification, are permitted provided that the following conditions
-#  are met:
-#
-#    * Redistributions of source code must retain the above copyright
-#      notice, this list of conditions and the following disclaimer.
-#    * Redistributions in binary form must reproduce the above copyright
-#      notice, this list of conditions and the following disclaimer in
-#      the documentation and/or other materials provided with the
-#      distribution.
-#    * Neither the name of Intel Corporation nor the names of its
-#      contributors may be used to endorse or promote products derived
-#      from this software without specific prior written permission.
-#
-#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-#  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-#  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-#  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-#  OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-#  LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-#  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-#  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-#  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-#  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
 ifeq ($(wildcard $(SPDK_ROOT_DIR)/mk/config.mk),)
@@ -88,6 +60,8 @@ COMMON_CFLAGS += -mcpu=$(TARGET_ARCHITECTURE)
 else ifeq ($(TARGET_MACHINE),aarch64)
 COMMON_CFLAGS += -march=$(TARGET_ARCHITECTURE)
 COMMON_CFLAGS += -DPAGE_SIZE=$(shell getconf PAGESIZE)
+else ifeq ('$(TARGET_MACHINE)|$(TARGET_ARCHITECTURE)','riscv64|native')
+# -march=native is not yet supported by GCC on RISC-V. Falling back to default.
 else
 COMMON_CFLAGS += -march=$(TARGET_ARCHITECTURE)
 endif
@@ -186,23 +160,20 @@ endif
 
 ifeq ($(CONFIG_VFIO_USER), y)
 ifneq ($(CONFIG_VFIO_USER_DIR),)
-VFIO_USER_DIR=$(CONFIG_VFIO_USER_DIR)
+VFIO_USER_SRC_DIR=$(CONFIG_VFIO_USER_DIR)
 else
-VFIO_USER_DIR=$(SPDK_ROOT_DIR)/libvfio-user
+VFIO_USER_SRC_DIR=$(SPDK_ROOT_DIR)/libvfio-user
 endif
 ifeq ($(CONFIG_DEBUG), y)
-VFIO_USER_BUILD_TYPE=dbg
+VFIO_USER_BUILD_TYPE=debug
 else
 VFIO_USER_BUILD_TYPE=release
 endif
-VFIO_USER_INSTALL_DIR=$(VFIO_USER_DIR)/build
+VFIO_USER_LIB_PREFIX=/usr/local/lib
+VFIO_USER_BUILD_DIR=$(SPDK_ROOT_DIR)/build/libvfio-user/build-$(VFIO_USER_BUILD_TYPE)
+VFIO_USER_INSTALL_DIR=$(SPDK_ROOT_DIR)/build/libvfio-user/
 VFIO_USER_INCLUDE_DIR=$(VFIO_USER_INSTALL_DIR)/usr/local/include
-VFIO_USER_LIBRARY_DIR=$(VFIO_USER_INSTALL_DIR)/usr/local/lib64
-ifeq (,$(wildcard $(VFIO_USER_LIBRARY_DIR)/.))
-# Some Linux distros use lib instead of lib64
-# for default installations
-VFIO_USER_LIBRARY_DIR=$(VFIO_USER_INSTALL_DIR)/usr/local/lib
-endif
+VFIO_USER_LIBRARY_DIR=$(VFIO_USER_INSTALL_DIR)/$(VFIO_USER_LIB_PREFIX)
 
 CFLAGS += -I$(VFIO_USER_INCLUDE_DIR)
 LDFLAGS += -L$(VFIO_USER_LIBRARY_DIR)
@@ -304,8 +275,17 @@ CXXFLAGS += $(COMMON_CFLAGS) -std=c++11
 
 SYS_LIBS += -lrt
 SYS_LIBS += -luuid
+SYS_LIBS += -lssl
 SYS_LIBS += -lcrypto
 SYS_LIBS += -lm
+
+PKGCONF ?= pkg-config
+# `libssl11` name is unique to Centos7 via EPEL
+# So it's safe to add it here without additional check for Centos7
+ifeq ($(shell $(PKGCONF) --exists libssl11 && echo 1),1)
+CFLAGS  += $(shell $(PKGCONF) --cflags libssl11)
+LDFLAGS += $(shell $(PKGCONF) --libs libssl11)
+endif
 
 ifneq ($(CONFIG_NVME_CUSE)$(CONFIG_FUSE),nn)
 SYS_LIBS += -lfuse3

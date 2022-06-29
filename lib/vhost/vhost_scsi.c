@@ -1,34 +1,6 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright(c) Intel Corporation. All rights reserved.
  *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "spdk/stdinc.h"
@@ -157,6 +129,7 @@ static const struct spdk_vhost_user_dev_backend spdk_vhost_scsi_user_device_back
 };
 
 static const struct spdk_vhost_dev_backend spdk_vhost_scsi_device_backend = {
+	.type = VHOST_BACKEND_SCSI,
 	.dump_info_json = vhost_scsi_dump_info_json,
 	.write_config_json = vhost_scsi_write_config_json,
 	.remove_device = vhost_scsi_dev_remove,
@@ -775,7 +748,7 @@ submit_inflight_desc(struct spdk_vhost_scsi_session *svsession,
 	resubmit->resubmit_num = 0;
 }
 
-static void
+static int
 process_vq(struct spdk_vhost_scsi_session *svsession, struct spdk_vhost_virtqueue *vq)
 {
 	struct spdk_vhost_session *vsession = &svsession->vsession;
@@ -802,6 +775,8 @@ process_vq(struct spdk_vhost_scsi_session *svsession, struct spdk_vhost_virtqueu
 
 		process_scsi_task(vsession, vq, reqs[i]);
 	}
+
+	return reqs_cnt;
 }
 
 static int
@@ -809,6 +784,7 @@ vdev_mgmt_worker(void *arg)
 {
 	struct spdk_vhost_scsi_session *svsession = arg;
 	struct spdk_vhost_session *vsession = &svsession->vsession;
+	int rc = 0;
 
 	process_removed_devs(svsession);
 
@@ -817,11 +793,11 @@ vdev_mgmt_worker(void *arg)
 	}
 
 	if (vsession->virtqueue[VIRTIO_SCSI_CONTROLQ].vring.desc) {
-		process_vq(svsession, &vsession->virtqueue[VIRTIO_SCSI_CONTROLQ]);
+		rc = process_vq(svsession, &vsession->virtqueue[VIRTIO_SCSI_CONTROLQ]);
 		vhost_vq_used_signal(vsession, &vsession->virtqueue[VIRTIO_SCSI_CONTROLQ]);
 	}
 
-	return SPDK_POLLER_BUSY;
+	return rc > 0 ? SPDK_POLLER_BUSY : SPDK_POLLER_IDLE;
 }
 
 static int
@@ -830,14 +806,15 @@ vdev_worker(void *arg)
 	struct spdk_vhost_scsi_session *svsession = arg;
 	struct spdk_vhost_session *vsession = &svsession->vsession;
 	uint32_t q_idx;
+	int rc = 0;
 
 	for (q_idx = VIRTIO_SCSI_REQUESTQ; q_idx < vsession->max_queues; q_idx++) {
-		process_vq(svsession, &vsession->virtqueue[q_idx]);
+		rc = process_vq(svsession, &vsession->virtqueue[q_idx]);
 	}
 
 	vhost_session_used_signal(vsession);
 
-	return SPDK_POLLER_BUSY;
+	return rc > 0 ? SPDK_POLLER_BUSY : SPDK_POLLER_IDLE;
 }
 
 static struct spdk_vhost_scsi_dev *
@@ -847,7 +824,7 @@ to_scsi_dev(struct spdk_vhost_dev *ctrlr)
 		return NULL;
 	}
 
-	if (ctrlr->backend != &spdk_vhost_scsi_device_backend) {
+	if (ctrlr->backend->type != VHOST_BACKEND_SCSI) {
 		SPDK_ERRLOG("%s: not a vhost-scsi device.\n", ctrlr->name);
 		return NULL;
 	}
@@ -858,7 +835,7 @@ to_scsi_dev(struct spdk_vhost_dev *ctrlr)
 static struct spdk_vhost_scsi_session *
 to_scsi_session(struct spdk_vhost_session *vsession)
 {
-	assert(vsession->vdev->backend == &spdk_vhost_scsi_device_backend);
+	assert(vsession->vdev->backend->type == VHOST_BACKEND_SCSI);
 	return (struct spdk_vhost_scsi_session *)vsession;
 }
 
@@ -877,10 +854,9 @@ spdk_vhost_scsi_dev_construct(const char *name, const char *cpumask)
 	svdev->vdev.protocol_features = SPDK_VHOST_SCSI_PROTOCOL_FEATURES;
 
 	spdk_vhost_lock();
-	rc = vhost_dev_register(&svdev->vdev, name, cpumask,
+	rc = vhost_dev_register(&svdev->vdev, name, cpumask, NULL,
 				&spdk_vhost_scsi_device_backend,
 				&spdk_vhost_scsi_user_device_backend);
-
 	if (rc) {
 		free(svdev);
 		spdk_vhost_unlock();

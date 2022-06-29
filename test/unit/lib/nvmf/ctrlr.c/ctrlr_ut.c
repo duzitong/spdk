@@ -1,35 +1,7 @@
-/*-
- *   BSD LICENSE
- *
+/*   SPDX-License-Identifier: BSD-3-Clause
  *   Copyright (c) Intel Corporation. All rights reserved.
  *   Copyright (c) 2019 Mellanox Technologies LTD. All rights reserved.
  *   Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "spdk/stdinc.h"
@@ -2765,6 +2737,133 @@ test_nvmf_property_set(void)
 	CU_ASSERT(req.rsp->prop_get_rsp.value.u64 == 0xDDADBEEF);
 }
 
+static void
+test_nvmf_ctrlr_get_features_host_behavior_support(void)
+{
+	int rc;
+	struct spdk_nvmf_request req = {};
+	struct spdk_nvmf_qpair qpair = {};
+	struct spdk_nvmf_ctrlr ctrlr = {};
+	struct spdk_nvme_host_behavior *host_behavior;
+	struct spdk_nvme_host_behavior behavior = {};
+	union nvmf_h2c_msg cmd = {};
+	union nvmf_c2h_msg rsp = {};
+
+	qpair.ctrlr = &ctrlr;
+	req.qpair = &qpair;
+	req.cmd = &cmd;
+	req.rsp = &rsp;
+
+	/* Invalid data */
+	req.data = NULL;
+	req.length = sizeof(struct spdk_nvme_host_behavior);
+
+	rc = nvmf_ctrlr_get_features_host_behavior_support(&req);
+	CU_ASSERT(rc == SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE);
+	CU_ASSERT(req.rsp->nvme_cpl.status.sct == SPDK_NVME_SCT_GENERIC);
+	CU_ASSERT(req.rsp->nvme_cpl.status.sc == SPDK_NVME_SC_INVALID_FIELD);
+	CU_ASSERT(req.data == NULL);
+
+	/* Wrong structure length */
+	req.data = &behavior;
+	req.length = sizeof(struct spdk_nvme_host_behavior) - 1;
+
+	rc = nvmf_ctrlr_get_features_host_behavior_support(&req);
+	CU_ASSERT(rc == SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE);
+	CU_ASSERT(req.rsp->nvme_cpl.status.sct == SPDK_NVME_SCT_GENERIC);
+	CU_ASSERT(req.rsp->nvme_cpl.status.sc == SPDK_NVME_SC_INVALID_FIELD);
+
+	/* Get Features Host Behavior Support Success */
+	req.data = &behavior;
+	req.length = sizeof(struct spdk_nvme_host_behavior);
+	ctrlr.acre_enabled = true;
+	host_behavior = (struct spdk_nvme_host_behavior *)req.data;
+	host_behavior->acre = false;
+
+	rc = nvmf_ctrlr_get_features_host_behavior_support(&req);
+	CU_ASSERT(rc == SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE);
+	CU_ASSERT(host_behavior->acre == true);
+}
+
+static void
+test_nvmf_ctrlr_set_features_host_behavior_support(void)
+{
+	int rc;
+	struct spdk_nvmf_request req = {};
+	struct spdk_nvmf_qpair qpair = {};
+	struct spdk_nvmf_ctrlr ctrlr = {};
+	struct spdk_nvme_host_behavior host_behavior = {};
+	union nvmf_h2c_msg cmd = {};
+	union nvmf_c2h_msg rsp = {};
+
+	qpair.ctrlr = &ctrlr;
+	req.qpair = &qpair;
+	req.cmd = &cmd;
+	req.rsp = &rsp;
+	req.iov[0].iov_base = &host_behavior;
+	req.iov[0].iov_len = sizeof(host_behavior);
+
+	/* Invalid iovcnt */
+	req.iovcnt = 0;
+	rc = SPDK_NVMF_REQUEST_EXEC_STATUS_ASYNCHRONOUS;
+	req.rsp->nvme_cpl.status.sct = SPDK_NVME_SCT_GENERIC;
+	req.rsp->nvme_cpl.status.sc = SPDK_NVME_SC_SUCCESS;
+
+	rc = nvmf_ctrlr_set_features_host_behavior_support(&req);
+	CU_ASSERT(rc == SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE);
+	CU_ASSERT(req.rsp->nvme_cpl.status.sct == SPDK_NVME_SCT_GENERIC);
+	CU_ASSERT(req.rsp->nvme_cpl.status.sc == SPDK_NVME_SC_INVALID_FIELD);
+
+	/* Invalid iov_len */
+	req.iovcnt = 1;
+	req.iov[0].iov_len = 0;
+	rc = SPDK_NVMF_REQUEST_EXEC_STATUS_ASYNCHRONOUS;
+	req.rsp->nvme_cpl.status.sct = SPDK_NVME_SCT_GENERIC;
+	req.rsp->nvme_cpl.status.sc = SPDK_NVME_SC_SUCCESS;
+
+	rc = nvmf_ctrlr_set_features_host_behavior_support(&req);
+	CU_ASSERT(rc == SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE);
+	CU_ASSERT(req.rsp->nvme_cpl.status.sct == SPDK_NVME_SCT_GENERIC);
+	CU_ASSERT(req.rsp->nvme_cpl.status.sc == SPDK_NVME_SC_INVALID_FIELD);
+
+	/* acre is false */
+	host_behavior.acre = 0;
+	req.iov[0].iov_len = sizeof(struct spdk_nvme_host_behavior);
+	rc = SPDK_NVMF_REQUEST_EXEC_STATUS_ASYNCHRONOUS;
+	req.rsp->nvme_cpl.status.sct = SPDK_NVME_SCT_GENERIC;
+	req.rsp->nvme_cpl.status.sc = SPDK_NVME_SC_SUCCESS;
+
+	rc = nvmf_ctrlr_set_features_host_behavior_support(&req);
+	CU_ASSERT(rc == SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE);
+	CU_ASSERT(req.rsp->nvme_cpl.status.sct == SPDK_NVME_SCT_GENERIC);
+	CU_ASSERT(req.rsp->nvme_cpl.status.sc == SPDK_NVME_SC_SUCCESS);
+	CU_ASSERT(ctrlr.acre_enabled == false);
+
+	/* acre is true */
+	host_behavior.acre = 1;
+	req.iov[0].iov_len = sizeof(struct spdk_nvme_host_behavior);
+	rc = SPDK_NVMF_REQUEST_EXEC_STATUS_ASYNCHRONOUS;
+	req.rsp->nvme_cpl.status.sct = SPDK_NVME_SCT_GENERIC;
+	req.rsp->nvme_cpl.status.sc = SPDK_NVME_SC_SUCCESS;
+
+	rc = nvmf_ctrlr_set_features_host_behavior_support(&req);
+	CU_ASSERT(rc == SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE);
+	CU_ASSERT(req.rsp->nvme_cpl.status.sct == SPDK_NVME_SCT_GENERIC);
+	CU_ASSERT(req.rsp->nvme_cpl.status.sc == SPDK_NVME_SC_SUCCESS);
+	CU_ASSERT(ctrlr.acre_enabled == true);
+
+	/* Invalid acre */
+	host_behavior.acre = 2;
+	rc = SPDK_NVMF_REQUEST_EXEC_STATUS_ASYNCHRONOUS;
+	req.rsp->nvme_cpl.status.sct = SPDK_NVME_SCT_GENERIC;
+	req.rsp->nvme_cpl.status.sc = SPDK_NVME_SC_SUCCESS;
+
+	rc = nvmf_ctrlr_set_features_host_behavior_support(&req);
+	CU_ASSERT(rc == SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE);
+	CU_ASSERT(req.rsp->nvme_cpl.status.sct == SPDK_NVME_SCT_GENERIC);
+	CU_ASSERT(req.rsp->nvme_cpl.status.sc == SPDK_NVME_SC_INVALID_FIELD);
+}
+
 int main(int argc, char **argv)
 {
 	CU_pSuite	suite = NULL;
@@ -2800,6 +2899,8 @@ int main(int argc, char **argv)
 	CU_ADD_TEST(suite, test_zcopy_read);
 	CU_ADD_TEST(suite, test_zcopy_write);
 	CU_ADD_TEST(suite, test_nvmf_property_set);
+	CU_ADD_TEST(suite, test_nvmf_ctrlr_get_features_host_behavior_support);
+	CU_ADD_TEST(suite, test_nvmf_ctrlr_set_features_host_behavior_support);
 
 	allocate_threads(1);
 	set_thread(0);
