@@ -1988,7 +1988,8 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def bdev_wal_create(args):
         rpc.bdev.bdev_wal_create(args.client,
                                   name=args.name,
-                                  base_bdevs=base_bdevs)
+                                  log_bdev=args.log_bdev,
+                                  core_bdev=args.core_bdev)
     p = subparsers.add_parser('bdev_wal_create', aliases=['construct_wal_bdev'],
                               help='Create new wal bdev')
     p.add_argument('-n', '--name', help='wal bdev name', required=True)

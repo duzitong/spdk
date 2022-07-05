@@ -163,8 +163,6 @@ struct rpc_bdev_wal_create {
 static void
 free_rpc_bdev_wal_create(struct rpc_bdev_wal_create *req)
 {
-	size_t i;
-
 	free(req->name);
 	free(req->log_bdev);
 	free(req->core_bdev);
@@ -196,7 +194,6 @@ rpc_bdev_wal_create(struct spdk_jsonrpc_request *request,
 	struct rpc_bdev_wal_create	req = {};
 	struct wal_bdev_config		*wal_cfg;
 	int				rc;
-	size_t				i;
 
 	if (spdk_json_decode_object(params, rpc_bdev_wal_create_decoders,
 				    SPDK_COUNTOF(rpc_bdev_wal_create_decoders),

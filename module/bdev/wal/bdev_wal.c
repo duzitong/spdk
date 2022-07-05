@@ -1010,7 +1010,6 @@ wal_bdev_remove_base_devices(struct wal_bdev_config *wal_cfg,
 			      wal_bdev_destruct_cb cb_fn, void *cb_arg)
 {
 	struct wal_bdev		*wal_bdev;
-	struct wal_base_bdev_info	*base_info;
 
 	SPDK_DEBUGLOG(bdev_wal, "wal_bdev_remove_base_devices\n");
 
