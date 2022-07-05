@@ -404,6 +404,47 @@ def bdev_replica_delete(client, name):
     params = {'name': name}
     return client.call('bdev_replica_delete', params)
 
+def bdev_wal_get_bdevs(client, category):
+    """Get list of wal bdevs based on category
+
+    Args:
+        category: any one of all or online or configuring or offline
+
+    Returns:
+        List of wal bdev names
+    """
+    params = {'category': category}
+    return client.call('bdev_wal_get_bdevs', params)
+
+
+def bdev_wal_create(client, name, log_bdev, core_bdev):
+    """Create wal bdev.
+
+    Args:
+        name: user defined wal bdev name
+        wal_bdev: bdev name to store logs
+        core_bdev: bdev name to save real data
+
+    Returns:
+        None
+    """
+    params = {'name': name, 'log_bdev': log_bdev, 'core_bdev': core_bdev}
+
+    return client.call('bdev_wal_create', params)
+
+
+def bdev_wal_delete(client, name):
+    """Delete wal bdev
+
+    Args:
+        name: wal bdev name
+
+    Returns:
+        None
+    """
+    params = {'name': name}
+    return client.call('bdev_wal_delete', params)
+
 
 def bdev_aio_create(client, filename, name, block_size=None):
     """Construct a Linux AIO block device.

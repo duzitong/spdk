@@ -1971,6 +1971,39 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     p.add_argument('name', help='replica bdev name')
     p.set_defaults(func=bdev_replica_delete)
 
+    # wal
+    def bdev_wal_get_bdevs(args):
+        print_array(rpc.bdev.bdev_wal_get_bdevs(args.client,
+                                                 category=args.category))
+
+    p = subparsers.add_parser('bdev_wal_get_bdevs', aliases=['get_wal_bdevs'],
+                              help="""This is used to list all the wal bdev names based on the input category
+    requested. Category should be one of 'all', 'online', 'configuring' or 'offline'. 'all' means all the wal bdevs whether
+    they are online or configuring or offline. 'online' is the wal bdev which is registered with bdev layer. 'configuring'
+    is the wal bdev which does not have full configuration discovered yet. 'offline' is the wal bdev which is not registered
+    with bdev as of now and it has encountered any error or user has requested to offline the wal bdev""")
+    p.add_argument('category', help='all or online or configuring or offline')
+    p.set_defaults(func=bdev_wal_get_bdevs)
+
+    def bdev_wal_create(args):
+        rpc.bdev.bdev_wal_create(args.client,
+                                  name=args.name,
+                                  base_bdevs=base_bdevs)
+    p = subparsers.add_parser('bdev_wal_create', aliases=['construct_wal_bdev'],
+                              help='Create new wal bdev')
+    p.add_argument('-n', '--name', help='wal bdev name', required=True)
+    p.add_argument('-l', '--log-bdev', help='log bdev name', required=True)
+    p.add_argument('-c', '--core-bdev', help='core bdev name', required=True)
+    p.set_defaults(func=bdev_wal_create)
+
+    def bdev_wal_delete(args):
+        rpc.bdev.bdev_wal_delete(args.client,
+                                  name=args.name)
+    p = subparsers.add_parser('bdev_wal_delete', aliases=['destroy_wal_bdev'],
+                              help='Delete existing wal bdev')
+    p.add_argument('name', help='wal bdev name')
+    p.set_defaults(func=bdev_wal_delete)
+
     # split
     def bdev_split_create(args):
         print_array(rpc.bdev.bdev_split_create(args.client,
