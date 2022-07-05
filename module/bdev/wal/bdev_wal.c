@@ -934,12 +934,11 @@ wal_bdev_configure(struct wal_bdev *wal_bdev)
 	struct spdk_bdev *wal_bdev_gen;
 	int rc = 0;
 
+	SPDK_NOTICELOG("Configure wal bdev %s.\n", wal_bdev->bdev.name);
+
 	assert(wal_bdev->state == WAL_BDEV_STATE_CONFIGURING);
 
-	wal_bdev->blocklen_shift = spdk_u32log2(wal_bdev->core_bdev_info.bdev->blocklen);
-
 	wal_bdev_gen = &wal_bdev->bdev;
-	wal_bdev_gen->blocklen = wal_bdev->core_bdev_info.bdev->blocklen;
 
 	rc = wal_bdev_start(wal_bdev);
 	if (rc != 0) {
@@ -1162,6 +1161,8 @@ wal_bdev_add_core_device(struct wal_bdev_config *wal_cfg)
 	wal_bdev->core_bdev_info.thread = spdk_get_thread();
 	wal_bdev->core_bdev_info.bdev = bdev;
 	wal_bdev->core_bdev_info.desc = desc;
+
+	wal_bdev->bdev.blocklen = bdev->blocklen;
 
 	return 0;
 }
