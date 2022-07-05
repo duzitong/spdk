@@ -1198,9 +1198,15 @@ wal_bdev_add_base_devices(struct wal_bdev_config *wal_cfg)
 		return rc;
 	}
 
-	wal_bdev_add_core_device(wal_cfg);
+	rc = wal_bdev_add_core_device(wal_cfg);
 	if (rc) {
 		SPDK_ERRLOG("Failed to add core device '%s' to WAL bdev '%s'.\n", wal_cfg->core_bdev.name, wal_cfg->name);
+		return rc;
+	}
+
+	rc = wal_bdev_configure(wal_bdev);
+	if (rc != 0) {
+		SPDK_ERRLOG("Failed to configure replica bdev\n");
 		return rc;
 	}
 	
