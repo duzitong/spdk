@@ -940,7 +940,6 @@ wal_bdev_configure(struct wal_bdev *wal_bdev)
 
 	wal_bdev_gen = &wal_bdev->bdev;
 
-	rc = wal_bdev_start(wal_bdev);
 	if (rc != 0) {
 		SPDK_ERRLOG("wal module startup callback failed\n");
 		return rc;
@@ -1163,6 +1162,7 @@ wal_bdev_add_core_device(struct wal_bdev_config *wal_cfg)
 	wal_bdev->core_bdev_info.desc = desc;
 
 	wal_bdev->bdev.blocklen = bdev->blocklen;
+	wal_bdev->bdev.blockcnt = bdev->blockcnt;
 
 	return 0;
 }
@@ -1214,14 +1214,6 @@ wal_bdev_add_base_devices(struct wal_bdev_config *wal_cfg)
 	return 0;
 }
 
-static int
-wal_bdev_start(struct wal_bdev *wal_bdev)
-{
-	wal_bdev->bdev.blockcnt = wal_bdev->core_bdev_info.bdev->blockcnt;
-
-	return 0;
-}
-
 static void
 wal_bdev_stop(struct wal_bdev *wal_bdev)
 {
@@ -1244,16 +1236,16 @@ wal_bdev_examine(struct spdk_bdev *bdev)
 	struct wal_bdev_config	*wal_cfg;
 	bool			is_log;
 
-	if (wal_bdev_can_claim_bdev(bdev->name, &wal_cfg, &is_log)) {
-		if (is_log) {
-			wal_bdev_add_log_device(wal_cfg);
-		} else {
-			wal_bdev_add_core_device(wal_cfg);
-		}
-	} else {
-		SPDK_DEBUGLOG(bdev_wal, "bdev %s can't be claimed\n",
-			      bdev->name);
-	}
+	// if (wal_bdev_can_claim_bdev(bdev->name, &wal_cfg, &is_log)) {
+	// 	if (is_log) {
+	// 		wal_bdev_add_log_device(wal_cfg);
+	// 	} else {
+	// 		wal_bdev_add_core_device(wal_cfg);
+	// 	}
+	// } else {
+	// 	SPDK_DEBUGLOG(bdev_wal, "bdev %s can't be claimed\n",
+	// 		      bdev->name);
+	// }
 
 	spdk_bdev_module_examine_done(&g_wal_if);
 }
