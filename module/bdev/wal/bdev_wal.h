@@ -98,7 +98,7 @@ struct wal_bdev_io {
 	struct wal_bdev_io_channel	*wal_ch;
 
 	/* the original IO */
-	struct spdk_bdev_io	*orig_io
+	struct spdk_bdev_io	*orig_io;
 
 	/* save for completion on orig thread */
 	enum spdk_bdev_io_status status;
@@ -143,9 +143,6 @@ struct wal_bdev {
 	/* open thread */
 	struct spdk_thread		*open_thread;
 };
-
-#define WAL_FOR_EACH_BASE_BDEV(r, i) \
-	for (i = r->base_bdev_info; i < r->base_bdev_info + r->num_base_bdevs; i++)
 
 /*
  * wal_base_bdev_config is the per base bdev data structure which contains

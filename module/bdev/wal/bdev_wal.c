@@ -93,7 +93,6 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 {
 	struct wal_bdev            *wal_bdev = io_device;
 	struct wal_bdev_io_channel *wal_ch = ctx_buf;
-	uint8_t i;
 
 	SPDK_DEBUGLOG(bdev_wal, "wal_bdev_create_cb, %p\n", wal_ch);
 
@@ -130,7 +129,6 @@ static void
 wal_bdev_destroy_cb(void *io_device, void *ctx_buf)
 {
 	struct wal_bdev_io_channel *wal_ch = ctx_buf;
-	uint8_t i;
 
 	SPDK_DEBUGLOG(bdev_wal, "wal_bdev_destroy_cb\n");
 
@@ -167,8 +165,6 @@ wal_bdev_cleanup(struct wal_bdev *wal_bdev)
 	}
 	TAILQ_REMOVE(&g_wal_bdev_list, wal_bdev, global_link);
 	free(wal_bdev->bdev.name);
-	wal_ch->log_channel = NULL;
-	wal_ch->core_channel = NULL;
 	if (wal_bdev->config) {
 		wal_bdev->config->wal_bdev = NULL;
 	}
@@ -228,7 +224,6 @@ static int
 wal_bdev_destruct(void *ctxt)
 {
 	struct wal_bdev *wal_bdev = ctxt;
-	struct wal_base_bdev_info *base_info;
 
 	SPDK_DEBUGLOG(bdev_wal, "wal_bdev_destruct\n");
 
@@ -254,24 +249,22 @@ wal_bdev_destruct(void *ctxt)
 
 	spdk_io_device_unregister(wal_bdev, NULL);
 
-	if (wal_bdev->num_base_bdevs_discovered == 0) {
-		/* Free wal_bdev when there are no base bdevs left */
-		SPDK_DEBUGLOG(bdev_wal, "wal bdev base bdevs is 0, going to free all in destruct\n");
-		wal_bdev_cleanup(wal_bdev);
-	}
+	wal_bdev_cleanup(wal_bdev);
 
 	return 0;
 }
 
-void
+static void _wal_bdev_io_complete(void *arg);
+
+static void
 _wal_bdev_io_complete(void *arg)
 {
 	struct wal_bdev_io *wal_io = (struct wal_bdev_io *)arg;
 
-	spdk_bdev_io_complete(io_ctx->orig_io, wal_io->status);
+	spdk_bdev_io_complete(wal_io->orig_io, wal_io->status);
 }
 
-void
+static void
 wal_bdev_io_complete(struct wal_bdev_io *wal_io, enum spdk_bdev_io_status status)
 {
 	struct spdk_io_channel *ch = spdk_io_channel_from_ctx(wal_io->wal_ch);
@@ -352,10 +345,6 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 
 	wal_bdev = wal_io->wal_bdev;
 
-	if (wal_io->base_bdev_io_remaining == 0) {
-		wal_io->base_bdev_io_remaining = 1;
-	}
-
 	base_info = &wal_bdev->core_bdev_info;
 	base_ch = wal_io->wal_ch->core_channel;
 
@@ -405,7 +394,6 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	struct spdk_bdev_io		*bdev_io = spdk_bdev_io_from_ctx(wal_io);
 	struct wal_bdev		*wal_bdev;
 	int				ret;
-	uint8_t				i;
 	struct wal_base_bdev_info	*base_info;
 	struct spdk_io_channel		*base_ch;
 
@@ -513,8 +501,8 @@ wal_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_io
 	wal_io->orig_io = bdev_io;
 
 	/* Send this request to the open_thread if that's not what we're on. */
-	if (spdk_get_thread() != wal_bdev->open_thread) {
-		spdk_thread_send_msg(comp_bdev->open_thread, _wal_bdev_submit_request, bdev_io);
+	if (spdk_get_thread() != wal_io->wal_bdev->open_thread) {
+		spdk_thread_send_msg(wal_io->wal_bdev->open_thread, _wal_bdev_submit_request, bdev_io);
 	} else {
 		_wal_bdev_submit_request(bdev_io);
 	}
@@ -581,7 +569,6 @@ static int
 wal_bdev_dump_info_json(void *ctx, struct spdk_json_write_ctx *w)
 {
 	struct wal_bdev *wal_bdev = ctx;
-	struct wal_base_bdev_info *base_info;
 
 	SPDK_DEBUGLOG(bdev_wal, "wal_bdev_dump_config_json\n");
 	assert(wal_bdev != NULL);
@@ -592,13 +579,13 @@ wal_bdev_dump_info_json(void *ctx, struct spdk_json_write_ctx *w)
 	spdk_json_write_named_uint32(w, "destruct_called", wal_bdev->destruct_called);
 
 	if (wal_bdev->log_bdev_info.bdev) {
-		spdk_json_write_named_string(w, "log_bdev", wal_bdev->log_bdev_info.bdev.name);
+		spdk_json_write_named_string(w, "log_bdev", wal_bdev->log_bdev_info.bdev->name);
 	} else {
 		spdk_json_write_named_null(w, "log_bdev");
 	}
 
 	if (wal_bdev->core_bdev_info.bdev) {
-		spdk_json_write_named_string(w, "core_bdev", wal_bdev->core_bdev_info.bdev.name);
+		spdk_json_write_named_string(w, "core_bdev", wal_bdev->core_bdev_info.bdev->name);
 	} else {
 		spdk_json_write_named_null(w, "core_bdev");
 	}
@@ -621,7 +608,6 @@ static void
 wal_bdev_write_config_json(struct spdk_bdev *bdev, struct spdk_json_write_ctx *w)
 {
 	struct wal_bdev *wal_bdev = bdev->ctxt;
-	struct wal_base_bdev_info *base_info;
 
 	spdk_json_write_object_begin(w);
 
@@ -631,13 +617,13 @@ wal_bdev_write_config_json(struct spdk_bdev *bdev, struct spdk_json_write_ctx *w
 	spdk_json_write_named_string(w, "name", bdev->name);
 
 	if (wal_bdev->log_bdev_info.bdev) {
-		spdk_json_write_named_string(w, "log_bdev", wal_bdev->log_bdev_info.bdev.name);
+		spdk_json_write_named_string(w, "log_bdev", wal_bdev->log_bdev_info.bdev->name);
 	} else {
 		spdk_json_write_named_null(w, "log_bdev");
 	}
 
 	if (wal_bdev->core_bdev_info.bdev) {
-		spdk_json_write_named_string(w, "core_bdev", wal_bdev->core_bdev_info.bdev.name);
+		spdk_json_write_named_string(w, "core_bdev", wal_bdev->core_bdev_info.bdev->name);
 	} else {
 		spdk_json_write_named_null(w, "core_bdev");
 	}
@@ -667,8 +653,6 @@ static const struct spdk_bdev_fn_table g_wal_bdev_fn_table = {
 void
 wal_bdev_config_cleanup(struct wal_bdev_config *wal_cfg)
 {
-	uint8_t i;
-
 	TAILQ_REMOVE(&g_wal_config.wal_bdev_config_head, wal_cfg, link);
 	g_wal_config.total_wal_bdev--;
 
@@ -842,7 +826,6 @@ wal_bdev_can_claim_bdev(const char *bdev_name, struct wal_bdev_config **_wal_cfg
 			 bool *is_log)
 {
 	struct wal_bdev_config *wal_cfg;
-	uint8_t i;
 
 	TAILQ_FOREACH(wal_cfg, &g_wal_config.wal_bdev_config_head, link) {
 		if (!strcmp(bdev_name, wal_cfg->log_bdev.name)) {
@@ -937,56 +920,6 @@ wal_bdev_create(struct wal_bdev_config *wal_cfg)
 }
 
 /*
- * brief
- * wal_bdev_alloc_base_bdev_resource allocates resource of base bdev.
- * params:
- * wal_bdev - pointer to wal bdev
- * bdev_name - base bdev name
- * base_bdev_slot - position to add base bdev
- * returns:
- * 0 - success
- * non zero - failure
- */
-static int
-wal_bdev_alloc_base_bdev_resource(struct wal_bdev *wal_bdev, const char *bdev_name,
-				   uint8_t base_bdev_slot)
-{
-	struct spdk_bdev_desc *desc;
-	struct spdk_bdev *bdev;
-	int rc;
-
-	rc = spdk_bdev_open_ext(bdev_name, true, wal_bdev_event_base_bdev, NULL, &desc);
-	if (rc != 0) {
-		if (rc != -ENODEV) {
-			SPDK_ERRLOG("Unable to create desc on bdev '%s'\n", bdev_name);
-		}
-		return rc;
-	}
-
-	bdev = spdk_bdev_desc_get_bdev(desc);
-
-	rc = spdk_bdev_module_claim_bdev(bdev, NULL, &g_wal_if);
-	if (rc != 0) {
-		SPDK_ERRLOG("Unable to claim this bdev as it is already claimed\n");
-		spdk_bdev_close(desc);
-		return rc;
-	}
-
-	SPDK_DEBUGLOG(bdev_wal, "bdev %s is claimed\n", bdev_name);
-
-	assert(wal_bdev->state != WAL_BDEV_STATE_ONLINE);
-	assert(base_bdev_slot < wal_bdev->num_base_bdevs);
-
-	wal_bdev->base_bdev_info[base_bdev_slot].thread = spdk_get_thread();
-	wal_bdev->base_bdev_info[base_bdev_slot].bdev = bdev;
-	wal_bdev->base_bdev_info[base_bdev_slot].desc = desc;
-	wal_bdev->num_base_bdevs_discovered++;
-	assert(wal_bdev->num_base_bdevs_discovered <= wal_bdev->num_base_bdevs);
-
-	return 0;
-}
-
-/*
  * brief:
  * If wal bdev config is complete, then only register the wal bdev to
  * bdev layer and remove this wal bdev from configuring list and
@@ -1000,33 +933,15 @@ wal_bdev_alloc_base_bdev_resource(struct wal_bdev *wal_bdev, const char *bdev_na
 static int
 wal_bdev_configure(struct wal_bdev *wal_bdev)
 {
-	uint32_t blocklen = 0;
 	struct spdk_bdev *wal_bdev_gen;
-	struct wal_base_bdev_info *base_info;
 	int rc = 0;
 
 	assert(wal_bdev->state == WAL_BDEV_STATE_CONFIGURING);
-	assert(wal_bdev->num_base_bdevs_discovered == wal_bdev->num_base_bdevs);
 
-	WAL_FOR_EACH_BASE_BDEV(wal_bdev, base_info) {
-		/* Check blocklen for all base bdevs that it should be same */
-		if (blocklen == 0) {
-			blocklen = base_info->bdev->blocklen;
-		} else if (blocklen != base_info->bdev->blocklen) {
-			/*
-			 * Assumption is that all the base bdevs for any wal bdev should
-			 * have same blocklen
-			 */
-			SPDK_ERRLOG("Blocklen of various bdevs not matching\n");
-			return -EINVAL;
-		}
-	}
-	assert(blocklen > 0);
-
-	wal_bdev->blocklen_shift = spdk_u32log2(blocklen);
+	wal_bdev->blocklen_shift = spdk_u32log2(wal_bdev->core_bdev_info.bdev->blocklen);
 
 	wal_bdev_gen = &wal_bdev->bdev;
-	wal_bdev_gen->blocklen = blocklen;
+	wal_bdev_gen->blocklen = wal_bdev->core_bdev_info.bdev->blocklen;
 
 	rc = wal_bdev_start(wal_bdev);
 	if (rc != 0) {
@@ -1182,9 +1097,14 @@ static void
 wal_bdev_event_base_bdev(enum spdk_bdev_event_type type, struct spdk_bdev *bdev,
 			  void *event_ctx)
 {
+	bool *is_log = (bool *) event_ctx;
 	switch (type) {
 	case SPDK_BDEV_EVENT_REMOVE:
-		wal_bdev_remove_base_bdev(bdev);
+		if (*is_log) {
+			wal_bdev_free_base_bdev_resource(wal_bdev, &wal_bdev->log_bdev_info);
+		} else {
+			wal_bdev_free_base_bdev_resource(wal_bdev, &wal_bdev->core_bdev_info);
+		}
 		break;
 	default:
 		SPDK_NOTICELOG("Unsupported bdev event: type %d\n", type);
@@ -1288,7 +1208,7 @@ wal_bdev_add_log_device(struct wal_bdev_config *wal_cfg)
 		return -ENODEV;
 	}
 
-	rc = spdk_bdev_open_ext(wal_cfg->log_bdev.name, true, wal_bdev_event_base_bdev, NULL, &desc);
+	rc = spdk_bdev_open_ext(wal_cfg->log_bdev.name, true, wal_bdev_event_base_bdev, true, &desc);
 	if (rc != 0) {
 		if (rc != -ENODEV) {
 			SPDK_ERRLOG("Unable to create desc on bdev '%s'\n", wal_cfg->log_bdev.name);
@@ -1338,7 +1258,7 @@ wal_bdev_add_core_device(struct wal_bdev_config *wal_cfg)
 		return -ENODEV;
 	}
 
-	rc = spdk_bdev_open_ext(wal_cfg->core_bdev.name, true, wal_bdev_event_base_bdev, NULL, &desc);
+	rc = spdk_bdev_open_ext(wal_cfg->core_bdev.name, true, wal_bdev_event_base_bdev, false, &desc);
 	if (rc != 0) {
 		if (rc != -ENODEV) {
 			SPDK_ERRLOG("Unable to create desc on bdev '%s'\n", wal_cfg->core_bdev.name);
