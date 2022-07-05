@@ -72,8 +72,6 @@ static void	wal_bdev_examine(struct spdk_bdev *bdev);
 static int	wal_bdev_start(struct wal_bdev *bdev);
 static void	wal_bdev_stop(struct wal_bdev *bdev);
 static int	wal_bdev_init(void);
-static void	wal_bdev_deconfigure(struct wal_bdev *wal_bdev,
-				      wal_bdev_destruct_cb cb_fn, void *cb_arg);
 static void	wal_bdev_event_base_bdev(enum spdk_bdev_event_type type, struct spdk_bdev *bdev,
 		void *event_ctx);
 
@@ -254,9 +252,9 @@ wal_bdev_destruct(void *ctxt)
 	return 0;
 }
 
-static void _wal_bdev_io_complete(void *arg);
+void _wal_bdev_io_complete(void *arg);
 
-static void
+void
 _wal_bdev_io_complete(void *arg)
 {
 	struct wal_bdev_io *wal_io = (struct wal_bdev_io *)arg;
@@ -264,7 +262,7 @@ _wal_bdev_io_complete(void *arg)
 	spdk_bdev_io_complete(wal_io->orig_io, wal_io->status);
 }
 
-static void
+void
 wal_bdev_io_complete(struct wal_bdev_io *wal_io, enum spdk_bdev_io_status status)
 {
 	struct spdk_io_channel *ch = spdk_io_channel_from_ctx(wal_io->wal_ch);
@@ -972,40 +970,6 @@ wal_bdev_configure(struct wal_bdev *wal_bdev)
 	return 0;
 }
 
-/*
- * brief:
- * If wal bdev is online and registered, change the bdev state to
- * configuring and unregister this wal device. Queue this wal device
- * in configuring list
- * params:
- * wal_bdev - pointer to wal bdev
- * cb_fn - callback function
- * cb_arg - argument to callback function
- * returns:
- * none
- */
-static void
-wal_bdev_deconfigure(struct wal_bdev *wal_bdev, wal_bdev_destruct_cb cb_fn,
-		      void *cb_arg)
-{
-	if (wal_bdev->state != WAL_BDEV_STATE_ONLINE) {
-		if (cb_fn) {
-			cb_fn(cb_arg, 0);
-		}
-		return;
-	}
-
-	assert(wal_bdev->num_base_bdevs == wal_bdev->num_base_bdevs_discovered);
-	TAILQ_REMOVE(&g_wal_bdev_configured_list, wal_bdev, state_link);
-	wal_bdev_stop(wal_bdev);
-	wal_bdev->state = WAL_BDEV_STATE_OFFLINE;
-	assert(wal_bdev->num_base_bdevs_discovered);
-	TAILQ_INSERT_TAIL(&g_wal_bdev_offline_list, wal_bdev, state_link);
-	SPDK_DEBUGLOG(bdev_wal, "wal bdev state changing from online to offline\n");
-
-	spdk_bdev_unregister(&wal_bdev->bdev, cb_fn, cb_arg);
-}
-
 
 /*
  * brief:
@@ -1022,14 +986,9 @@ static void
 wal_bdev_event_base_bdev(enum spdk_bdev_event_type type, struct spdk_bdev *bdev,
 			  void *event_ctx)
 {
-	bool *is_log = (bool *) event_ctx;
 	switch (type) {
 	case SPDK_BDEV_EVENT_REMOVE:
-		if (*is_log) {
-			wal_bdev_free_base_bdev_resource(wal_bdev, &wal_bdev->log_bdev_info);
-		} else {
-			wal_bdev_free_base_bdev_resource(wal_bdev, &wal_bdev->core_bdev_info);
-		}
+		// TODO
 		break;
 	default:
 		SPDK_NOTICELOG("Unsupported bdev event: type %d\n", type);
@@ -1133,7 +1092,7 @@ wal_bdev_add_log_device(struct wal_bdev_config *wal_cfg)
 		return -ENODEV;
 	}
 
-	rc = spdk_bdev_open_ext(wal_cfg->log_bdev.name, true, wal_bdev_event_base_bdev, true, &desc);
+	rc = spdk_bdev_open_ext(wal_cfg->log_bdev.name, true, wal_bdev_event_base_bdev, NULL, &desc);
 	if (rc != 0) {
 		if (rc != -ENODEV) {
 			SPDK_ERRLOG("Unable to create desc on bdev '%s'\n", wal_cfg->log_bdev.name);
@@ -1183,7 +1142,7 @@ wal_bdev_add_core_device(struct wal_bdev_config *wal_cfg)
 		return -ENODEV;
 	}
 
-	rc = spdk_bdev_open_ext(wal_cfg->core_bdev.name, true, wal_bdev_event_base_bdev, false, &desc);
+	rc = spdk_bdev_open_ext(wal_cfg->core_bdev.name, true, wal_bdev_event_base_bdev, NULL, &desc);
 	if (rc != 0) {
 		if (rc != -ENODEV) {
 			SPDK_ERRLOG("Unable to create desc on bdev '%s'\n", wal_cfg->core_bdev.name);
