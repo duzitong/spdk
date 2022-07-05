@@ -206,25 +206,12 @@ rpc_bdev_wal_create(struct spdk_jsonrpc_request *request,
 		goto cleanup;
 	}
 
-	rc = wal_bdev_config_add(req.name, req.base_bdevs.num_base_bdevs,
-				  &wal_cfg);
+	rc = wal_bdev_config_add(req.name, req.log_bdev, req.core_bdev, &wal_cfg);
 	if (rc != 0) {
 		spdk_jsonrpc_send_error_response_fmt(request, rc,
 						     "Failed to add wal bdev config %s: %s",
 						     req.name, spdk_strerror(-rc));
 		goto cleanup;
-	}
-
-	for (i = 0; i < req.base_bdevs.num_base_bdevs; i++) {
-		rc = wal_bdev_config_add_base_bdev(wal_cfg, req.base_bdevs.base_bdevs[i], i);
-		if (rc != 0) {
-			wal_bdev_config_cleanup(wal_cfg);
-			spdk_jsonrpc_send_error_response_fmt(request, rc,
-							     "Failed to add base bdev %s to wal bdev config %s: %s",
-							     req.base_bdevs.base_bdevs[i], req.name,
-							     spdk_strerror(-rc));
-			goto cleanup;
-		}
 	}
 
 	rc = wal_bdev_create(wal_cfg);

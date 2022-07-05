@@ -96,6 +96,12 @@ struct wal_bdev_io {
 
 	/* Context of the original channel for this IO */
 	struct wal_bdev_io_channel	*wal_ch;
+
+	/* the original IO */
+	struct spdk_bdev_io	*orig_io
+
+	/* save for completion on orig thread */
+	enum spdk_bdev_io_status status;
 };
 
 /*
@@ -133,6 +139,9 @@ struct wal_bdev {
 
 	/* Set to true if destroy of this wal bdev is started. */
 	bool				destroy_started;
+
+	/* open thread */
+	struct spdk_thread		*open_thread;
 };
 
 #define WAL_FOR_EACH_BASE_BDEV(r, i) \
@@ -208,10 +217,8 @@ int wal_bdev_create(struct wal_bdev_config *wal_cfg);
 int wal_bdev_add_base_devices(struct wal_bdev_config *wal_cfg);
 void wal_bdev_remove_base_devices(struct wal_bdev_config *wal_cfg,
 				   wal_bdev_destruct_cb cb_fn, void *cb_ctx);
-int wal_bdev_config_add(const char *wal_name, uint8_t num_base_bdevs,
+int wal_bdev_config_add(const char *wal_name, const char *log_bdev_name, const char *core_bdev_name,
 			 struct wal_bdev_config **_wal_cfg);
-int wal_bdev_config_add_base_bdev(struct wal_bdev_config *wal_cfg,
-				   const char *base_bdev_name, uint8_t slot);
 void wal_bdev_config_cleanup(struct wal_bdev_config *wal_cfg);
 struct wal_bdev_config *wal_bdev_config_find_by_name(const char *wal_name);
 
