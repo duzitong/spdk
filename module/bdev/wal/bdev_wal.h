@@ -241,7 +241,7 @@ struct wal_config {
  */
 struct wal_bdev_io_channel {
 	/* wal bdev */
-	struct spdk_bdev		*wal_bdev;
+	struct wal_bdev			*wal_bdev;
 
 	/* IO channel of log bdev */
 	struct spdk_io_channel	*log_channel;
