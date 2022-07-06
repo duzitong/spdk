@@ -187,7 +187,6 @@ bdev_malloc_writev_with_md(struct malloc_disk *mdisk, struct spdk_io_channel *ch
 
 	if (res != 0) {
 		malloc_done(task, res);
-		break;
 	}
 
 	dst += mdisk->disk.md_len;

@@ -35,6 +35,7 @@
 #define SPDK_BDEV_WAL_INTERNAL_H
 
 #include "spdk/bdev_module.h"
+#include "bsl.h"
 
 /*
  * WAL state describes the state of the wal bdev. This wal bdev can be either in
@@ -156,6 +157,9 @@ struct wal_bdev {
 
 	/* max blocks of logs */
 	uint64_t	log_max;
+
+	/* skip list index */
+	struct bskiplist 	bsl;
 };
 
 struct wal_metadata {

@@ -38,7 +38,7 @@ SO_VER := 4
 SO_MINOR := 0
 
 CFLAGS += -I$(SPDK_ROOT_DIR)/lib/bdev/
-C_SRCS = bdev_wal.c bdev_wal_rpc.c
+C_SRCS = bdev_wal.c bdev_wal_rpc.c bsl.c
 
 LIBNAME = bdev_wal
 
