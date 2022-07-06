@@ -1,5 +1,6 @@
 #include "bsl.h"
-
+#include "spdk/stdinc.h"
+#include "spdk/env.h"
 
 bstat *bstatClone(bstat *pb);
 int bslRandomLevel(void);
@@ -7,18 +8,18 @@ bskiplistNode *bslCreateNode(int level, long begin, long end, bstat *ele);
 void bslPrintNode(bskiplistNode *bsln);
 void bslFreeNode(bskiplistNode *bsln);
 void bslAdjustNodeBegin(bskiplistNode *bn, long end);
-void bslAdjustNodeEnd(bskiplistNode *bn, long begin)
+void bslAdjustNodeEnd(bskiplistNode *bn, long begin);
 
 
 bstat *bstatCreate(long begin, long end) {
-    bstat *pb = malloc(sizeof(pb));
+    bstat *pb = cmalloc(1, sizeof(pb));
     pb->begin = begin;
     pb->end = end;
     return pb;
 }
 
 bstat *bstatClone(bstat *pb) {
-    bstat *clone = malloc(sizeof(clone));
+    bstat *clone = cmalloc(1, sizeof(clone));
     clone->begin = pb->begin;
     clone->end = pb->end;
     clone->type = pb->type;
@@ -41,7 +42,7 @@ int bslRandomLevel(void) {
 /* Create a skiplist node with the specified number of levels. */
 bskiplistNode *bslCreateNode(int level, long begin, long end, bstat *ele) {
     bskiplistNode *bn =
-        malloc(sizeof(*bn)+level*sizeof(struct bskiplistLevel));
+        cmalloc(1, sizeof(*bn)+level*sizeof(struct bskiplistLevel));
     bn->begin = begin;
     bn->end = end;
     bn->ele = ele;
@@ -54,7 +55,7 @@ bskiplist *bslCreate(void) {
     int j;
     bskiplist *bsl;
 
-    bsl = malloc(sizeof(*bsl));
+    bsl = cmalloc(1, sizeof(*bsl));
     bsl->level = 1;
     bsl->header = bslCreateNode(BSKIPLIST_MAXLEVEL,-1, -1, NULL);
     for (j = 0; j < BSKIPLIST_MAXLEVEL; j++) {
@@ -65,7 +66,7 @@ bskiplist *bslCreate(void) {
 
 bskiplistFreeNodes *bslfnCreate(void) {
     bskiplistFreeNodes *bslfn;
-    bslfn = malloc(sizeof(*bslfn));
+    bslfn = cmalloc(1, sizeof(*bslfn));
     bslfn->header = bslfn->tail = bslCreateNode(BSKIPLIST_MAXLEVEL,-1, -1, NULL);
     bslfn->header->level[0].forward = NULL;
     return bslfn;

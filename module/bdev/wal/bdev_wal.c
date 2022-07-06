@@ -312,11 +312,16 @@ wal_base_bdev_read_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb
 				   SPDK_BDEV_IO_STATUS_FAILED);
 }
 
-// TODO: update index
 static void
 wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
 	struct wal_bdev_io *wal_io = cb_arg;
+	uint64_t begin = bdev_io->u.bdev.offset_blocks;
+	uint64_t end = bdev_io->u.bdev.offset_blocks + bdev_io->u.bdev.num_blocks;
+
+	struct bstat *bstat = bstatCreate(begin, end);
+
+	bslInsert(wal_io->wal_bdev->bsl, begin, end, bstat, wal_io->wal_bdev->bslfn);
 
 	spdk_bdev_free_io(bdev_io);
 
@@ -1267,6 +1272,8 @@ static int
 wal_bdev_start(struct wal_bdev *wal_bdev)
 {
 	wal_bdev->log_max = wal_bdev->log_bdev_info.bdev->blockcnt - 1;  // last block used to track log head
+	wal_bdev->bsl = bslCreate();
+	wal_bdev->bslfn = bslfnCreate();
 	// TODO: recover
 	wal_bdev->log_head = 0;
 	wal_bdev->log_tail = 0;

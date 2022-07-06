@@ -160,6 +160,9 @@ struct wal_bdev {
 
 	/* skip list index */
 	struct bskiplist 	bsl;
+
+	/* nodes to free */
+	struct bskiplistFreeNodes bslfn;
 };
 
 struct wal_metadata {
