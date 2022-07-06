@@ -1,5 +1,15 @@
 #include "bsl.h"
 
+
+bstat *bstatClone(bstat *pb);
+int bslRandomLevel(void);
+bskiplistNode *bslCreateNode(int level, long begin, long end, bstat *ele);
+void bslPrintNode(bskiplistNode *bsln);
+void bslFreeNode(bskiplistNode *bsln);
+void bslAdjustNodeBegin(bskiplistNode *bn, long end);
+void bslAdjustNodeEnd(bskiplistNode *bn, long begin)
+
+
 bstat *bstatCreate(long begin, long end) {
     bstat *pb = malloc(sizeof(pb));
     pb->begin = begin;
@@ -67,7 +77,7 @@ void bslPrint(bskiplist *bsl, char full) {
     
     if (full) {
         while (x) {
-            printf("[%lld, %lld]->[%lld, %lld] ", x->begin, x->end, x->ele->begin, x->ele->end);
+            printf("[%ld, %ld]->[%ld, %ld] ", x->begin, x->end, x->ele->begin, x->ele->end);
             x = x->level[0].forward;
         }
         printf("\n");
@@ -77,7 +87,7 @@ void bslPrint(bskiplist *bsl, char full) {
         printf("%2d: ", i+1);
         x = bsl->header;
         while (x) {
-            printf("[%lld, %lld] ", x->begin, x->end);
+            printf("[%ld, %ld] ", x->begin, x->end);
             x = x->level[i].forward;
         }
         printf("\n");
@@ -86,7 +96,7 @@ void bslPrint(bskiplist *bsl, char full) {
 
 void bslPrintNode(bskiplistNode *bsln) {
     if (bsln) {
-        printf("%02d: [%lld, %lld]\n", bsln->height, bsln->begin, bsln->end);
+        printf("%02d: [%ld, %ld]\n", bsln->height, bsln->begin, bsln->end);
     } else {
         printf("NULL bsl node\n");
     }
@@ -105,7 +115,7 @@ void bslfnPrint(bskiplistFreeNodes *bslfn) {
     printf("Free nodes: ");
     x = bslfn->header->level[0].forward;
     while (x) {
-        printf("[%lld, %lld]", x->begin, x->end);
+        printf("[%ld, %ld]", x->begin, x->end);
         x = x->level[0].forward;
     }
     printf("\n");
