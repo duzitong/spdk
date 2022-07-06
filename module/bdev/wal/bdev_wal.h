@@ -35,6 +35,7 @@
 #define SPDK_BDEV_WAL_INTERNAL_H
 
 #include "spdk/bdev_module.h"
+#include "spdk/thread.h"
 #include "bsl.h"
 
 /*
@@ -223,6 +224,12 @@ struct wal_bdev_io_channel {
 
 	/*IO channels of core bdev */
 	struct spdk_io_channel  *core_channel;
+
+	/* poller to move data from log bdev to core bdev */
+	struct spdk_poller		*mover_poller;
+
+	/* poller to report stat */
+	struct spdk_poller		*stat_poller;
 };
 
 /* TAIL heads for various wal bdev lists */

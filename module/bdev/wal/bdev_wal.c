@@ -111,6 +111,9 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 		return -ENOMEM;
 	}
 
+	wal_ch->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_bdev, 0);
+	wal_ch->stat_poller = SPDK_POLLER_REGISTER(wal_bdev_stat_report, wal_bdev, 1000*1000);
+
 	return 0;
 }
 
@@ -138,6 +141,9 @@ wal_bdev_destroy_cb(void *io_device, void *ctx_buf)
 	spdk_put_io_channel(wal_ch->core_channel);
 	wal_ch->log_channel = NULL;
 	wal_ch->core_channel = NULL;
+
+	spdk_poller_unregister(&wal_ch->mover_poller);
+	spdk_poller_unregister(&wal_ch->stat_poller);
 }
 
 /*
@@ -1315,6 +1321,24 @@ wal_bdev_examine(struct spdk_bdev *bdev)
 	}
 
 	spdk_bdev_module_examine_done(&g_wal_if);
+}
+
+static int
+wal_bdev_mover(void *ctx)
+{
+	struct wal_bdev *bdev = ctx;
+
+	return SPDK_POLLER_IDLE;
+}
+
+static int
+wal_bdev_stat_report(void *ctx)
+{
+	struct wal_bdev *bdev = ctx;
+
+	bslPrint(bdev->bsl, 1);
+
+	return SPDK_POLLER_BUSY;
 }
 
 /* Log component for bdev wal bdev module */
