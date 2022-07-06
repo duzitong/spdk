@@ -1339,6 +1339,7 @@ wal_bdev_mover(void *ctx)
 	struct wal_bdev_io_channel *ch = ctx;
 	struct wal_bdev *bdev = ch->wal_bdev;
 	struct wal_metadata *metadata;
+	int ret;
 
 	if (bdev->moving) {
 		return SPDK_POLLER_BUSY;
