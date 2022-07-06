@@ -12,14 +12,14 @@ void bslAdjustNodeEnd(bskiplistNode *bn, long begin);
 
 
 bstat *bstatCreate(long begin, long end) {
-    bstat *pb = cmalloc(1, sizeof(pb));
+    bstat *pb = calloc(1, sizeof(pb));
     pb->begin = begin;
     pb->end = end;
     return pb;
 }
 
 bstat *bstatClone(bstat *pb) {
-    bstat *clone = cmalloc(1, sizeof(clone));
+    bstat *clone = calloc(1, sizeof(clone));
     clone->begin = pb->begin;
     clone->end = pb->end;
     clone->type = pb->type;
@@ -42,7 +42,7 @@ int bslRandomLevel(void) {
 /* Create a skiplist node with the specified number of levels. */
 bskiplistNode *bslCreateNode(int level, long begin, long end, bstat *ele) {
     bskiplistNode *bn =
-        cmalloc(1, sizeof(*bn)+level*sizeof(struct bskiplistLevel));
+        calloc(1, sizeof(*bn)+level*sizeof(struct bskiplistLevel));
     bn->begin = begin;
     bn->end = end;
     bn->ele = ele;
@@ -55,7 +55,7 @@ bskiplist *bslCreate(void) {
     int j;
     bskiplist *bsl;
 
-    bsl = cmalloc(1, sizeof(*bsl));
+    bsl = calloc(1, sizeof(*bsl));
     bsl->level = 1;
     bsl->header = bslCreateNode(BSKIPLIST_MAXLEVEL,-1, -1, NULL);
     for (j = 0; j < BSKIPLIST_MAXLEVEL; j++) {
@@ -66,7 +66,7 @@ bskiplist *bslCreate(void) {
 
 bskiplistFreeNodes *bslfnCreate(void) {
     bskiplistFreeNodes *bslfn;
-    bslfn = cmalloc(1, sizeof(*bslfn));
+    bslfn = calloc(1, sizeof(*bslfn));
     bslfn->header = bslfn->tail = bslCreateNode(BSKIPLIST_MAXLEVEL,-1, -1, NULL);
     bslfn->header->level[0].forward = NULL;
     return bslfn;
