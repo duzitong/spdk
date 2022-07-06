@@ -164,6 +164,9 @@ struct wal_bdev {
 
 	/* nodes to free */
 	struct bskiplistFreeNodes *bslfn;
+
+	/* indicate whether there's ongoing moving task */
+	bool		moving;
 };
 
 struct wal_metadata {
@@ -172,6 +175,24 @@ struct wal_metadata {
 	uint64_t	seq;
 
 	uint64_t	next_offset;
+
+	uint64_t	length;
+
+	uint64_t	core_offset;
+
+	uint64_t	core_length;
+};
+
+struct wal_mover_context {
+	struct wal_bdev				*bdev;
+
+	struct wal_bdev_io_channel	*ch;
+
+	struct wal_metadata 		*metadata;
+
+	void 						*data;
+
+	uint64_t					*head;
 };
 
 /*
@@ -219,10 +240,13 @@ struct wal_config {
  * contains the relationship of wal bdev io channel with base bdev io channels.
  */
 struct wal_bdev_io_channel {
-	/*IO channels of log bdev */
+	/* wal bdev */
+	struct spdk_bdev		*wal_bdev;
+
+	/* IO channel of log bdev */
 	struct spdk_io_channel	*log_channel;
 
-	/*IO channels of core bdev */
+	/* IO channel of core bdev */
 	struct spdk_io_channel  *core_channel;
 
 	/* poller to move data from log bdev to core bdev */
