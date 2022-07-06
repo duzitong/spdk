@@ -75,6 +75,8 @@ static void	wal_bdev_stop(struct wal_bdev *bdev);
 static int	wal_bdev_init(void);
 static void	wal_bdev_event_base_bdev(enum spdk_bdev_event_type type, struct spdk_bdev *bdev,
 		void *event_ctx);
+static int wal_bdev_mover(void *ctx);
+static int wal_bdev_stat_report(void *ctx);
 
 /*
  * brief:
