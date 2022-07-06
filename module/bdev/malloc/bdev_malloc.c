@@ -180,16 +180,20 @@ bdev_malloc_writev_with_md(struct malloc_disk *mdisk, struct spdk_io_channel *ch
 		      len, offset, iovcnt);
 
 	task->status = SPDK_BDEV_IO_STATUS_SUCCESS;
-	task->num_outstanding = 1;
+	task->num_outstanding = 0;
+	
+	if (md) {
+		task->num_outstanding++;
 
-	res = spdk_accel_submit_copy(ch, dst, md,
-						mdisk->disk.md_len, 0, malloc_done, task);
+		res = spdk_accel_submit_copy(ch, dst, md,
+							mdisk->disk.md_len, 0, malloc_done, task);
 
-	if (res != 0) {
-		malloc_done(task, res);
+		if (res != 0) {
+			malloc_done(task, res);
+		}
+
+		dst += mdisk->disk.md_len;
 	}
-
-	dst += mdisk->disk.md_len;
 
 	for (i = 0; i < iovcnt; i++) {
 		task->num_outstanding++;
