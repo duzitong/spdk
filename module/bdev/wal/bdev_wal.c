@@ -34,6 +34,7 @@
 #include "bdev_wal.h"
 #include "spdk/env.h"
 #include "spdk/thread.h"
+#include "spdk/likely.h"
 #include "spdk/log.h"
 #include "spdk/string.h"
 #include "spdk/util.h"
@@ -300,7 +301,20 @@ wal_bdev_queue_io_wait(struct wal_bdev_io *wal_io, struct spdk_bdev *bdev,
 
 // TODO -
 static void
-wal_base_bdev_rw_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
+wal_base_bdev_read_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
+{
+	struct wal_bdev_io *wal_io = cb_arg;
+
+	spdk_bdev_free_io(bdev_io);
+
+	wal_bdev_io_complete(wal_io, success ?
+				   SPDK_BDEV_IO_STATUS_SUCCESS :
+				   SPDK_BDEV_IO_STATUS_FAILED);
+}
+
+// TODO: update index
+static void
+wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
 	struct wal_bdev_io *wal_io = cb_arg;
 
@@ -348,7 +362,7 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 
 	ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
 					bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
-					bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, wal_base_bdev_rw_complete,
+					bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, wal_base_bdev_read_complete,
 					wal_io);
 
 	if (ret != 0) {
@@ -394,29 +408,57 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	int				ret;
 	struct wal_base_bdev_info	*base_info;
 	struct spdk_io_channel		*base_ch;
+	struct wal_metadata			*metadata;
+	uint64_t	log_offset, log_blocks;
 
 	wal_bdev = wal_io->wal_bdev;
 
-	base_info = &wal_bdev->core_bdev_info;
-	base_ch = wal_io->wal_ch->core_channel;
+	base_info = &wal_bdev->log_bdev_info;
+	base_ch = wal_io->wal_ch->log_channel;
 
-	ret = spdk_bdev_writev_blocks(base_info->desc, base_ch,
-					bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
-					bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, wal_base_bdev_rw_complete,
+	// use 1 block in log device for metadata
+	metadata = (wal_metadata *) spdk_zmalloc(wal_bdev->log_bdev_info.bdev->blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+
+	metadata->version = 1;
+	metadata->seq = wal_io->seq = ++wal_bdev->seq;
+
+	log_blocks = bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift + 1;
+	if (wal_bdev->log_tail + log_blocks > wal_bdev->log_max) {
+		if (spdk_unlikely(log_blocks > wal_bdev->log_head)) {
+			SPDK_ERRLOG("bdev io submit error due to no enough space left on log device.\n");
+			wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
+		} else {
+			log_offset = 0;
+			wal_bdev->log_tail = log_blocks;
+		}
+	} else {
+		log_offset = wal_bdev->log_tail;
+		wal_bdev->log_tail += log_blocks;
+	}
+	metadata->next_offset = wal_bdev->log_tail;
+
+	if (!metadata) {
+		goto write_no_mem;
+	}
+
+	ret = spdk_bdev_writev_blocks_with_md(base_info->desc, base_ch,
+					bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt, metadata,
+					log_offset, log_blocks, wal_base_bdev_write_complete,
 					wal_io);
 
-	if (ret == 0) {
+	if (spdk_likely(ret == 0)) {
 		
 	} else if (ret == -ENOMEM) {
-		wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
-					_wal_bdev_submit_write_request);
-		return;
+		goto write_no_mem;
 	} else {
 		SPDK_ERRLOG("bdev io submit error not due to ENOMEM, it should not happen\n");
 		assert(false);
 		wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
-		return;
 	}
+write_no_mem:
+	wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
+				_wal_bdev_submit_write_request);
+	return;
 }
 
 // TODO - end
@@ -938,6 +980,7 @@ wal_bdev_configure(struct wal_bdev *wal_bdev)
 
 	assert(wal_bdev->state == WAL_BDEV_STATE_CONFIGURING);
 
+	wal_bdev->blocklen_shift = spdk_u32log2(wal_bdev->core_bdev_info.bdev->blocklen) - spdk_u32log2(wal_bdev->log_bdev_info.bdev->blocklen);
 	wal_bdev_gen = &wal_bdev->bdev;
 
 	wal_bdev->state = WAL_BDEV_STATE_ONLINE;
@@ -1204,6 +1247,12 @@ wal_bdev_add_base_devices(struct wal_bdev_config *wal_cfg)
 		return rc;
 	}
 
+	rc = wal_bdev_start(wal_bdev);
+	if (rc) {
+		SPDK_ERRORLOG("Failed to start WAL bdev '%s'.\n", wal_cfg->name);
+		return rc;
+	}
+
 	rc = wal_bdev_configure(wal_bdev);
 	if (rc != 0) {
 		SPDK_ERRLOG("Failed to configure WAL bdev\n");
@@ -1211,6 +1260,15 @@ wal_bdev_add_base_devices(struct wal_bdev_config *wal_cfg)
 	}
 	
 	return 0;
+}
+
+static int
+wal_bdev_start(struct wal_bdev *wal_bdev)
+{
+	wal_bdev->log_max = wal_bdev->log_bdev_info.bdev->blockcnt - 1;  // last block used to track log head
+	// TODO: recover
+	wal_bdev->log_head = 0;
+	wal_bdev->log_tail = 0;
 }
 
 static void

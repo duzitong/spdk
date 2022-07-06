@@ -102,6 +102,8 @@ struct wal_bdev_io {
 
 	/* save for completion on orig thread */
 	enum spdk_bdev_io_status status;
+
+	uint64_t	seq;
 };
 
 /*
@@ -142,7 +144,27 @@ struct wal_bdev {
 
 	/* open thread */
 	struct spdk_thread		*open_thread;
+
+	/* sequence id */
+	uint64_t	seq;
+
+	/* head offset of logs */
+	uint64_t	log_head;
+
+	/* tail offset of logs */
+	uint64_t	log_tail;
+
+	/* max blocks of logs */
+	uint64_t	log_max;
 };
+
+struct wal_metadata {
+	uint64_t	version;
+	
+	uint64_t	seq;
+
+	uint64_t	next_offset;
+}
 
 /*
  * wal_base_bdev_config is the per base bdev data structure which contains
