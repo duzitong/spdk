@@ -164,7 +164,7 @@ struct wal_metadata {
 	uint64_t	seq;
 
 	uint64_t	next_offset;
-}
+};
 
 /*
  * wal_base_bdev_config is the per base bdev data structure which contains

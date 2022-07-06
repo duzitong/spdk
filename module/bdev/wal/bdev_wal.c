@@ -422,7 +422,7 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	metadata->version = 1;
 	metadata->seq = wal_io->seq = ++wal_bdev->seq;
 
-	log_blocks = bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift + 1;
+	log_blocks = (bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift) + 1;
 	if (wal_bdev->log_tail + log_blocks > wal_bdev->log_max) {
 		if (spdk_unlikely(log_blocks > wal_bdev->log_head)) {
 			SPDK_ERRLOG("bdev io submit error due to no enough space left on log device.\n");
@@ -1249,7 +1249,7 @@ wal_bdev_add_base_devices(struct wal_bdev_config *wal_cfg)
 
 	rc = wal_bdev_start(wal_bdev);
 	if (rc) {
-		SPDK_ERRORLOG("Failed to start WAL bdev '%s'.\n", wal_cfg->name);
+		SPDK_ERRLOG("Failed to start WAL bdev '%s'.\n", wal_cfg->name);
 		return rc;
 	}
 
@@ -1269,6 +1269,8 @@ wal_bdev_start(struct wal_bdev *wal_bdev)
 	// TODO: recover
 	wal_bdev->log_head = 0;
 	wal_bdev->log_tail = 0;
+
+	return 0;
 }
 
 static void
