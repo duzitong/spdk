@@ -940,11 +940,10 @@ wal_bdev_configure(struct wal_bdev *wal_bdev)
 
 	wal_bdev_gen = &wal_bdev->bdev;
 
-	if (rc != 0) {
-		SPDK_ERRLOG("wal module startup callback failed\n");
-		return rc;
-	}
 	wal_bdev->state = WAL_BDEV_STATE_ONLINE;
+
+	wal_bdev->open_thread = spdk_get_thread();
+
 	SPDK_DEBUGLOG(bdev_wal, "io device register %p\n", wal_bdev);
 	SPDK_DEBUGLOG(bdev_wal, "blockcnt %" PRIu64 ", blocklen %u\n",
 		      wal_bdev_gen->blockcnt, wal_bdev_gen->blocklen);
@@ -1207,7 +1206,7 @@ wal_bdev_add_base_devices(struct wal_bdev_config *wal_cfg)
 
 	rc = wal_bdev_configure(wal_bdev);
 	if (rc != 0) {
-		SPDK_ERRLOG("Failed to configure replica bdev\n");
+		SPDK_ERRLOG("Failed to configure WAL bdev\n");
 		return rc;
 	}
 	
@@ -1236,16 +1235,16 @@ wal_bdev_examine(struct spdk_bdev *bdev)
 	struct wal_bdev_config	*wal_cfg;
 	bool			is_log;
 
-	// if (wal_bdev_can_claim_bdev(bdev->name, &wal_cfg, &is_log)) {
-	// 	if (is_log) {
-	// 		wal_bdev_add_log_device(wal_cfg);
-	// 	} else {
-	// 		wal_bdev_add_core_device(wal_cfg);
-	// 	}
-	// } else {
-	// 	SPDK_DEBUGLOG(bdev_wal, "bdev %s can't be claimed\n",
-	// 		      bdev->name);
-	// }
+	if (wal_bdev_can_claim_bdev(bdev->name, &wal_cfg, &is_log)) {
+		if (is_log) {
+			wal_bdev_add_log_device(wal_cfg);
+		} else {
+			wal_bdev_add_core_device(wal_cfg);
+		}
+	} else {
+		SPDK_DEBUGLOG(bdev_wal, "bdev %s can't be claimed\n",
+			      bdev->name);
+	}
 
 	spdk_bdev_module_examine_done(&g_wal_if);
 }
