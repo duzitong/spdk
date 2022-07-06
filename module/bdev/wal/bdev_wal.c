@@ -417,7 +417,7 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	base_ch = wal_io->wal_ch->log_channel;
 
 	// use 1 block in log device for metadata
-	metadata = (wal_metadata *) spdk_zmalloc(wal_bdev->log_bdev_info.bdev->blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	metadata = (struct wal_metadata *) spdk_zmalloc(wal_bdev->log_bdev_info.bdev->blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 
 	metadata->version = 1;
 	metadata->seq = wal_io->seq = ++wal_bdev->seq;
@@ -427,6 +427,7 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 		if (spdk_unlikely(log_blocks > wal_bdev->log_head)) {
 			SPDK_ERRLOG("bdev io submit error due to no enough space left on log device.\n");
 			wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
+			return;
 		} else {
 			log_offset = 0;
 			wal_bdev->log_tail = log_blocks;
@@ -443,7 +444,7 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 
 	ret = spdk_bdev_writev_blocks_with_md(base_info->desc, base_ch,
 					bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt, metadata,
-					log_offset, log_blocks, wal_base_bdev_write_complete,
+					log_offset, log_blocks-1, wal_base_bdev_write_complete,
 					wal_io);
 
 	if (spdk_likely(ret == 0)) {
@@ -451,10 +452,10 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	} else if (ret == -ENOMEM) {
 		goto write_no_mem;
 	} else {
-		SPDK_ERRLOG("bdev io submit error not due to ENOMEM, it should not happen\n");
-		assert(false);
+		SPDK_ERRLOG("bdev io submit error due to %d, it should not happen\n", ret);
 		wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
 	}
+	return;
 write_no_mem:
 	wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
 				_wal_bdev_submit_write_request);
