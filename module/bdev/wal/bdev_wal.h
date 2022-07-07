@@ -154,15 +154,18 @@ struct wal_bdev {
 
 	/* head offset of logs */
 	uint64_t	log_head;
+	
+	/* current round of log head */
+	uint64_t	head_round;
 
 	/* tail offset of logs */
 	uint64_t	log_tail;
 
+	/* current round of log tail */
+	uint64_t	tail_round;
+
 	/* max blocks of logs */
 	uint64_t	log_max;
-
-	/* current round of logs */
-	uint64_t	round;
 
 	/* skip list index */
 	struct bskiplist 	*bsl;

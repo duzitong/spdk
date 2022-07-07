@@ -431,7 +431,7 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	struct wal_base_bdev_info	*base_info;
 	struct spdk_io_channel		*base_ch;
 	struct wal_metadata			*metadata;
-	uint64_t	log_offset, log_blocks;
+	uint64_t	log_offset, log_blocks, next_tail;
 
 	wal_bdev = wal_io->wal_bdev;
 
@@ -451,7 +451,8 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	metadata->core_length =  bdev_io->u.bdev.num_blocks;
 
 	log_blocks = (bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift) + 1;
-	if (wal_bdev->log_tail + log_blocks >= wal_bdev->log_max) {
+	next_tail = wal_bdev->log_tail + log_blocks;
+	if (next_tail >= wal_bdev->log_max) {
 		if (spdk_unlikely(log_blocks > wal_bdev->log_head)) {
 			SPDK_ERRLOG("bdev io submit error due to no enough space left on log device.\n");
 			wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
@@ -459,15 +460,19 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 		} else {
 			log_offset = 0;
 			wal_bdev->log_tail = log_blocks;
-			wal_bdev->round++;
+			wal_bdev->tail_round++;
 		}
+	} else if (wal_bdev->tail_round > wal_bdev->head_round && next_tail > wal_bdev->log_head) {
+		SPDK_ERRLOG("bdev io submit error due to no enough space left on log device.\n");
+		wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
+		return;
 	} else {
 		log_offset = wal_bdev->log_tail;
 		wal_bdev->log_tail += log_blocks;
 	}
 	metadata->next_offset = wal_bdev->log_tail;
 	metadata->length = log_blocks - 1;
-	metadata->round = wal_bdev->round;
+	metadata->round = wal_bdev->tail_round;
 
 	wal_io->metadata = metadata;
 
@@ -1301,7 +1306,8 @@ wal_bdev_start(struct wal_bdev *wal_bdev)
 	// TODO: recover
 	wal_bdev->log_head = 0;
 	wal_bdev->log_tail = 0;
-	wal_bdev->round = 0;
+	wal_bdev->head_round = 0;
+	wal_bdev->tail_round = 0;
 
 	return 0;
 }
@@ -1394,8 +1400,9 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 	}
 
 	if (spdk_unlikely(metadata->version != METADATA_VERSION)) {
-		SPDK_NOTICELOG("Go back to 0 block during move.\n");
+		SPDK_NOTICELOG("Go back to block '0' during move.\n");
 		bdev->log_head = 0;
+		bdev->head_round++;
 		bdev->moving = false;
 		return;
 	}
@@ -1513,7 +1520,7 @@ wal_bdev_stat_report(void *ctx)
 	struct wal_bdev *bdev = ctx;
 
 	// bslPrint(bdev->bsl, 1);
-	SPDK_NOTICELOG("WAL bdev head: %ld, tail: %ld, round: %ld.\n", bdev->log_head, bdev->log_tail, bdev->round);
+	SPDK_NOTICELOG("WAL bdev head: %ld(%ld), tail: %ld(%ld).\n", bdev->log_head, bdev->head_round, bdev->log_tail, bdev->tail_round);
 
 	return SPDK_POLLER_BUSY;
 }
