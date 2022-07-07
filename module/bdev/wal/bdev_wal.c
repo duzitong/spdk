@@ -1360,7 +1360,7 @@ wal_bdev_mover(void *ctx)
 		return SPDK_POLLER_BUSY;
 	}
 
-	if (bdev->log_head == bdev->log_tail) {
+	if (bdev->log_head == bdev->log_tail && bdev->head_round == bdev->tail_round) {
 		return SPDK_POLLER_IDLE;
 	}
 
