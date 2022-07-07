@@ -11,10 +11,23 @@ void bslAdjustNodeBegin(bskiplistNode *bn, long end);
 void bslAdjustNodeEnd(bskiplistNode *bn, long begin);
 
 
-bstat *bstatCreate(long begin, long end, long round) {
+bstat *bstatBdevCreate(long begin, long end, long round, long bdevOffset) {
     bstat *pb = calloc(1, sizeof(pb));
     pb->begin = begin;
     pb->end = end;
+    pb->round = round;
+    pb->type = LOCATION_TYPE_BDEV;
+    pb->location = bdevOffset;
+    return pb;
+}
+
+bstat *bstatMemCreate(long begin, long end, long round, void *data) {
+    bstat *pb = calloc(1, sizeof(pb));
+    pb->begin = begin;
+    pb->end = end;
+    pb->round = round;
+    pb->type = LOCATION_TYPE_MEM;
+    pb->location = data;
     return pb;
 }
 
@@ -252,7 +265,7 @@ bskiplistNode *bslFirstNodeAfterBegin(bskiplist *bsl, long begin) {
     x = bsl->header;
     for (i = bsl->level-1; i >= 0; i--) {
         while (x->level[i].forward &&
-                (x->level[i].forward->begin < begin))
+                (x->level[i].forward->end < begin))
         {
             x = x->level[i].forward;
         }

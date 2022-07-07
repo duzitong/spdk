@@ -75,6 +75,7 @@ static void	wal_bdev_stop(struct wal_bdev *bdev);
 static int	wal_bdev_init(void);
 static void	wal_bdev_event_base_bdev(enum spdk_bdev_event_type type, struct spdk_bdev *bdev,
 		void *event_ctx);
+static bool wal_bdev_is_valid_entry(struct wal_bdev *bdev, struct bstat *bstat);
 static int wal_bdev_mover(void *ctx);
 static void wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
 static void wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
@@ -313,6 +314,26 @@ wal_bdev_queue_io_wait(struct wal_bdev_io *wal_io, struct spdk_bdev *bdev,
 	spdk_bdev_queue_io_wait(bdev, ch, &wal_io->waitq_entry);
 }
 
+static bool wal_bdev_is_valid_entry(struct wal_bdev *bdev, struct bstat *bstat)
+{
+	if (bstat->type == LOCATION_TYPE_BDEV) {
+		if (bstat->round == bdev->tail_round) {
+			return true;
+		}
+
+		if (bstat->round < bdev->tail_round - 1) {
+			return false;
+		}
+
+		if (bstat->location >= bdev->log_tail) {
+			return true;
+		}
+		return false;
+	}
+
+	return true;
+}
+
 // TODO -
 static void
 wal_base_bdev_read_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
@@ -330,12 +351,15 @@ static void
 wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
 	struct wal_bdev_io *wal_io = cb_arg;
+	uint64_t begin, end;
 
-	struct bstat *bstat = bstatCreate(bdev_io->u.bdev.offset_blocks, 
-									bdev_io->u.bdev.offset_blocks + bdev_io->u.bdev.num_blocks,
-									wal_io->metadata->round);
+	begin = wal_io->metadata->core_offset;
+	end = wal_io->metadata->core_offset + wal_io->metadata->core_offset;
 
-	bslInsert(wal_io->wal_bdev->bsl, wal_io->metadata->core_offset, wal_io->metadata->core_offset + wal_io->metadata->core_offset,
+	struct bstat *bstat = bstatBdevCreate(begin, end, wal_io->metadata->round,
+											bdev_io->u.bdev.offset_blocks + 1);
+
+	bslInsert(wal_io->wal_bdev->bsl, begin, end,
 				bstat, wal_io->wal_bdev->bslfn);
 
 	spdk_bdev_free_io(bdev_io);
@@ -376,28 +400,60 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 	int				ret;
 	struct wal_base_bdev_info	*base_info;
 	struct spdk_io_channel		*base_ch;
+	struct bskiplistNode		*bn;
+	uint64_t	read_begin, read_end;
 
 	wal_bdev = wal_io->wal_bdev;
+	read_begin = bdev_io->u.bdev.offset_blocks;
+	read_end = bdev_io->u.bdev.offset_blocks + bdev_io->u.bdev.num_blocks - 1;
 
-	base_info = &wal_bdev->core_bdev_info;
-	base_ch = wal_io->wal_ch->core_channel;
+	bn = bslFirstNodeAfterBegin(wal_bdev->bsl, read_begin);
 
-	ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
-					bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
-					bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, wal_base_bdev_read_complete,
-					wal_io);
+	if (bn->ele->begin <= read_begin && bn->ele->end >= read_end 
+		&& wal_bdev_is_valid_entry(wal_bdev, bn->ele)) {
+		// one entry in log bdev
+		base_info = &wal_bdev->log_bdev_info;
+		base_ch = wal_io->wal_ch->log_channel;
 
-	if (ret != 0) {
-			if (ret == -ENOMEM) {
-			wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
-						_wal_bdev_submit_read_request);
-			return;
-		} else {
-			SPDK_ERRLOG("bdev io submit error not due to ENOMEM, it should not happen\n");
-			assert(false);
-			wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
-			return;
+		ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
+						bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
+						bn->ele->location - read_begin + bn->ele->begin, bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift,
+						wal_base_bdev_read_complete, wal_io);
+		
+		if (ret != 0) {
+			goto read_error;
 		}
+		return;
+	}
+
+	if (bn->ele->begin > read_end) {
+		// not found in index
+		base_info = &wal_bdev->core_bdev_info;
+		base_ch = wal_io->wal_ch->core_channel;
+
+		ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
+						bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
+						bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, wal_base_bdev_read_complete,
+						wal_io);
+
+		if (ret != 0) {
+			goto read_error;
+		}
+		return;
+	}
+
+	// TODO: create a mem buffer to read data from several parts and copy back to origin iov
+
+read_error:
+	if (ret == -ENOMEM) {
+		wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
+					_wal_bdev_submit_read_request);
+		return;
+	} else {
+		SPDK_ERRLOG("bdev io submit error not due to ENOMEM, it should not happen\n");
+		assert(false);
+		wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
+		return;
 	}
 }
 
@@ -454,18 +510,14 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	next_tail = wal_bdev->log_tail + log_blocks;
 	if (next_tail >= wal_bdev->log_max) {
 		if (spdk_unlikely(log_blocks > wal_bdev->log_head)) {
-			SPDK_ERRLOG("bdev io submit error due to no enough space left on log device.\n");
-			wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
-			return;
+			goto write_no_space;
 		} else {
 			log_offset = 0;
 			wal_bdev->log_tail = log_blocks;
 			wal_bdev->tail_round++;
 		}
 	} else if (wal_bdev->tail_round > wal_bdev->head_round && next_tail > wal_bdev->log_head) {
-		SPDK_ERRLOG("bdev io submit error due to no enough space left on log device.\n");
-		wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
-		return;
+		goto write_no_space;
 	} else {
 		log_offset = wal_bdev->log_tail;
 		wal_bdev->log_tail += log_blocks;
@@ -489,6 +541,11 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 		SPDK_ERRLOG("bdev io submit error due to %d, it should not happen\n", ret);
 		wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
 	}
+	return;
+write_no_space:
+	SPDK_ERRLOG("bdev io submit waiting due to no enough space left on log device.\n");
+	wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
+				_wal_bdev_submit_write_request);
 	return;
 write_no_mem:
 	wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
@@ -1521,6 +1578,7 @@ wal_bdev_stat_report(void *ctx)
 
 	// bslPrint(bdev->bsl, 1);
 	SPDK_NOTICELOG("WAL bdev head: %ld(%ld), tail: %ld(%ld).\n", bdev->log_head, bdev->head_round, bdev->log_tail, bdev->tail_round);
+	bslfnFree(bdev->bslfn);
 
 	return SPDK_POLLER_BUSY;
 }
