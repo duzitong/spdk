@@ -427,42 +427,42 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 	read_begin = bdev_io->u.bdev.offset_blocks;
 	read_end = bdev_io->u.bdev.offset_blocks + bdev_io->u.bdev.num_blocks - 1;
 
-	bn = bslFirstNodeAfterBegin(wal_bdev->bsl, read_begin);
+	// bn = bslFirstNodeAfterBegin(wal_bdev->bsl, read_begin);
 
-	if (bn->ele->begin <= read_begin && bn->ele->end >= read_end 
-		&& wal_bdev_is_valid_entry(wal_bdev, bn->ele)) {
-		// one entry in log bdev
-		base_info = &wal_bdev->log_bdev_info;
-		base_ch = wal_io->wal_ch->log_channel;
+	// if (bn->ele->begin <= read_begin && bn->ele->end >= read_end 
+	// 	&& wal_bdev_is_valid_entry(wal_bdev, bn->ele)) {
+	// 	// one entry in log bdev
+	// 	base_info = &wal_bdev->log_bdev_info;
+	// 	base_ch = wal_io->wal_ch->log_channel;
 
-		ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
-						bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
-						bn->ele->bdevOffset - read_begin + bn->ele->begin, bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift,
-						wal_base_bdev_read_complete, wal_io);
+	// 	ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
+	// 					bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
+	// 					bn->ele->bdevOffset - read_begin + bn->ele->begin, bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift,
+	// 					wal_base_bdev_read_complete, wal_io);
 		
-		if (ret != 0) {
-			wal_bdev_read_request_error(ret, wal_io, base_info, base_ch);
-			return;
-		}
-		return;
-	}
+	// 	if (ret != 0) {
+	// 		wal_bdev_read_request_error(ret, wal_io, base_info, base_ch);
+	// 		return;
+	// 	}
+	// 	return;
+	// }
 
-	if (bn->ele->begin > read_end) {
-		// not found in index
-		base_info = &wal_bdev->core_bdev_info;
-		base_ch = wal_io->wal_ch->core_channel;
+	// if (bn->ele->begin > read_end) {
+	// 	// not found in index
+	// 	base_info = &wal_bdev->core_bdev_info;
+	// 	base_ch = wal_io->wal_ch->core_channel;
 
-		ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
-						bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
-						bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, wal_base_bdev_read_complete,
-						wal_io);
+	// 	ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
+	// 					bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
+	// 					bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, wal_base_bdev_read_complete,
+	// 					wal_io);
 
-		if (ret != 0) {
-			wal_bdev_read_request_error(ret, wal_io, base_info, base_ch);
-			return;
-		}
-		return;
-	}
+	// 	if (ret != 0) {
+	// 		wal_bdev_read_request_error(ret, wal_io, base_info, base_ch);
+	// 		return;
+	// 	}
+	// 	return;
+	// }
 
 	// TODO: create a mem buffer to read data from several parts and copy back to origin iov
 	base_info = &wal_bdev->core_bdev_info;
