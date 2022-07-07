@@ -325,9 +325,10 @@ static bool wal_bdev_is_valid_entry(struct wal_bdev *bdev, struct bstat *bstat)
 			return false;
 		}
 
-		if (bstat->location >= bdev->log_tail) {
+		if (bstat->bdevOffset >= bdev->log_tail) {
 			return true;
 		}
+
 		return false;
 	}
 
@@ -417,7 +418,7 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 
 		ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
 						bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
-						bn->ele->location - read_begin + bn->ele->begin, bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift,
+						bn->ele->bdevOffset - read_begin + bn->ele->begin, bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift,
 						wal_base_bdev_read_complete, wal_io);
 		
 		if (ret != 0) {
