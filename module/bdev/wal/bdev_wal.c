@@ -1449,7 +1449,7 @@ wal_bdev_mover_clean(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 	struct wal_mover_context *mover_ctx = ctx;
 	struct wal_bdev *bdev = mover_ctx->bdev;
 
-	bdev->log_head = *mover_ctx->info->head;
+	bdev->log_head = mover_ctx->info->head;
 	
 	spdk_free(mover_ctx->info);
 	spdk_free(mover_ctx->data);
