@@ -11,7 +11,7 @@ void bslAdjustNodeBegin(bskiplistNode *bn, long end);
 void bslAdjustNodeEnd(bskiplistNode *bn, long begin);
 
 
-bstat *bstatCreate(long begin, long end) {
+bstat *bstatCreate(long begin, long end, long round) {
     bstat *pb = calloc(1, sizeof(pb));
     pb->begin = begin;
     pb->end = end;

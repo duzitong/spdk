@@ -38,6 +38,8 @@
 #include "spdk/thread.h"
 #include "bsl.h"
 
+#define METADATA_VERSION	10086	// XD
+
 /*
  * WAL state describes the state of the wal bdev. This wal bdev can be either in
  * configured list or configuring list
@@ -159,6 +161,9 @@ struct wal_bdev {
 	/* max blocks of logs */
 	uint64_t	log_max;
 
+	/* current round of logs */
+	uint64_t	round;
+
 	/* skip list index */
 	struct bskiplist 	*bsl;
 
@@ -181,6 +186,8 @@ struct wal_metadata {
 	uint64_t	core_offset;
 
 	uint64_t	core_length;
+
+	uint64_t	round;
 };
 
 /* info stored in the last block of log bdev */

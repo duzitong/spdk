@@ -331,7 +331,9 @@ wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *c
 {
 	struct wal_bdev_io *wal_io = cb_arg;
 
-	struct bstat *bstat = bstatCreate(bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.offset_blocks + bdev_io->u.bdev.num_blocks);
+	struct bstat *bstat = bstatCreate(bdev_io->u.bdev.offset_blocks, 
+									bdev_io->u.bdev.offset_blocks + bdev_io->u.bdev.num_blocks,
+									wal_io->metadata->round);
 
 	bslInsert(wal_io->wal_bdev->bsl, wal_io->metadata->core_offset, wal_io->metadata->core_offset + wal_io->metadata->core_offset,
 				bstat, wal_io->wal_bdev->bslfn);
@@ -443,7 +445,7 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 		goto write_no_mem;
 	}
 
-	metadata->version = 1;
+	metadata->version = METADATA_VERSION;
 	metadata->seq = ++wal_bdev->seq;
 	metadata->core_offset = bdev_io->u.bdev.offset_blocks;
 	metadata->core_length =  bdev_io->u.bdev.num_blocks;
@@ -457,6 +459,7 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 		} else {
 			log_offset = 0;
 			wal_bdev->log_tail = log_blocks;
+			wal_bdev->round++;
 		}
 	} else {
 		log_offset = wal_bdev->log_tail;
@@ -464,6 +467,7 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	}
 	metadata->next_offset = wal_bdev->log_tail;
 	metadata->length = log_blocks - 1;
+	metadata->round = wal_bdev->round;
 
 	wal_io->metadata = metadata;
 
@@ -1297,6 +1301,7 @@ wal_bdev_start(struct wal_bdev *wal_bdev)
 	// TODO: recover
 	wal_bdev->log_head = 0;
 	wal_bdev->log_tail = 0;
+	wal_bdev->round = 0;
 
 	return 0;
 }
@@ -1364,7 +1369,7 @@ wal_bdev_mover(void *ctx)
 	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, ch->log_channel, metadata, bdev->log_head, 1, 
 									wal_bdev_mover_read_data, mover_ctx);
 	if (ret) {
-		SPDK_ERRLOG("Failed to read metadata during move");
+		SPDK_ERRLOG("Failed to read metadata during move.\n");
 		wal_bdev_mover_free(ctx);
 	}
 
@@ -1383,8 +1388,19 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 	spdk_bdev_free_io(bdev_io);
 
 	if (spdk_unlikely(!success)) {
-		SPDK_ERRLOG("Failed to read metadata during move");
+		SPDK_ERRLOG("Failed to read metadata during move.\n");
 		wal_bdev_mover_free(ctx);
+		return;
+	}
+
+	if (spdk_unlikely(metadata->version != METADATA_VERSION)) {
+		SPDK_NOTICELOG("Go back to 0 block during move.\n");
+		ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, ch->log_channel, metadata, 0, 1, 
+								wal_bdev_mover_read_data, mover_ctx);
+		if (ret) {
+			SPDK_ERRLOG("Failed to read metadata during move.\n");
+			wal_bdev_mover_free(ctx);
+		}
 		return;
 	}
 
@@ -1395,7 +1411,7 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, ch->log_channel, data, bdev->log_head+1, metadata->length, 
 									wal_bdev_mover_write_data, mover_ctx);
 	if (ret) {
-		SPDK_ERRLOG("Failed to read data during move");
+		SPDK_ERRLOG("Failed to read data during move.\n");
 		wal_bdev_mover_free(ctx);
 	}
 }
@@ -1412,7 +1428,7 @@ wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 	spdk_bdev_free_io(bdev_io);
 
 	if (spdk_unlikely(!success)) {
-		SPDK_ERRLOG("Failed to read data during move");
+		SPDK_ERRLOG("Failed to read data during move.\n");
 		wal_bdev_mover_free(ctx);
 		return;
 	}
@@ -1421,7 +1437,7 @@ wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 									metadata->core_offset, metadata->core_length,
 									wal_bdev_mover_update_head, mover_ctx);
 	if (ret) {
-		SPDK_ERRLOG("Failed to write data during move");
+		SPDK_ERRLOG("Failed to write data during move.\n");
 		wal_bdev_mover_free(ctx);
 	}
 }
@@ -1439,7 +1455,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 	spdk_bdev_free_io(bdev_io);
 
 	if (spdk_unlikely(!success)) {
-		SPDK_ERRLOG("Failed to write data during move");
+		SPDK_ERRLOG("Failed to write data during move.\n");
 		wal_bdev_mover_free(ctx);
 		return;
 	}
@@ -1453,7 +1469,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 									bdev->log_max, 1,
 									wal_bdev_mover_clean, mover_ctx);
 	if (ret) {
-		SPDK_ERRLOG("Failed to update head to log bdev during move");
+		SPDK_ERRLOG("Failed to update head to log bdev during move.\n");
 		wal_bdev_mover_free(ctx);
 	}
 }
@@ -1467,7 +1483,7 @@ wal_bdev_mover_clean(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 	spdk_bdev_free_io(bdev_io);
 
 	if (spdk_unlikely(!success)) {
-		SPDK_ERRLOG("Failed to update head to log bdev during move");
+		SPDK_ERRLOG("Failed to update head to log bdev during move.\n");
 		wal_bdev_mover_free(ctx);
 		return;
 	}
