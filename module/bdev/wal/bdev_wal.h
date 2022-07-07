@@ -183,6 +183,11 @@ struct wal_metadata {
 	uint64_t	core_length;
 };
 
+/* info stored in the last block of log bdev */
+struct wal_log_info {
+	uint64_t	head;
+}
+
 struct wal_mover_context {
 	struct wal_bdev				*bdev;
 
@@ -192,7 +197,7 @@ struct wal_mover_context {
 
 	void 						*data;
 
-	uint64_t					*head;
+	struct wal_log_info			*info;
 };
 
 /*

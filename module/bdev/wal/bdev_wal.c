@@ -1424,13 +1424,14 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 	struct wal_bdev *bdev = mover_ctx->bdev;
 	struct wal_metadata *metadata = mover_ctx->metadata;
 	int ret;
+	struct wal_log_info *info;
 
-	uint64_t *head = spdk_zmalloc(bdev->log_bdev_info.bdev->blocklen, 0, 
+	info = spdk_zmalloc(bdev->log_bdev_info.bdev->blocklen, 0, 
 							NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-	*head = metadata->next_offset;
-	mover_ctx->head = head;
+	info->head = metadata->next_offset;
+	mover_ctx->info = info;
 
-	ret = spdk_bdev_write_blocks(bdev->log_bdev_info.desc, ch->log_channel, head,
+	ret = spdk_bdev_write_blocks(bdev->log_bdev_info.desc, ch->log_channel, info,
 									bdev->log_max, 1,
 									wal_bdev_mover_clean, mover_ctx);
 	if (ret) {
@@ -1448,9 +1449,9 @@ wal_bdev_mover_clean(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 	struct wal_mover_context *mover_ctx = ctx;
 	struct wal_bdev *bdev = mover_ctx->bdev;
 
-	bdev->log_head = *mover_ctx->head;
+	bdev->log_head = *mover_ctx->info->head;
 	
-	spdk_free(mover_ctx->head);
+	spdk_free(mover_ctx->info);
 	spdk_free(mover_ctx->data);
 	spdk_free(mover_ctx->metadata);
 	spdk_free(mover_ctx);
