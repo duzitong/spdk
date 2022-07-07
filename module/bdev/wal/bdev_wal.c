@@ -1517,7 +1517,7 @@ wal_bdev_stat_report(void *ctx)
 	struct wal_bdev *bdev = ctx;
 
 	// bslPrint(bdev->bsl, 1);
-	SPDK_NOTICELOG("WAL bdev head: %ld, tail: %ld\n", bdev->log_head, bdev->log_tail);
+	SPDK_NOTICELOG("WAL bdev head: %ld, tail: %ld, round: %ld.\n", bdev->log_head, bdev->log_tail, bdev->round);
 
 	return SPDK_POLLER_BUSY;
 }
