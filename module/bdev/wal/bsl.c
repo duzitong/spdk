@@ -118,7 +118,7 @@ void bslPrintNode(bskiplistNode *bsln) {
 
 void bslFreeNode(bskiplistNode *bsln) {
     if (bsln->ele->type == LOCATION_TYPE_MEM)
-        free(bsln->ele->memPointer);
+        free((void *)bsln->ele->bdevOffset);
     free(bsln->ele);
     free(bsln);
 }
