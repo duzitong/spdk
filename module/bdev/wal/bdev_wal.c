@@ -337,6 +337,8 @@ wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *c
 
 	spdk_bdev_free_io(bdev_io);
 
+	spdk_free(wal_io->metadata);
+
 	wal_bdev_io_complete(wal_io, success ?
 				   SPDK_BDEV_IO_STATUS_SUCCESS :
 				   SPDK_BDEV_IO_STATUS_FAILED);
@@ -1454,7 +1456,7 @@ wal_bdev_mover_clean(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 	spdk_free(mover_ctx->info);
 	spdk_free(mover_ctx->data);
 	spdk_free(mover_ctx->metadata);
-	spdk_free(mover_ctx);
+	free(mover_ctx);
 
 	bdev->moving = false;
 }
@@ -1465,7 +1467,7 @@ wal_bdev_stat_report(void *ctx)
 	struct wal_bdev *bdev = ctx;
 
 	// bslPrint(bdev->bsl, 1);
-	SPDK_NOTICELOG("WAL bdev head: %ld, tail: %ld", bdev->log_head, bdev->log_tail);
+	SPDK_NOTICELOG("WAL bdev head: %ld, tail: %ld\n", bdev->log_head, bdev->log_tail);
 
 	return SPDK_POLLER_BUSY;
 }
