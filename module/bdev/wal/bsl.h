@@ -16,7 +16,6 @@ typedef struct bstat {
     locationType type;
     long unsigned int round;
     long unsigned int bdevOffset;
-    void *memPointer;
 } bstat;
 
 typedef struct bskiplistNode {
@@ -39,7 +38,7 @@ typedef struct bskiplistFreeNodes {
 } bskiplistFreeNodes;
 
 bstat *bstatBdevCreate(long begin, long end, long unsigned int round, long unsigned int bdevOffset);
-bstat *bstatMemCreate(long begin, long end, long unsigned int round, void* data);
+bstat *bstatMemCreate(long begin, long end, long unsigned int round, void* memPointer);
 bskiplist *bslCreate(void);
 bskiplistFreeNodes *bslfnCreate(void);
 void bslPrint(bskiplist *bsl, char full);

@@ -21,13 +21,13 @@ bstat *bstatBdevCreate(long begin, long end, long unsigned int round, long unsig
     return pb;
 }
 
-bstat *bstatMemCreate(long begin, long end, long unsigned int round, void *data) {
+bstat *bstatMemCreate(long begin, long end, long unsigned int round, void *memPointer) {
     bstat *pb = calloc(1, sizeof(pb));
     pb->begin = begin;
     pb->end = end;
     pb->round = round;
     pb->type = LOCATION_TYPE_MEM;
-    pb->memPointer = data;
+    pb->bdevOffset = memPointer;
     return pb;
 }
 
@@ -37,7 +37,6 @@ bstat *bstatClone(bstat *pb) {
     clone->end = pb->end;
     clone->type = pb->type;
     clone->bdevOffset = pb->bdevOffset;
-    clone->memPointer = pb->memPointer;
     return clone;
 }
 
