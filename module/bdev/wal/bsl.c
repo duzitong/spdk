@@ -11,7 +11,7 @@ void bslAdjustNodeBegin(bskiplistNode *bn, long end);
 void bslAdjustNodeEnd(bskiplistNode *bn, long begin);
 
 
-bstat *bstatBdevCreate(long begin, long end, u_int64_t round, long bdevOffset) {
+bstat *bstatBdevCreate(long begin, long end, long unsigned int round, long unsigned int bdevOffset) {
     bstat *pb = calloc(1, sizeof(pb));
     pb->begin = begin;
     pb->end = end;
@@ -21,7 +21,7 @@ bstat *bstatBdevCreate(long begin, long end, u_int64_t round, long bdevOffset) {
     return pb;
 }
 
-bstat *bstatMemCreate(long begin, long end, u_int64_t round, void *data) {
+bstat *bstatMemCreate(long begin, long end, long unsigned int round, void *data) {
     bstat *pb = calloc(1, sizeof(pb));
     pb->begin = begin;
     pb->end = end;
@@ -118,8 +118,8 @@ void bslPrintNode(bskiplistNode *bsln) {
 }
 
 void bslFreeNode(bskiplistNode *bsln) {
-    if (bsln->ele->type == MEM)
-        free(bsln->ele->location.memPointer);
+    if (bsln->ele->type == LOCATION_TYPE_MEM)
+        free(bsln->ele->memPointer);
     free(bsln->ele);
     free(bsln);
 }

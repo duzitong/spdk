@@ -14,8 +14,8 @@ typedef enum {
 typedef struct bstat {
     long begin, end;
     locationType type;
-    u_int64_t round;
-    uint64_t bdevOffset;
+    long unsigned int round;
+    long unsigned int bdevOffset;
     void *memPointer;
 } bstat;
 
@@ -38,8 +38,8 @@ typedef struct bskiplistFreeNodes {
     struct bskiplistNode *header, *tail;
 } bskiplistFreeNodes;
 
-bstat *bstatBdevCreate(long begin, long end, u_int64_t round, long bdevOffset);
-bstat *bstatMemCreate(long begin, long end, u_int64_t round, void* data);
+bstat *bstatBdevCreate(long begin, long end, long unsigned int round, long bdevOffset);
+bstat *bstatMemCreate(long begin, long end, long unsigned int round, void* data);
 bskiplist *bslCreate(void);
 bskiplistFreeNodes *bslfnCreate(void);
 void bslPrint(bskiplist *bsl, char full);
