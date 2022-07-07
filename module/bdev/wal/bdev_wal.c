@@ -465,6 +465,18 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 	}
 
 	// TODO: create a mem buffer to read data from several parts and copy back to origin iov
+	base_info = &wal_bdev->core_bdev_info;
+	base_ch = wal_io->wal_ch->core_channel;
+
+	ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
+					bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
+					bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, wal_base_bdev_read_complete,
+					wal_io);
+
+	if (ret != 0) {
+		wal_bdev_read_request_error(ret, wal_io, base_info, base_ch);
+		return;
+	}
 }
 
 static void
