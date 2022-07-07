@@ -17,6 +17,7 @@ struct rpc_construct_malloc {
 	uint64_t num_blocks;
 	uint32_t block_size;
 	uint32_t optimal_io_boundary;
+	bool	md;
 };
 
 static void
@@ -32,6 +33,7 @@ static const struct spdk_json_object_decoder rpc_construct_malloc_decoders[] = {
 	{"num_blocks", offsetof(struct rpc_construct_malloc, num_blocks), spdk_json_decode_uint64},
 	{"block_size", offsetof(struct rpc_construct_malloc, block_size), spdk_json_decode_uint32},
 	{"optimal_io_boundary", offsetof(struct rpc_construct_malloc, optimal_io_boundary), spdk_json_decode_uint32, true},
+	{"md", offsetof(struct rpc_construct_malloc, md), spdk_json_decode_bool, true},
 };
 
 static void
@@ -70,7 +72,7 @@ rpc_bdev_malloc_create(struct spdk_jsonrpc_request *request,
 	}
 
 	rc = create_malloc_disk(&bdev, req.name, uuid, req.num_blocks, req.block_size,
-				req.optimal_io_boundary);
+				req.optimal_io_boundary, req.md);
 	if (rc) {
 		spdk_jsonrpc_send_error_response(request, rc, spdk_strerror(-rc));
 		goto cleanup;

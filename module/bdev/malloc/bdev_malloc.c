@@ -182,7 +182,7 @@ bdev_malloc_writev_with_md(struct malloc_disk *mdisk, struct spdk_io_channel *ch
 	task->status = SPDK_BDEV_IO_STATUS_SUCCESS;
 	task->num_outstanding = 0;
 	
-	if (md) {
+	if (mdisk->disk.md_len > 0 && md) {
 		task->num_outstanding++;
 
 		res = spdk_accel_submit_copy(ch, dst, md,
@@ -376,7 +376,7 @@ static const struct spdk_bdev_fn_table malloc_fn_table = {
 
 int
 create_malloc_disk(struct spdk_bdev **bdev, const char *name, const struct spdk_uuid *uuid,
-		   uint64_t num_blocks, uint32_t block_size, uint32_t optimal_io_boundary)
+		   uint64_t num_blocks, uint32_t block_size, uint32_t optimal_io_boundary, bool md)
 {
 	struct malloc_disk	*mdisk;
 	int rc;
@@ -427,8 +427,10 @@ create_malloc_disk(struct spdk_bdev **bdev, const char *name, const struct spdk_
 	mdisk->disk.write_cache = 1;
 	mdisk->disk.blocklen = block_size;
 	mdisk->disk.blockcnt = num_blocks;
-	mdisk->disk.md_len = block_size;
-	mdisk->disk.md_interleave = false;
+	if (md) {
+		mdisk->disk.md_len = block_size;
+		mdisk->disk.md_interleave = false;
+	}
 	if (optimal_io_boundary) {
 		mdisk->disk.optimal_io_boundary = optimal_io_boundary;
 		mdisk->disk.split_on_optimal_io_boundary = true;

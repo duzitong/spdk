@@ -229,7 +229,7 @@ def bdev_ocf_set_seqcutoff(client, name, policy, threshold, promotion_count):
     return client.call('bdev_ocf_set_seqcutoff', params)
 
 
-def bdev_malloc_create(client, num_blocks, block_size, name=None, uuid=None, optimal_io_boundary=None):
+def bdev_malloc_create(client, num_blocks, block_size, name=None, uuid=None, optimal_io_boundary=None, md=False):
     """Construct a malloc block device.
 
     Args:
@@ -249,6 +249,8 @@ def bdev_malloc_create(client, num_blocks, block_size, name=None, uuid=None, opt
         params['uuid'] = uuid
     if optimal_io_boundary:
         params['optimal_io_boundary'] = optimal_io_boundary
+    if md:
+        params['md'] = True
     return client.call('bdev_malloc_create', params)
 
 
