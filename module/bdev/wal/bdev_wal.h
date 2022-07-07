@@ -105,7 +105,7 @@ struct wal_bdev_io {
 	/* save for completion on orig thread */
 	enum spdk_bdev_io_status status;
 
-	uint64_t	seq;
+	struct wal_metadata	*metadata;
 };
 
 /*

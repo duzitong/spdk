@@ -118,7 +118,7 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 	}
 
 	wal_ch->wal_bdev = wal_bdev;
-	wal_ch->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_ch, 0);
+	wal_ch->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_ch, 1000*1000);
 	wal_ch->stat_poller = SPDK_POLLER_REGISTER(wal_bdev_stat_report, wal_bdev, 30*1000*1000);
 
 	return 0;
@@ -329,12 +329,11 @@ static void
 wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
 	struct wal_bdev_io *wal_io = cb_arg;
-	uint64_t begin = bdev_io->u.bdev.offset_blocks;
-	uint64_t end = bdev_io->u.bdev.offset_blocks + bdev_io->u.bdev.num_blocks;
 
-	struct bstat *bstat = bstatCreate(begin, end);
+	struct bstat *bstat = bstatCreate(bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.offset_blocks + bdev_io->u.bdev.num_blocks);
 
-	bslInsert(wal_io->wal_bdev->bsl, begin, end, bstat, wal_io->wal_bdev->bslfn);
+	bslInsert(wal_io->wal_bdev->bsl, wal_io->metadata->core_offset, wal_io->metadata->core_offset + wal_io->metadata->core_offset,
+				bstat, wal_io->wal_bdev->bslfn);
 
 	spdk_bdev_free_io(bdev_io);
 
@@ -442,7 +441,7 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	}
 
 	metadata->version = 1;
-	metadata->seq = wal_io->seq = ++wal_bdev->seq;
+	metadata->seq = ++wal_bdev->seq;
 	metadata->core_offset = bdev_io->u.bdev.offset_blocks;
 	metadata->core_length =  bdev_io->u.bdev.num_blocks;
 
@@ -462,6 +461,8 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	}
 	metadata->next_offset = wal_bdev->log_tail;
 	metadata->length = log_blocks - 1;
+
+	wal_io->metadata = metadata;
 
 	ret = spdk_bdev_writev_blocks_with_md(base_info->desc, base_ch,
 					bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt, metadata,
