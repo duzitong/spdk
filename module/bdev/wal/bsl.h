@@ -38,7 +38,7 @@ typedef struct bskiplistFreeNodes {
     struct bskiplistNode *header, *tail;
 } bskiplistFreeNodes;
 
-bstat *bstatBdevCreate(long begin, long end, long unsigned int round, long bdevOffset);
+bstat *bstatBdevCreate(long begin, long end, long unsigned int round, long unsigned int bdevOffset);
 bstat *bstatMemCreate(long begin, long end, long unsigned int round, void* data);
 bskiplist *bslCreate(void);
 bskiplistFreeNodes *bslfnCreate(void);

@@ -76,6 +76,8 @@ static int	wal_bdev_init(void);
 static void	wal_bdev_event_base_bdev(enum spdk_bdev_event_type type, struct spdk_bdev *bdev,
 		void *event_ctx);
 static bool wal_bdev_is_valid_entry(struct wal_bdev *bdev, struct bstat *bstat);
+static void wal_bdev_read_request_error(int ret, struct wal_bdev_io *wal_io, 
+							struct wal_base_bdev_info *base_info, struct spdk_io_channel *base_ch);
 static int wal_bdev_mover(void *ctx);
 static void wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
 static void wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
@@ -383,6 +385,23 @@ _wal_bdev_submit_read_request(void *_wal_io)
 	wal_bdev_submit_read_request(wal_io);
 }
 
+static void
+wal_bdev_read_request_error(int ret, struct wal_bdev_io *wal_io, 
+							struct wal_base_bdev_info	*base_info,
+							struct spdk_io_channel		*base_ch)
+{
+	if (ret == -ENOMEM) {
+		wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
+					_wal_bdev_submit_read_request);
+		return;
+	} else {
+		SPDK_ERRLOG("bdev io submit error not due to ENOMEM, it should not happen\n");
+		assert(false);
+		wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
+		return;
+	}
+}
+
 /*
  * brief:
  * wal_bdev_submit_read_request function submits read requests
@@ -422,7 +441,8 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 						wal_base_bdev_read_complete, wal_io);
 		
 		if (ret != 0) {
-			goto read_error;
+			wal_bdev_read_request_error(ret, wal_io, base_info, base_ch);
+			return;
 		}
 		return;
 	}
@@ -438,24 +458,13 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 						wal_io);
 
 		if (ret != 0) {
-			goto read_error;
+			wal_bdev_read_request_error(ret, wal_io, base_info, base_ch);
+			return;
 		}
 		return;
 	}
 
 	// TODO: create a mem buffer to read data from several parts and copy back to origin iov
-
-read_error:
-	if (ret == -ENOMEM) {
-		wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
-					_wal_bdev_submit_read_request);
-		return;
-	} else {
-		SPDK_ERRLOG("bdev io submit error not due to ENOMEM, it should not happen\n");
-		assert(false);
-		wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
-		return;
-	}
 }
 
 static void
