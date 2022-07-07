@@ -447,7 +447,7 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	metadata->core_length =  bdev_io->u.bdev.num_blocks;
 
 	log_blocks = (bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift) + 1;
-	if (wal_bdev->log_tail + log_blocks > wal_bdev->log_max) {
+	if (wal_bdev->log_tail + log_blocks >= wal_bdev->log_max) {
 		if (spdk_unlikely(log_blocks > wal_bdev->log_head)) {
 			SPDK_ERRLOG("bdev io submit error due to no enough space left on log device.\n");
 			wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
@@ -1287,7 +1287,7 @@ wal_bdev_add_base_devices(struct wal_bdev_config *wal_cfg)
 static int
 wal_bdev_start(struct wal_bdev *wal_bdev)
 {
-	wal_bdev->log_max = wal_bdev->log_bdev_info.bdev->blockcnt - 1;  // last block used to track log head
+	wal_bdev->log_max = wal_bdev->log_bdev_info.bdev->blockcnt - 2;  // last block used to track log head
 	wal_bdev->bsl = bslCreate();
 	wal_bdev->bslfn = bslfnCreate();
 	// TODO: recover
@@ -1338,7 +1338,6 @@ wal_bdev_mover(void *ctx)
 {
 	struct wal_bdev_io_channel *ch = ctx;
 	struct wal_bdev *bdev = ch->wal_bdev;
-	struct wal_metadata *metadata;
 	int ret;
 
 	if (bdev->moving) {
@@ -1350,14 +1349,14 @@ wal_bdev_mover(void *ctx)
 	}
 
 	bdev->moving = true;
-	metadata = (struct wal_metadata *) spdk_zmalloc(bdev->log_bdev_info.bdev->blocklen, 0, 
-														NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-
 	struct wal_mover_context *mover_ctx = calloc(1, sizeof(struct wal_mover_context));
 	mover_ctx->bdev = bdev;
 	mover_ctx->ch = ch;
-	mover_ctx->metadata = metadata;
-	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, ch->log_channel, metadata, bdev->log_head, 1, 
+
+	mover_ctx->metadata = (struct wal_metadata *) spdk_zmalloc(bdev->log_bdev_info.bdev->blocklen, 0, 
+														NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+
+	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, ch->log_channel, mover_ctx->metadata, bdev->log_head, 1, 
 									wal_bdev_mover_read_data, mover_ctx);
 	if (ret) {
 		SPDK_ERRLOG("Failed to read metadata during move");
@@ -1379,11 +1378,10 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 	struct wal_metadata *metadata = mover_ctx->metadata;
 	int ret;
 
-	void *data = spdk_zmalloc(bdev->log_bdev_info.bdev->blocklen * metadata->length, 0, 
+	mover_ctx->data = spdk_zmalloc(bdev->log_bdev_info.bdev->blocklen * metadata->length, 0, 
 								NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 	
-	mover_ctx->data = data;
-	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, ch->log_channel, data, bdev->log_head+1, metadata->length, 
+	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, ch->log_channel, mover_ctx->data, bdev->log_head+1, metadata->length, 
 									wal_bdev_mover_write_data, mover_ctx);
 	if (ret) {
 		SPDK_ERRLOG("Failed to read data during move");
