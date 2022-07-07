@@ -1481,13 +1481,13 @@ static void
 wal_bdev_mover_free(struct wal_mover_context *ctx)
 {
 	if (ctx->info) {
-		spdk_free(mover_ctx->info);
+		spdk_free(ctx->info);
 	}
 	if (ctx->data) {
-		spdk_free(mover_ctx->data);
+		spdk_free(ctx->data);
 	}
 	if (ctx->metadata) {
-		spdk_free(mover_ctx->metadata);
+		spdk_free(ctx->metadata);
 	}
 
 	ctx->bdev->moving = false;
