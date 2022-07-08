@@ -108,6 +108,10 @@ struct wal_bdev_io {
 	enum spdk_bdev_io_status status;
 
 	struct wal_metadata	*metadata;
+
+	uint16_t	remaining_base_bdev_io;
+
+	void	*read_buf;
 };
 
 /*

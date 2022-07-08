@@ -348,6 +348,32 @@ wal_base_bdev_read_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb
 }
 
 static void
+wal_base_bdev_read_complete_part(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
+{
+	struct wal_bdev_io *wal_io = cb_arg;
+	struct spdk_bdev_io *orig_io = wal_io->orig_io;
+	void *copy = wal_io->read_buf;
+
+	spdk_bdev_free_io(bdev_io);
+
+	wal_io->remaining_base_bdev_io--;
+
+	if (wal_io->remaining_base_bdev_io == 0) {
+		for (i = 0; i < orig_io->u.bdev.iovcnt; i++) {
+			memcpy(orig_io->u.bdev.iovs[i].iov_base, copy, (size_t)orig_io->u.bdev.iovs[i].iov_len);
+			copy += orig_io->u.bdev.iovs[i].iov_len;
+		}
+
+		// TODO: add to index
+		spdk_free(wal_io->read_buf);
+
+		wal_bdev_io_complete(wal_io, success ?
+					SPDK_BDEV_IO_STATUS_SUCCESS :
+					SPDK_BDEV_IO_STATUS_FAILED);
+	}
+}
+
+static void
 wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
 	struct wal_bdev_io *wal_io = cb_arg;
@@ -458,8 +484,8 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
     }
 
 	// merge from log & core
-	copy = buf = spdk_zmalloc(bdev_io->u.bdev.num_blocks * wal_bdev->bdev.blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-
+	wal_io->read_buf = spdk_zmalloc(bdev_io->u.bdev.num_blocks * wal_bdev->bdev.blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	wal_io->remaining_base_bdev_io = 0;
 	read_cur = read_begin;
 
 	while (read_cur != read_end) {
@@ -469,9 +495,10 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 			} else {
 				tmp = bn->begin > read_end ? read_end : bn->begin;
 			}
-			
+
+			wal_io->remaining_base_bdev_io++;
 			ret = spdk_bdev_read_blocks(wal_bdev->core_bdev_info.desc, wal_io->wal_ch->core_channel,
-							buf + (read_cur - read_begin) * wal_bdev->bdev.blocklen,
+							wal_io->read_buf + (read_cur - read_begin) * wal_bdev->bdev.blocklen,
 							read_cur, tmp - read_cur + 1, wal_base_bdev_read_complete,
 							wal_io);
 
@@ -486,8 +513,9 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 		if (bn && read_cur >= bn->begin) {
 			tmp = bn->end > read_end ? read_end : bn->end;
 			
+			wal_io->remaining_base_bdev_io++;
 			ret = spdk_bdev_read_blocks(wal_bdev->log_bdev_info.desc, wal_io->wal_ch->log_channel,
-							buf + (read_cur - read_begin) * wal_bdev->bdev.blocklen,
+							wal_io->read_buf + (read_cur - read_begin) * wal_bdev->bdev.blocklen,
 							read_cur, tmp - read_cur + 1, wal_base_bdev_read_complete,
 							wal_io);
 
