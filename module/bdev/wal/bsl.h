@@ -15,10 +15,10 @@ typedef struct bstat {
     long begin, end;
     locationType type;
     long unsigned int round;
-    union {
+    union location {
         long unsigned int bdevOffset;
         void *memPointer;
-    } location;
+    } l;
 } bstat;
 
 typedef struct bskiplistNode {

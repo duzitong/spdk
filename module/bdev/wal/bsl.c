@@ -17,7 +17,7 @@ bstat *bstatBdevCreate(long begin, long end, long round, long unsigned int bdevO
     pb->end = end;
     pb->round = round;
     pb->type = LOCATION_BDEV;
-    pb->location.bdevOffset = bdevOffset;
+    pb->l.bdevOffset = bdevOffset;
     return pb;
 }
 
@@ -27,7 +27,7 @@ bstat *bstatMemCreate(long begin, long end, long round, void *memPointer) {
     pb->end = end;
     pb->round = round;
     pb->type = LOCATION_MEM;
-    pb->location.memPointer = memPointer;
+    pb->l.memPointer = memPointer;
     return pb;
 }
 
@@ -36,7 +36,7 @@ bstat *bstatClone(bstat *pb) {
     clone->begin = pb->begin;
     clone->end = pb->end;
     clone->type = pb->type;
-    clone->location = pb->location;
+    clone->l = pb->l;
     return clone;
 }
 
@@ -117,8 +117,7 @@ void bslPrintNode(bskiplistNode *bsln) {
 }
 
 void bslFreeNode(bskiplistNode *bsln) {
-    if (bsln->ele->type == LOCATION_MEM)
-        free(bsln->ele->location.memPointer);
+    // Caller's duty to free mem data
     free(bsln->ele);
     free(bsln);
 }
