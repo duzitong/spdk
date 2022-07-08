@@ -451,7 +451,7 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
                         wal_io);
 
         if (ret != 0) {
-			wal_bdev_read_request_error(ret, wal_io, &wal_bdev->core_bdev_info.desc, wal_io->wal_ch->core_channel);
+			wal_bdev_read_request_error(ret, wal_io, &wal_bdev->core_bdev_info, wal_io->wal_ch->core_channel);
             return;
         }
         return;
@@ -476,7 +476,7 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 							wal_io);
 
 			if (ret != 0) {
-				wal_bdev_read_request_error(ret, wal_io, &wal_bdev->core_bdev_info.desc, wal_io->wal_ch->core_channel);
+				wal_bdev_read_request_error(ret, wal_io, &wal_bdev->core_bdev_info, wal_io->wal_ch->core_channel);
 				return;
 			}
 			read_cur = tmp;
@@ -492,7 +492,7 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 							wal_io);
 
 			if (ret != 0) {
-				wal_bdev_read_request_error(ret, wal_io, &wal_bdev->log_bdev_info.desc, wal_io->wal_ch->log_channel);
+				wal_bdev_read_request_error(ret, wal_io, &wal_bdev->log_bdev_info, wal_io->wal_ch->log_channel);
 				return;
 			}
 			read_cur = tmp;
