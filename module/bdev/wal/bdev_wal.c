@@ -358,19 +358,26 @@ wal_base_bdev_read_complete_part(struct spdk_bdev_io *bdev_io, bool success, voi
 	spdk_bdev_free_io(bdev_io);
 
 	wal_io->remaining_base_bdev_io--;
+	wal_io->status = success && wal_io->status == SPDK_BDEV_IO_STATUS_SUCCESS 
+					? SPDK_BDEV_IO_STATUS_SUCCESS
+					: SPDK_BDEV_IO_STATUS_FAILED;
+
+	if (!success) {
+		SPDK_ERRLOG("Error reading data from base bdev.\n");
+	}
 
 	if (wal_io->remaining_base_bdev_io == 0) {
-		for (i = 0; i < orig_io->u.bdev.iovcnt; i++) {
-			memcpy(orig_io->u.bdev.iovs[i].iov_base, copy, (size_t)orig_io->u.bdev.iovs[i].iov_len);
-			copy += orig_io->u.bdev.iovs[i].iov_len;
+		if (wal_io->status == SPDK_BDEV_IO_STATUS_SUCCESS) {
+			for (i = 0; i < orig_io->u.bdev.iovcnt; i++) {
+				memcpy(orig_io->u.bdev.iovs[i].iov_base, copy, (size_t)orig_io->u.bdev.iovs[i].iov_len);
+				copy += orig_io->u.bdev.iovs[i].iov_len;
+			}
+			// TODO: add to index
 		}
 
-		// TODO: add to index
 		spdk_free(wal_io->read_buf);
 
-		wal_bdev_io_complete(wal_io, success ?
-					SPDK_BDEV_IO_STATUS_SUCCESS :
-					SPDK_BDEV_IO_STATUS_FAILED);
+		wal_bdev_io_complete(wal_io, wal_io->status);
 	}
 }
 
@@ -484,6 +491,7 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
     }
 
 	// merge from log & core
+	SPDK_NOTICELOG("Merge reads from log & core\n");
 	wal_io->read_buf = spdk_zmalloc(bdev_io->u.bdev.num_blocks * wal_bdev->bdev.blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 	wal_io->remaining_base_bdev_io = 0;
 	read_cur = read_begin;
