@@ -352,6 +352,7 @@ wal_base_bdev_read_complete_part(struct spdk_bdev_io *bdev_io, bool success, voi
 {
 	struct wal_bdev_io *wal_io = cb_arg;
 	struct spdk_bdev_io *orig_io = wal_io->orig_io;
+	int i;
 	void *copy = wal_io->read_buf;
 
 	spdk_bdev_free_io(bdev_io);
@@ -439,10 +440,9 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 {
 	struct spdk_bdev_io		*bdev_io = spdk_bdev_io_from_ctx(wal_io);
 	struct wal_bdev		*wal_bdev;
-	int				ret, i;
+	int				ret;
 	struct bskiplistNode        *bn;
     uint64_t    read_begin, read_end, read_cur, tmp;
-	void 	*buf, *copy;
 
 	wal_bdev = wal_io->wal_bdev;
 	read_begin = bdev_io->u.bdev.offset_blocks;
@@ -530,11 +530,6 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 		if (bn && read_cur > bn->end) {
 			bn = bn->level[0].forward;
 		}
-	}
-	
-	for (i = 0; i < bdev_io->u.bdev.iovcnt; i++) {
-		memcpy(bdev_io->u.bdev.iovs[i].iov_base, copy, (size_t)bdev_io->u.bdev.iovs[i].iov_len);
-		copy += bdev_io->u.bdev.iovs[i].iov_len;
 	}
 }
 
