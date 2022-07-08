@@ -14,6 +14,7 @@ typedef enum {
 typedef struct bstat {
     long begin, end;
     locationType type;
+    long unsigned int round;
     union {
         long unsigned int bdevOffset;
         void *memPointer;
