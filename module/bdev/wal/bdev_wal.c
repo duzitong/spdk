@@ -499,7 +499,7 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 			wal_io->remaining_base_bdev_io++;
 			ret = spdk_bdev_read_blocks(wal_bdev->core_bdev_info.desc, wal_io->wal_ch->core_channel,
 							wal_io->read_buf + (read_cur - read_begin) * wal_bdev->bdev.blocklen,
-							read_cur, tmp - read_cur + 1, wal_base_bdev_read_complete,
+							read_cur, tmp - read_cur + 1, wal_base_bdev_read_complete_part,
 							wal_io);
 
 			if (ret != 0) {
@@ -516,7 +516,7 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 			wal_io->remaining_base_bdev_io++;
 			ret = spdk_bdev_read_blocks(wal_bdev->log_bdev_info.desc, wal_io->wal_ch->log_channel,
 							wal_io->read_buf + (read_cur - read_begin) * wal_bdev->bdev.blocklen,
-							read_cur, tmp - read_cur + 1, wal_base_bdev_read_complete,
+							read_cur, tmp - read_cur + 1, wal_base_bdev_read_complete_part,
 							wal_io);
 
 			if (ret != 0) {
