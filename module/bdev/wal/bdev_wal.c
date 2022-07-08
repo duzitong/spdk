@@ -390,7 +390,7 @@ wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *c
 	end = wal_io->metadata->core_offset + wal_io->metadata->core_offset;
 
 	struct bstat *bstat = bstatBdevCreate(begin, end, wal_io->metadata->round,
-										bdev_io->u.bdev.offset_blocks);
+										bdev_io->u.bdev.offset_blocks+1);
 
 	bslInsert(wal_io->wal_bdev->bsl, wal_io->metadata->core_offset, wal_io->metadata->core_offset + wal_io->metadata->core_length,
 				bstat, wal_io->wal_bdev->bslfn);
