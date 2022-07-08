@@ -265,7 +265,7 @@ bskiplistNode *bslFirstNodeAfterBegin(bskiplist *bsl, long begin) {
     x = bsl->header;
     for (i = bsl->level-1; i >= 0; i--) {
         while (x->level[i].forward &&
-                (x->level[i].forward->begin < begin))
+                (x->level[i].forward->begin < end))
         {
             x = x->level[i].forward;
         }

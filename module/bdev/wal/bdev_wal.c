@@ -414,10 +414,9 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 	struct spdk_bdev_io		*bdev_io = spdk_bdev_io_from_ctx(wal_io);
 	struct wal_bdev		*wal_bdev;
 	int				ret;
-	struct wal_base_bdev_info	*base_info;
-	struct spdk_io_channel		*base_ch;
 	struct bskiplistNode        *bn;
-    uint64_t    read_begin, read_end;
+    uint64_t    read_begin, read_end, read_cur, tmp;
+	void 	*buf, *copy;
 
 	wal_bdev = wal_io->wal_bdev;
 	read_begin = bdev_io->u.bdev.offset_blocks;
@@ -428,9 +427,7 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 	if (bn && bn->begin <= read_begin && bn->end >= read_end 
         && wal_bdev_is_valid_entry(wal_bdev, bn->ele)) {
         // one entry in log bdev
-        base_info = &wal_bdev->log_bdev_info;
-        base_ch = wal_io->wal_ch->log_channel;        
-		ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
+		ret = spdk_bdev_readv_blocks(wal_bdev->log_bdev_info.desc, wal_io->wal_ch->log_channel,
                         bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
                         bn->ele->l.bdevOffset + read_begin - bn->ele->begin, bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift,
                         wal_base_bdev_read_complete, wal_io);
@@ -440,40 +437,76 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 			SPDK_NOTICELOG("bn begin: %ld, end: %ld\n.", bn->begin, bn->end);
 			SPDK_NOTICELOG("bn ele begin: %ld, end: %ld\n.", bn->ele->begin, bn->ele->end);
 			SPDK_NOTICELOG("read from log bdev offset: %ld, delta: %ld\n.", bn->ele->l.bdevOffset, read_begin - bn->ele->begin);
-			wal_bdev_read_request_error(ret, wal_io, base_info, base_ch);
+			wal_bdev_read_request_error(ret, wal_io, &wal_bdev->log_bdev_info, wal_io->wal_ch->log_channel);
             return;
         }
         return;
     }
 
-    if (!bn || bn->ele->begin > read_end) {
+    if (!bn || bn->begin > read_end) {
         // not found in index
-        base_info = &wal_bdev->core_bdev_info;
-        base_ch = wal_io->wal_ch->core_channel;
-
-        ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
+        ret = spdk_bdev_readv_blocks(wal_bdev->core_bdev_info.desc, wal_io->wal_ch->core_channel,
                         bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
                         bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, wal_base_bdev_read_complete,
                         wal_io);
 
         if (ret != 0) {
-			wal_bdev_read_request_error(ret, wal_io, base_info, base_ch);
+			wal_bdev_read_request_error(ret, wal_io, &wal_bdev->core_bdev_info.desc, wal_io->wal_ch->core_channel);
             return;
         }
         return;
     }
 
-	base_info = &wal_bdev->core_bdev_info;
-	base_ch = wal_io->wal_ch->core_channel;
+	// merge from log & core
+	copy = buf = spdk_zmalloc(bdev_io->u.bdev.num_blocks * wal_bdev->bdev.blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 
-	ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
-					bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
-					bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, wal_base_bdev_read_complete,
-					wal_io);
+	read_cur = read_begin;
 
-	if (ret != 0) {
-		wal_bdev_read_request_error(ret, wal_io, base_info, base_ch);
-		return;
+	while (read_cur != read_end) {
+		if (!bn || read_cur < bn->begin) {
+			if (!bn) {
+				tmp = read_end;
+			} else {
+				tmp = bn->begin > read_end ? read_end : bn->begin;
+			}
+			
+			ret = spdk_bdev_read_blocks(wal_bdev->core_bdev_info.desc, wal_io->wal_ch->core_channel,
+							buf + (read_cur - read_begin) * wal_bdev->bdev.blocklen,
+							read_cur, tmp - read_cur + 1, wal_base_bdev_read_complete,
+							wal_io);
+
+			if (ret != 0) {
+				wal_bdev_read_request_error(ret, wal_io, &wal_bdev->core_bdev_info.desc, wal_io->wal_ch->core_channel);
+				return;
+			}
+			read_cur = tmp;
+			continue;
+		}
+
+		if (bn && read_cur >= bn->begin) {
+			tmp = bn->end > read_end ? read_end : bn->end;
+			
+			ret = spdk_bdev_read_blocks(wal_bdev->log_bdev_info.desc, wal_io->wal_ch->log_channel,
+							buf + (read_cur - read_begin) * wal_bdev->bdev.blocklen,
+							read_cur, tmp - read_cur + 1, wal_base_bdev_read_complete,
+							wal_io);
+
+			if (ret != 0) {
+				wal_bdev_read_request_error(ret, wal_io, &wal_bdev->log_bdev_info.desc, wal_io->wal_ch->log_channel);
+				return;
+			}
+			read_cur = tmp;
+			continue;
+		}
+
+		if (bn && read_cur > bn->end) {
+			bn = bn->level[0].forward;
+		}
+	}
+	
+	for (i = 0; i < iovcnt; i++) {
+		memcpy(iov[i].iov_base, copy, (size_t)iov[i].iov_len);
+		copy += iov[i].iov_len;
 	}
 }
 
