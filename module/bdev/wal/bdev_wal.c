@@ -75,6 +75,7 @@ static void	wal_bdev_stop(struct wal_bdev *bdev);
 static int	wal_bdev_init(void);
 static void	wal_bdev_event_base_bdev(enum spdk_bdev_event_type type, struct spdk_bdev *bdev,
 		void *event_ctx);
+static bool wal_bdev_is_valid_entry(struct wal_bdev *bdev, struct bstat *bstat)
 static int wal_bdev_mover(void *ctx);
 static void wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
 static void wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
@@ -313,6 +314,26 @@ wal_bdev_queue_io_wait(struct wal_bdev_io *wal_io, struct spdk_bdev *bdev,
 	spdk_bdev_queue_io_wait(bdev, ch, &wal_io->waitq_entry);
 }
 
+static bool wal_bdev_is_valid_entry(struct wal_bdev *bdev, struct bstat *bstat)
+{
+    if (bstat->type == LOCATION_BDEV) {
+        if (bstat->round == bdev->tail_round) {
+            return true;
+        }
+
+        if (bstat->round < bdev->tail_round - 1) {
+            return false;
+        }
+
+        if (bstat->location >= bdev->log_tail) {
+            return true;
+        }
+        return false;
+    }
+
+    return true;
+}
+
 // TODO -
 static void
 wal_base_bdev_read_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
@@ -360,6 +381,23 @@ _wal_bdev_submit_read_request(void *_wal_io)
 	wal_bdev_submit_read_request(wal_io);
 }
 
+static void
+wal_bdev_read_request_error(int ret, struct wal_bdev_io *wal_io, 
+                            struct wal_base_bdev_info    *base_info,
+                            struct spdk_io_channel        *base_ch)
+{
+    if (ret == -ENOMEM) {
+        wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
+                    _wal_bdev_submit_read_request);
+        return;
+    } else {
+        SPDK_ERRLOG("bdev io submit error not due to ENOMEM, it should not happen\n");
+        assert(false);
+        wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
+        return;
+    }
+}
+
 /*
  * brief:
  * wal_bdev_submit_read_request function submits read requests
@@ -378,8 +416,48 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 	int				ret;
 	struct wal_base_bdev_info	*base_info;
 	struct spdk_io_channel		*base_ch;
+	struct bskiplistNode        *bn;
+    uint64_t    read_begin, read_end;
 
 	wal_bdev = wal_io->wal_bdev;
+	read_begin = bdev_io->u.bdev.offset_blocks;
+    read_end = bdev_io->u.bdev.offset_blocks + bdev_io->u.bdev.num_blocks - 1;
+
+    bn = bslFirstNodeAfterBegin(wal_bdev->bsl, read_begin);
+
+	if (bn->ele->begin <= read_begin && bn->ele->end >= read_end 
+        && wal_bdev_is_valid_entry(wal_bdev, bn->ele)) {
+        // one entry in log bdev
+        base_info = &wal_bdev->log_bdev_info;
+        base_ch = wal_io->wal_ch->log_channel;        
+		ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
+                        bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
+                        bn->ele->location - read_begin + bn->ele->begin, bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift,
+                        wal_base_bdev_read_complete, wal_io);
+        
+        if (ret != 0) {
+			wal_bdev_read_request_error(ret, wal_io, base_info, base_ch);
+            return;
+        }
+        return;
+    }
+
+    if (bn->ele->begin > read_end) {
+        // not found in index
+        base_info = &wal_bdev->core_bdev_info;
+        base_ch = wal_io->wal_ch->core_channel;
+
+        ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
+                        bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
+                        bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, wal_base_bdev_read_complete,
+                        wal_io);
+
+        if (ret != 0) {
+			wal_bdev_read_request_error(ret, wal_io, base_info, base_ch);
+            return;
+        }
+        return;
+    }
 
 	base_info = &wal_bdev->core_bdev_info;
 	base_ch = wal_io->wal_ch->core_channel;
@@ -390,16 +468,8 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 					wal_io);
 
 	if (ret != 0) {
-			if (ret == -ENOMEM) {
-			wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
-						_wal_bdev_submit_read_request);
-			return;
-		} else {
-			SPDK_ERRLOG("bdev io submit error not due to ENOMEM, it should not happen\n");
-			assert(false);
-			wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
-			return;
-		}
+		wal_bdev_read_request_error(ret, wal_io, base_info, base_ch);
+		return;
 	}
 }
 
