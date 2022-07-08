@@ -12,7 +12,7 @@ void bslAdjustNodeEnd(bskiplistNode *bn, long begin);
 
 
 bstat *bstatBdevCreate(long begin, long end, long round, long unsigned int bdevOffset) {
-    bstat *pb = calloc(1, sizeof(pb));
+    bstat *pb = calloc(1, sizeof(*pb));
     pb->begin = begin;
     pb->end = end;
     pb->round = round;
@@ -22,7 +22,7 @@ bstat *bstatBdevCreate(long begin, long end, long round, long unsigned int bdevO
 }
 
 bstat *bstatMemCreate(long begin, long end, long round, void *memPointer) {
-    bstat *pb = calloc(1, sizeof(pb));
+    bstat *pb = calloc(1, sizeof(*pb));
     pb->begin = begin;
     pb->end = end;
     pb->round = round;
@@ -32,7 +32,7 @@ bstat *bstatMemCreate(long begin, long end, long round, void *memPointer) {
 }
 
 bstat *bstatClone(bstat *pb) {
-    bstat *clone = calloc(1, sizeof(clone));
+    bstat *clone = calloc(1, sizeof(*clone));
     clone->begin = pb->begin;
     clone->end = pb->end;
     clone->type = pb->type;
