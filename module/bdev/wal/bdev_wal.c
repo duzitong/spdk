@@ -358,7 +358,7 @@ wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *c
 	struct bstat *bstat = bstatBdevCreate(begin, end, wal_io->metadata->round,
 										bdev_io->u.bdev.offset_blocks);
 
-	bslInsert(wal_io->wal_bdev->bsl, wal_io->metadata->core_offset, wal_io->metadata->core_offset + wal_io->metadata->core_offset,
+	bslInsert(wal_io->wal_bdev->bsl, wal_io->metadata->core_offset, wal_io->metadata->core_offset + wal_io->metadata->core_length,
 				bstat, wal_io->wal_bdev->bslfn);
 
 	spdk_bdev_free_io(bdev_io);
@@ -391,7 +391,7 @@ wal_bdev_read_request_error(int ret, struct wal_bdev_io *wal_io,
                     _wal_bdev_submit_read_request);
         return;
     } else {
-        SPDK_ERRLOG("bdev io submit error not due to ENOMEM, it should not happen\n");
+        SPDK_ERRLOG("bdev io submit error due to %d, it should not happen\n", ret);
         assert(false);
         wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
         return;
@@ -425,17 +425,21 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 
     bn = bslFirstNodeAfterBegin(wal_bdev->bsl, read_begin);
 
-	if (bn && bn->ele->begin <= read_begin && bn->ele->end >= read_end 
+	if (bn && bn->begin <= read_begin && bn->end >= read_end 
         && wal_bdev_is_valid_entry(wal_bdev, bn->ele)) {
         // one entry in log bdev
         base_info = &wal_bdev->log_bdev_info;
         base_ch = wal_io->wal_ch->log_channel;        
 		ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
                         bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
-                        bn->ele->l.bdevOffset - read_begin + bn->ele->begin, bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift,
+                        bn->ele->l.bdevOffset + read_begin - bn->ele->begin, bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift,
                         wal_base_bdev_read_complete, wal_io);
         
         if (ret != 0) {
+			SPDK_NOTICELOG("read from begin: %ld, end: %ld\n.", read_begin, read_end);
+			SPDK_NOTICELOG("bn begin: %ld, end: %ld\n.", bn->begin, bn->end);
+			SPDK_NOTICELOG("bn ele begin: %ld, end: %ld\n.", bn->ele->begin, bn->ele->end);
+			SPDK_NOTICELOG("read from log bdev offset: %ld, delta: %ld\n.", bn->ele->l.bdevOffset, read_begin - bn->ele->begin);
 			wal_bdev_read_request_error(ret, wal_io, base_info, base_ch);
             return;
         }
