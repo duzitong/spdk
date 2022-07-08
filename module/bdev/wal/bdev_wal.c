@@ -499,6 +499,10 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 	read_cur = read_begin;
 
 	while (read_cur != read_end) {
+		while (bn && !wal_bdev_is_valid_entry(bn)) {
+			bn = bn->level[0].forward;
+		}
+
 		if (!bn || read_cur < bn->begin) {
 			if (!bn) {
 				tmp = read_end;
