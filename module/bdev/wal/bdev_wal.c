@@ -75,7 +75,7 @@ static void	wal_bdev_stop(struct wal_bdev *bdev);
 static int	wal_bdev_init(void);
 static void	wal_bdev_event_base_bdev(enum spdk_bdev_event_type type, struct spdk_bdev *bdev,
 		void *event_ctx);
-static bool wal_bdev_is_valid_entry(struct wal_bdev *bdev, struct bstat *bstat)
+static bool wal_bdev_is_valid_entry(struct wal_bdev *bdev, struct bstat *bstat);
 static int wal_bdev_mover(void *ctx);
 static void wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
 static void wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
@@ -325,7 +325,7 @@ static bool wal_bdev_is_valid_entry(struct wal_bdev *bdev, struct bstat *bstat)
             return false;
         }
 
-        if (bstat->location >= bdev->log_tail) {
+        if (bstat->l >= bdev->log_tail) {
             return true;
         }
         return false;
@@ -432,7 +432,7 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
         base_ch = wal_io->wal_ch->log_channel;        
 		ret = spdk_bdev_readv_blocks(base_info->desc, base_ch,
                         bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
-                        bn->ele->location - read_begin + bn->ele->begin, bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift,
+                        bn->ele->l.bdevOffset - read_begin + bn->ele->begin, bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift,
                         wal_base_bdev_read_complete, wal_io);
         
         if (ret != 0) {
