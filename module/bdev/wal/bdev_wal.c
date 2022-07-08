@@ -427,6 +427,9 @@ wal_bdev_read_request_error(int ret, struct wal_bdev_io *wal_io,
     } else {
         SPDK_ERRLOG("bdev io submit error due to %d, it should not happen\n", ret);
         assert(false);
+		if (wal_io->read_buf) {
+			spdk_free(wal_io->read_buf);
+		}
         wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
         return;
     }
@@ -491,7 +494,6 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
     }
 
 	// merge from log & core
-	SPDK_NOTICELOG("Merge reads from log & core\n");
 	wal_io->read_buf = spdk_zmalloc(bdev_io->u.bdev.num_blocks * wal_bdev->bdev.blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 	wal_io->remaining_base_bdev_io = 0;
 	read_cur = read_begin;
@@ -524,7 +526,7 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 			wal_io->remaining_base_bdev_io++;
 			ret = spdk_bdev_read_blocks(wal_bdev->log_bdev_info.desc, wal_io->wal_ch->log_channel,
 							wal_io->read_buf + (read_cur - read_begin) * wal_bdev->bdev.blocklen,
-							read_cur, tmp - read_cur + 1, wal_base_bdev_read_complete_part,
+							bn->ele->l.bdevOffset + read_cur - bn->ele->begin, tmp - read_cur + 1, wal_base_bdev_read_complete_part,
 							wal_io);
 
 			if (ret != 0) {
@@ -532,11 +534,8 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 				return;
 			}
 			read_cur = tmp;
-			continue;
-		}
-
-		if (bn && read_cur > bn->end) {
 			bn = bn->level[0].forward;
+			continue;
 		}
 	}
 }
