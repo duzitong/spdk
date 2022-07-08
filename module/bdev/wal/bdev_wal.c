@@ -330,10 +330,12 @@ static void
 wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
 	struct wal_bdev_io *wal_io = cb_arg;
+	uint64_t begin, end;
+	begin = wal_io->metadata->core_offset;
+	end = wal_io->metadata->core_offset + wal_io->metadata->core_offset;
 
-	struct bstat *bstat = bstatCreate(bdev_io->u.bdev.offset_blocks, 
-									bdev_io->u.bdev.offset_blocks + bdev_io->u.bdev.num_blocks,
-									wal_io->metadata->round);
+	struct bstat *bstat = bstatBdevCreate(begin, end, wal_io->metadata->round,
+										bdev_io->u.bdev.offset_blocks);
 
 	bslInsert(wal_io->wal_bdev->bsl, wal_io->metadata->core_offset, wal_io->metadata->core_offset + wal_io->metadata->core_offset,
 				bstat, wal_io->wal_bdev->bslfn);
@@ -488,6 +490,7 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	return;
 write_no_space:
 	SPDK_ERRLOG("bdev io submit error due to no enough space left on log device.\n");
+	// TODO: queue write requests
 	wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
 	return;
 write_no_mem:

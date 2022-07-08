@@ -6,16 +6,16 @@
 #define BSKIPLIST_P 0.3      /* Skiplist P = 0.3 */
 
 typedef enum {
-    BDEV,
+    LOCATION_BDEV,
 
-    MEM
+    LOCATION_MEM
 } locationType;
 
 typedef struct bstat {
     long begin, end;
     locationType type;
     union {
-        long bdevOffset;
+        long unsigned int bdevOffset;
         void *memPointer;
     } location;
 } bstat;
@@ -39,7 +39,8 @@ typedef struct bskiplistFreeNodes {
     struct bskiplistNode *header, *tail;
 } bskiplistFreeNodes;
 
-bstat *bstatCreate(long begin, long end, long round);
+bstat *bstatBdevCreate(long begin, long end, long round, long unsigned int bdevOffset);
+bstat *bstatMemCreate(long begin, long end, long round, void *memPointer);
 bskiplist *bslCreate(void);
 bskiplistFreeNodes *bslfnCreate(void);
 void bslPrint(bskiplist *bsl, char full);
