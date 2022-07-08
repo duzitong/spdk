@@ -1509,7 +1509,7 @@ wal_bdev_mover(void *ctx)
 									wal_bdev_mover_read_data, mover_ctx);
 	if (ret) {
 		SPDK_ERRLOG("Failed to read metadata during move: %d.\n", ret);
-		wal_bdev_mover_free(ctx);
+		wal_bdev_mover_free(mover_ctx);
 	}
 
 	return SPDK_POLLER_BUSY;
@@ -1528,7 +1528,7 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 
 	if (spdk_unlikely(!success)) {
 		SPDK_ERRLOG("Failed to read metadata during move.\n");
-		wal_bdev_mover_free(ctx);
+		wal_bdev_mover_free(mover_ctx);
 		return;
 	}
 
@@ -1565,7 +1565,7 @@ wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 
 	if (spdk_unlikely(!success)) {
 		SPDK_ERRLOG("Failed to read data during move.\n");
-		wal_bdev_mover_free(ctx);
+		wal_bdev_mover_free(mover_ctx);
 		return;
 	}
 
@@ -1574,7 +1574,7 @@ wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 									wal_bdev_mover_update_head, mover_ctx);
 	if (ret) {
 		SPDK_ERRLOG("Failed to write data during move: %d.\n", ret);
-		wal_bdev_mover_free(ctx);
+		wal_bdev_mover_free(mover_ctx);
 	}
 }
 
@@ -1592,7 +1592,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 
 	if (spdk_unlikely(!success)) {
 		SPDK_ERRLOG("Failed to write data during move.\n");
-		wal_bdev_mover_free(ctx);
+		wal_bdev_mover_free(mover_ctx);
 		return;
 	}
 
@@ -1606,7 +1606,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 									wal_bdev_mover_clean, mover_ctx);
 	if (ret) {
 		SPDK_ERRLOG("Failed to update head to log bdev during move: %d.\n", ret);
-		wal_bdev_mover_free(ctx);
+		wal_bdev_mover_free(mover_ctx);
 	}
 }
 
@@ -1626,7 +1626,7 @@ wal_bdev_mover_clean(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 
 	bdev->log_head = mover_ctx->info->head;
 	
-	wal_bdev_mover_free(ctx);
+	wal_bdev_mover_free(mover_ctx);
 }
 
 static void
