@@ -117,7 +117,8 @@ void bslPrintNode(bskiplistNode *bsln) {
 }
 
 void bslFreeNode(bskiplistNode *bsln) {
-    // Caller's duty to free mem data
+    if (bsln->ele->type == LOCATION_MEM)
+        free(bsln->ele->l.memPointer);
     free(bsln->ele);
     free(bsln);
 }
