@@ -454,18 +454,14 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	next_tail = wal_bdev->log_tail + log_blocks;
 	if (next_tail >= wal_bdev->log_max) {
 		if (spdk_unlikely(log_blocks > wal_bdev->log_head)) {
-			SPDK_ERRLOG("bdev io submit error due to no enough space left on log device.\n");
-			wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
-			return;
+			goto write_no_space;
 		} else {
 			log_offset = 0;
 			wal_bdev->log_tail = log_blocks;
 			wal_bdev->tail_round++;
 		}
 	} else if (wal_bdev->tail_round > wal_bdev->head_round && next_tail > wal_bdev->log_head) {
-		SPDK_ERRLOG("bdev io submit error due to no enough space left on log device.\n");
-		wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
-		return;
+		goto write_no_space;
 	} else {
 		log_offset = wal_bdev->log_tail;
 		wal_bdev->log_tail += log_blocks;
@@ -489,6 +485,11 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 		SPDK_ERRLOG("bdev io submit error due to %d, it should not happen\n", ret);
 		wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
 	}
+	return;
+write_no_space:
+	SPDK_ERRLOG("bdev io submit error due to no enough space left on log device.\n");
+	wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
+				_wal_bdev_submit_write_request);
 	return;
 write_no_mem:
 	wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
