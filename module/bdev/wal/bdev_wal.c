@@ -488,8 +488,7 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	return;
 write_no_space:
 	SPDK_ERRLOG("bdev io submit error due to no enough space left on log device.\n");
-	wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
-				_wal_bdev_submit_write_request);
+	wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
 	return;
 write_no_mem:
 	wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
