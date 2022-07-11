@@ -36,9 +36,14 @@
 
 #include "spdk/bdev_module.h"
 #include "spdk/thread.h"
+#include "spdk/trace.h"
+#include "spdk_internal/trace_defs.h"
 #include "bsl.h"
 
 #define METADATA_VERSION	10086	// XD
+
+#define TRACE_BDEV_BSL_INSERT_START		SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x10)
+#define TRACE_BDEV_BSL_INSERT_END		SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x11)
 
 /*
  * WAL state describes the state of the wal bdev. This wal bdev can be either in

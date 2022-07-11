@@ -39,7 +39,7 @@
 #include "spdk/string.h"
 #include "spdk/util.h"
 #include "spdk/json.h"
-#include "spdk/string.h"
+#include "spdk/trace.h"
 
 static bool g_shutdown_started = false;
 
@@ -394,9 +394,13 @@ wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *c
 
 	struct bstat *bstat = bstatBdevCreate(begin, end, wal_io->metadata->round,
 										bdev_io->u.bdev.offset_blocks+1);
+	
+	
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSL_INSERT_START, 0, 0, (uintptr_t)wal_io);
 
 	bslInsert(wal_io->wal_bdev->bsl, wal_io->metadata->core_offset, wal_io->metadata->core_offset + wal_io->metadata->core_length,
 				bstat, wal_io->wal_bdev->bslfn);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSL_INSERT_END, 0, 0, (uintptr_t)wal_io);
 
 	spdk_bdev_free_io(bdev_io);
 
@@ -1730,3 +1734,24 @@ wal_bdev_stat_report(void *ctx)
 
 /* Log component for bdev wal bdev module */
 SPDK_LOG_REGISTER_COMPONENT(bdev_wal)
+
+SPDK_TRACE_REGISTER_FN(wal_trace, "wal", TRACE_GROUP_BDEV)
+{
+	struct spdk_trace_tpoint_opts opts[] = {
+		{
+			"WAL_BSL_INSERT_START", TRACE_BDEV_BSL_INSERT_START,
+			OWNER_BDEV, OBJECT_BDEV_IO, 1,
+			{
+			}
+		},
+		{
+			"WAL_BSL_INSERT_END", TRACE_BDEV_BSL_INSERT_END,
+			OWNER_BDEV, OBJECT_BDEV_IO, 0,
+			{}
+		},
+	};
+
+	spdk_trace_register_owner(OWNER_BDEV, 'b');
+	spdk_trace_register_object(OBJECT_BDEV_IO, 'i');
+	spdk_trace_register_description_ext(opts, SPDK_COUNTOF(opts));
+}
