@@ -46,7 +46,7 @@ bskiplist *bslCreate(void);
 bskiplistFreeNodes *bslfnCreate(void);
 void bslPrint(bskiplist *bsl, char full);
 void bslfnPrint(bskiplistFreeNodes *bslfn);
-void bslfnFree(bskiplistFreeNodes *bslfn);
+void bslfnFree(bskiplistFreeNodes *bslfn, int max);
 bskiplistNode *bslInsert(bskiplist *bsl, long begin, long end, bstat *ele, bskiplistFreeNodes *bslfn);
 bskiplistNode *bslFirstNodeAfterBegin(bskiplist *bsl, long begin);
 bskiplistNode *bslGetRandomNode(bskiplist *bsl, unsigned long int mod);

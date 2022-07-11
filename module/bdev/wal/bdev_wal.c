@@ -1686,7 +1686,7 @@ wal_bdev_cleaner(void *ctx)
 		}
 	}
 
-	bslfnFree(wal_bdev->bslfn);
+	bslfnFree(wal_bdev->bslfn, 100);
 
 	return SPDK_POLLER_BUSY;
 }

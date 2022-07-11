@@ -135,15 +135,18 @@ void bslfnPrint(bskiplistFreeNodes *bslfn) {
     printf("\n");
 }
 
-void bslfnFree(bskiplistFreeNodes *bslfn) {
+bool bslfnFree(bskiplistFreeNodes *bslfn, int max) {
     bskiplistNode *x;
+    int i = 0;
 
     x = bslfn->header->level[0].forward;
-    while (x) {
+    while (x && i < max) {
         bslfn->header->level[0].forward = x->level[0].forward;
         bslFreeNode(x);
         x = bslfn->header->level[0].forward;
+        i++;
     }
+    return i > 0;
 }
 
 void bslAdjustNodeBegin(bskiplistNode *bn, long end) {
