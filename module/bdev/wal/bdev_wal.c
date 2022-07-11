@@ -1739,6 +1739,37 @@ SPDK_TRACE_REGISTER_FN(wal_trace, "wal", TRACE_GROUP_BDEV)
 {
 	struct spdk_trace_tpoint_opts opts[] = {
 		{
+			"BDEV_IO_START", TRACE_BDEV_IO_START,
+			OWNER_BDEV, OBJECT_BDEV_IO, 1,
+			{
+				{ "type", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "ctx", SPDK_TRACE_ARG_TYPE_PTR, 8 },
+				{ "offset", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "len", SPDK_TRACE_ARG_TYPE_INT, 8 }
+			}
+		},
+		{
+			"BDEV_IO_DONE", TRACE_BDEV_IO_DONE,
+			OWNER_BDEV, OBJECT_BDEV_IO, 0,
+			{{ "ctx", SPDK_TRACE_ARG_TYPE_PTR, 8 }}
+		},
+		{
+			"BDEV_IOCH_CREATE", TRACE_BDEV_IOCH_CREATE,
+			OWNER_BDEV, OBJECT_NONE, 1,
+			{
+				{ "name", SPDK_TRACE_ARG_TYPE_STR, 40 },
+				{ "thread_id", SPDK_TRACE_ARG_TYPE_INT, 8}
+			}
+		},
+		{
+			"BDEV_IOCH_DESTROY", TRACE_BDEV_IOCH_DESTROY,
+			OWNER_BDEV, OBJECT_NONE, 0,
+			{
+				{ "name", SPDK_TRACE_ARG_TYPE_STR, 40 },
+				{ "thread_id", SPDK_TRACE_ARG_TYPE_INT, 8}
+			}
+		},
+		{
 			"WAL_BSL_INSERT_START", TRACE_BDEV_BSL_INSERT_START,
 			OWNER_BDEV, OBJECT_BDEV_IO, 1,
 			{
