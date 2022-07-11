@@ -1665,20 +1665,36 @@ static int
 wal_bdev_cleaner(void *ctx)
 {
 	struct wal_bdev *wal_bdev = ctx;
-	bskiplistNode *bn, *tmp;
+	bskiplistNode *update[BSKIPLIST_MAXLEVEL], *x, *tmp;
 	int i, j, count = 0, total;
+	
+    long rand = random();
 
-	bn = bslGetRandomNode(wal_bdev->bsl, wal_bdev->bdev.blockcnt);
+    for (i = 0; i < 3; i++) {
+        rand <<= 4;
+        rand += random();
+    }
+    rand %= wal_bdev->bdev.blockcnt;
+
+    x = bsl->header;
+    for (i = bsl->level-1; i >= 0; i--) {
+        while (x->level[i].forward &&
+                (x->level[i].forward->end < rand))
+        {
+            x = x->level[i].forward;
+        }
+        update[i] = x;
+    }
 
 	// try removal for level times.
 	for (i = 0; i < wal_bdev->bsl->level; i++) {
-		tmp = bn->level[0].forward;
+		tmp = x->level[0].forward;
 		if (tmp) {
 			if (wal_bdev_is_valid_entry(wal_bdev, tmp->ele)) {
-				bn = tmp;
+				break;
 			} else {
 				for (j = 0; j < tmp->height; j++) {
-					bn->level[j].forward = tmp->level[j].forward;
+					update[j]->level[j].forward = tmp->level[j].forward;
 					tmp->level[j].forward = NULL;
 				}
 				wal_bdev->bslfn->tail->level[0].forward = tmp;

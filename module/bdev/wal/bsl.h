@@ -49,6 +49,5 @@ void bslfnPrint(bskiplistFreeNodes *bslfn);
 int bslfnFree(bskiplistFreeNodes *bslfn, int max);
 bskiplistNode *bslInsert(bskiplist *bsl, long begin, long end, bstat *ele, bskiplistFreeNodes *bslfn);
 bskiplistNode *bslFirstNodeAfterBegin(bskiplist *bsl, long begin);
-bskiplistNode *bslGetRandomNode(bskiplist *bsl, unsigned long int mod);
 
 #endif /* SPDK_BSL_INTERNAL_H */
