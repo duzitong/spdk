@@ -122,7 +122,7 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 
 	wal_ch->wal_bdev = wal_bdev;
 	wal_ch->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_ch, 50);
-	wal_ch->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_ch, 50);
+	wal_ch->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_bdev, 50);
 	wal_ch->stat_poller = SPDK_POLLER_REGISTER(wal_bdev_stat_report, wal_bdev, 30*1000*1000);
 
 	return 0;
@@ -1667,10 +1667,6 @@ wal_bdev_cleaner(void *ctx)
 	struct wal_bdev *wal_bdev = ctx;
 	bskiplistNode *bn, *tmp;
 	int i, j;
-
-	if (spdk_unlikely(!wal_bdev->bsl)) {
-		return SPDK_POLLER_IDLE;
-	}
 
 	bn = bslGetRandomNode(wal_bdev->bsl, wal_bdev->bdev.blockcnt);
 
