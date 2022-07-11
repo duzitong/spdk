@@ -146,6 +146,9 @@ int bslfnFree(bskiplistFreeNodes *bslfn, int max) {
         x = bslfn->header->level[0].forward;
         i++;
     }
+    if (!bslfn->header->level[0].forward) {
+        bslfn->tail = bslfn->header;
+    }
     return i;
 }
 

@@ -1686,7 +1686,7 @@ wal_bdev_cleaner(void *ctx)
 	total = bslfnFree(wal_bdev->bslfn, 100);
 	
 	if (total) {
-		SPDK_NOTICELOG("%d nodes removed from bsl, %d nodes cleaned.\n", count, total);
+		SPDK_NOTICELOG("%d nodes removed from bsl, %d nodes freeed.\n", count, total);
 		return SPDK_POLLER_BUSY;
 	}
 
