@@ -1666,7 +1666,7 @@ wal_bdev_cleaner(void *ctx)
 {
 	struct wal_bdev *wal_bdev = ctx;
 	bskiplistNode *bn, *tmp;
-	int i, j;
+	int i, j, count = 0, total;
 
 	bn = bslGetRandomNode(wal_bdev->bsl, wal_bdev->bdev.blockcnt);
 
@@ -1679,10 +1679,14 @@ wal_bdev_cleaner(void *ctx)
 				tmp->level[j].forward = NULL;
 			}
 			wal_bdev->bslfn->tail->level[0].forward = tmp;
+			count++;
 		}
 	}
+
+	total = bslfnFree(wal_bdev->bslfn, 100);
 	
-	if (bslfnFree(wal_bdev->bslfn, 100)) {
+	if (total) {
+		SPDK_NOTICELOG("%d nodes removed from bsl, %d nodes cleaned.\n", count, total);
 		return SPDK_POLLER_BUSY;
 	}
 
