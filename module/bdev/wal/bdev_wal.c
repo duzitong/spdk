@@ -1665,9 +1665,15 @@ static int
 wal_bdev_cleaner(void *ctx)
 {
 	struct wal_bdev *wal_bdev = ctx;
-	bskiplistNode *bn = bslGetRandomNode(wal_bdev->bsl, wal_bdev->bdev.blockcnt);
+	bskiplistNode *bn, *tmp;
 	bskiplistNode *tmp;
 	int i, j;
+
+	if (spdk_unlikely(!wal_bdev->bsl)) {
+		return SPDK_POLLER_IDLE;
+	}
+
+	bn = bslGetRandomNode(wal_bdev->bsl, wal_bdev->bdev.blockcnt);
 
 	// try removal for level times.
 	for (i = 0; i < wal_bdev->bsl->level; i++) {
