@@ -683,10 +683,6 @@ _wal_bdev_submit_request(void *arg)
 	struct spdk_bdev_io *bdev_io = arg;
 	struct wal_bdev_io *wal_io = (struct wal_bdev_io *)bdev_io->driver_ctx;
 
-	if (wal_io->wal_bdev->cleaning) {
-		SPDK_NOTICELOG("Serve IO during cleaning");
-	}
-
 	switch (bdev_io->type) {
 	case SPDK_BDEV_IO_TYPE_READ:
 		spdk_bdev_io_get_buf(bdev_io, wal_bdev_get_buf_cb,
@@ -1672,29 +1668,31 @@ wal_bdev_cleaner(void *ctx)
 	bskiplistNode *bn, *tmp;
 	int i, j, count = 0, total;
 
-	wal_bdev->cleaning = true;
-
 	bn = bslGetRandomNode(wal_bdev->bsl, wal_bdev->bdev.blockcnt);
 
 	// try removal for level times.
 	for (i = 0; i < wal_bdev->bsl->level; i++) {
-		if (bn->level[0].forward && !wal_bdev_is_valid_entry(wal_bdev, bn->level[0].forward->ele)) {
-			tmp = bn->level[0].forward;
-			for (j = 0; j < bn->level[0].forward->height; j++) {
-				bn->level[j].forward = tmp->level[j].forward;
-				tmp->level[j].forward = NULL;
+		tmp = bn->level[0].forward;
+		if (tmp) {
+			if (wal_bdev_is_valid_entry(wal_bdev, tmp->ele)) {
+				bn = tmp;
+			} else {
+				for (j = 0; j < tmp->height; j++) {
+					bn->level[j].forward = tmp->level[j].forward;
+					tmp->level[j].forward = NULL;
+				}
+				wal_bdev->bslfn->tail->level[0].forward = tmp;
+				wal_bdev->bslfn->tail = tmp;
+				count++;
 			}
-			wal_bdev->bslfn->tail->level[0].forward = tmp;
-			wal_bdev->bslfn->tail = tmp;
-			count++;
+		} else {
+			break;
 		}
 	}
 
 	SPDK_NOTICELOG("%d nodes removed from bsl.\n", count);
 	total = bslfnFree(wal_bdev->bslfn, 10000);
 	SPDK_NOTICELOG("%d nodes freeed from bslfn.\n", total);
-	
-	wal_bdev->cleaning = false;
 
 	if (total) {
 		SPDK_NOTICELOG("%d nodes removed from bsl, %d nodes freeed.\n", count, total);

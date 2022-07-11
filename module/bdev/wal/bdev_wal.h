@@ -179,8 +179,6 @@ struct wal_bdev {
 
 	/* indicate whether there's ongoing moving task */
 	bool		moving;
-
-	bool		cleaning;
 };
 
 struct wal_metadata {
