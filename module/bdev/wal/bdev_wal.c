@@ -1666,7 +1666,6 @@ wal_bdev_cleaner(void *ctx)
 {
 	struct wal_bdev *wal_bdev = ctx;
 	bskiplistNode *bn, *tmp;
-	bskiplistNode *tmp;
 	int i, j;
 
 	if (spdk_unlikely(!wal_bdev->bsl)) {
