@@ -1685,10 +1685,12 @@ wal_bdev_cleaner(void *ctx)
 			wal_bdev->bslfn->tail->level[0].forward = tmp;
 		}
 	}
+	
+	if (bslfnFree(wal_bdev->bslfn, 100)) {
+		return SPDK_POLLER_BUSY;
+	}
 
-	bslfnFree(wal_bdev->bslfn, 100);
-
-	return SPDK_POLLER_BUSY;
+	return SPDK_POLLER_IDLE;
 }
 
 static int
