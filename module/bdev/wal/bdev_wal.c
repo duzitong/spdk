@@ -1691,7 +1691,9 @@ wal_bdev_cleaner(void *ctx)
 		tmp = x->level[0].forward;
 		if (tmp) {
 			if (wal_bdev_is_valid_entry(wal_bdev, tmp->ele)) {
-				break;
+				for (j = 0; j < tmp->height; j++) {
+					update[j] = tmp;
+				}
 			} else {
 				for (j = 0; j < tmp->height; j++) {
 					update[j]->level[j].forward = tmp->level[j].forward;
@@ -1706,9 +1708,7 @@ wal_bdev_cleaner(void *ctx)
 		}
 	}
 
-	SPDK_NOTICELOG("%d nodes removed from bsl.\n", count);
 	total = bslfnFree(wal_bdev->bslfn, 10000);
-	SPDK_NOTICELOG("%d nodes freeed from bslfn.\n", total);
 
 	if (total) {
 		SPDK_NOTICELOG("%d nodes removed from bsl, %d nodes freeed.\n", count, total);
