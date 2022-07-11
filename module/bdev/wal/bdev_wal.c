@@ -1677,7 +1677,7 @@ wal_bdev_cleaner(void *ctx)
     rand %= wal_bdev->bdev.blockcnt;
 
     x = wal_bdev->bsl->header;
-    for (i = bsl->level-1; i >= 0; i--) {
+    for (i = wal_bdev->bsl->level-1; i >= 0; i--) {
         while (x->level[i].forward &&
                 (x->level[i].forward->end < rand))
         {
