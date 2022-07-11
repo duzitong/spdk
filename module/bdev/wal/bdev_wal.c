@@ -1685,6 +1685,7 @@ wal_bdev_cleaner(void *ctx)
 				tmp->level[j].forward = NULL;
 			}
 			wal_bdev->bslfn->tail->level[0].forward = tmp;
+			wal_bdev->bslfn->tail = tmp;
 			count++;
 		}
 	}
