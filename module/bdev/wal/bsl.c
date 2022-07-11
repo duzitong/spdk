@@ -140,14 +140,11 @@ int bslfnFree(bskiplistFreeNodes *bslfn, int max) {
     int i = 0;
 
     x = bslfn->header->level[0].forward;
-    while (x && i < max) {
+    while (x && i < max && x != bslfn->tail) {
         bslfn->header->level[0].forward = x->level[0].forward;
         bslFreeNode(x);
         x = bslfn->header->level[0].forward;
         i++;
-    }
-    if (!bslfn->header->level[0].forward) {
-        bslfn->tail = bslfn->header;
     }
     return i;
 }
