@@ -273,3 +273,20 @@ bskiplistNode *bslFirstNodeAfterBegin(bskiplist *bsl, long begin) {
 
     return x->level[0].forward;
 }
+
+bskiplistNode *bslGetRandomNode(bskiplist *bsl, unsigned long int mod) {
+    bskiplistNode *x;
+    int i, rand;
+
+    rand = random() % mod;
+    x = bsl->header;
+    for (i = bsl->level-1; i >= 0; i--) {
+        while (x->level[i].forward &&
+                (x->level[i].forward->end < rand))
+        {
+            x = x->level[i].forward;
+        }
+    }
+
+    return x;
+}

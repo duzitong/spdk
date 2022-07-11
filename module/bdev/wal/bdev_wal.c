@@ -82,6 +82,7 @@ static void wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success
 static void wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
 static void wal_bdev_mover_clean(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
 static void wal_bdev_mover_free(struct wal_mover_context *ctx);
+static int wal_bdev_cleaner(void *ctx);
 static int wal_bdev_stat_report(void *ctx);
 
 /*
@@ -121,6 +122,7 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 
 	wal_ch->wal_bdev = wal_bdev;
 	wal_ch->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_ch, 50);
+	wal_ch->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_ch, 50);
 	wal_ch->stat_poller = SPDK_POLLER_REGISTER(wal_bdev_stat_report, wal_bdev, 30*1000*1000);
 
 	return 0;
@@ -152,6 +154,7 @@ wal_bdev_destroy_cb(void *io_device, void *ctx_buf)
 	wal_ch->core_channel = NULL;
 
 	spdk_poller_unregister(&wal_ch->mover_poller);
+	spdk_poller_unregister(&wal_ch->cleaner_poller);
 	spdk_poller_unregister(&wal_ch->stat_poller);
 }
 
@@ -1656,6 +1659,31 @@ wal_bdev_mover_free(struct wal_mover_context *ctx)
 	ctx->bdev->moving = false;
 
 	free(ctx);
+}
+
+static int
+wal_bdev_cleaner(void *ctx)
+{
+	struct wal_bdev *wal_bdev = ctx;
+	bskiplistNode *bn = bslGetRandomNode(wal_bdev->bsl, wal_bdev->bdev.blockcnt);
+	bskiplistNode *tmp;
+	int i, j;
+
+	// try removal for level times.
+	for (i = 0; i < wal_bdev->bsl->level; i++) {
+		if (bn->level[0].forward && !wal_bdev_is_valid_entry(wal_bdev, bn->level[0].forward->ele)) {
+			tmp = bn->level[0].forward;
+			for (j = 0; j < bn->level[0].forward->height; j++) {
+				bn->level[j].forward = tmp->level[j].forward;
+				tmp->level[j].forward = NULL;
+			}
+			wal_bdev->bslfn->tail->level[0].forward = tmp;
+		}
+	}
+
+	bslfnFree(wal_bdev->bslfn);
+
+	return SPDK_POLLER_BUSY;
 }
 
 static int

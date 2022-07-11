@@ -271,6 +271,9 @@ struct wal_bdev_io_channel {
 	/* poller to move data from log bdev to core bdev */
 	struct spdk_poller		*mover_poller;
 
+	/* poller to clean index */
+	struct spdk_poller		*cleaner_poller;
+
 	/* poller to report stat */
 	struct spdk_poller		*stat_poller;
 };
