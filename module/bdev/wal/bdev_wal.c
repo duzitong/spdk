@@ -122,7 +122,7 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 
 	wal_ch->wal_bdev = wal_bdev;
 	wal_ch->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_ch, 50);
-	wal_ch->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_bdev, 50);
+	wal_ch->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_bdev, 1000*1000);
 	wal_ch->stat_poller = SPDK_POLLER_REGISTER(wal_bdev_stat_report, wal_bdev, 30*1000*1000);
 
 	return 0;
@@ -682,6 +682,10 @@ _wal_bdev_submit_request(void *arg)
 {
 	struct spdk_bdev_io *bdev_io = arg;
 	struct wal_bdev_io *wal_io = (struct wal_bdev_io *)bdev_io->driver_ctx;
+
+	if (wal_io->wal_bdev->cleaning) {
+		SPDK_NOTICELOG("Serve IO during cleaning");
+	}
 
 	switch (bdev_io->type) {
 	case SPDK_BDEV_IO_TYPE_READ:
@@ -1668,6 +1672,8 @@ wal_bdev_cleaner(void *ctx)
 	bskiplistNode *bn, *tmp;
 	int i, j, count = 0, total;
 
+	wal_bdev->cleaning = true;
+
 	bn = bslGetRandomNode(wal_bdev->bsl, wal_bdev->bdev.blockcnt);
 
 	// try removal for level times.
@@ -1683,8 +1689,10 @@ wal_bdev_cleaner(void *ctx)
 		}
 	}
 
-	total = bslfnFree(wal_bdev->bslfn, 100);
+	total = bslfnFree(wal_bdev->bslfn, 10000);
 	
+	wal_bdev->cleaning = false;
+
 	if (total) {
 		SPDK_NOTICELOG("%d nodes removed from bsl, %d nodes freeed.\n", count, total);
 		return SPDK_POLLER_BUSY;
