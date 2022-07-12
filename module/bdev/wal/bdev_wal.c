@@ -394,7 +394,7 @@ wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *c
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSTAT_CREATE_START, 0, 0, (uintptr_t)wal_io);
 	struct bstat *bstat = bstatBdevCreate(begin, end, wal_io->metadata->round,
-										bdev_io->u.bdev.offset_blocks+1);
+										bdev_io->u.bdev.offset_blocks+1, wal_io->wal_bdev->bstat_pool);
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSTAT_CREATE_END, 0, 0, (uintptr_t)wal_io);
 	
 	
@@ -1453,8 +1453,12 @@ static int
 wal_bdev_start(struct wal_bdev *wal_bdev)
 {
 	wal_bdev->log_max = wal_bdev->log_bdev_info.bdev->blockcnt - 2;  // last block used to track log head
-	wal_bdev->bsl = bslCreate();
-	wal_bdev->bslfn = bslfnCreate();
+
+	wal_bdev->bstat_pool = spdk_mempool_create("WAL_BSTAT_POOL", wal_bdev->bdev.blockcnt << 6, sizeof(bstat), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
+	wal_bdev->bsl_node_pool = spdk_mempool_create("WAL_BSL_NODE_POOL", wal_bdev->bdev.blockcnt << 6, sizeof(bskiplistNode), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
+
+	wal_bdev->bsl = bslCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
+	wal_bdev->bslfn = bslfnCreate(wal_bdev->bsl_node_pool);
 	// TODO: recover
 	wal_bdev->log_head = 0;
 	wal_bdev->log_tail = 0;

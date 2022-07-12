@@ -35,6 +35,7 @@
 #define SPDK_BDEV_WAL_INTERNAL_H
 
 #include "spdk/bdev_module.h"
+#include "spdk/env.h"
 #include "spdk/thread.h"
 #include "spdk/trace.h"
 #include "spdk_internal/trace_defs.h"
@@ -159,6 +160,12 @@ struct wal_bdev {
 
 	/* open thread */
 	struct spdk_thread		*open_thread;
+
+	/* bsl node mempool */
+	struct spdk_mempool		*bsl_node_pool;
+
+	/* bstat mempool */
+	struct spdk_mempool		*bstat_pool;
 
 	/* sequence id */
 	uint64_t	seq;
