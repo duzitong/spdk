@@ -409,7 +409,7 @@ spdk_mem_register(void *vaddr, size_t len)
 	}
 
 	TAILQ_FOREACH(map, &g_spdk_mem_maps, tailq) {
-		DEBUG_PRINT("enter\n");
+		// DEBUG_PRINT("enter\n");
 		rc = map->ops.notify_cb(map->cb_ctx, map, SPDK_MEM_MAP_NOTIFY_REGISTER, seg_vaddr, seg_len);
 		if (rc != 0) {
 			pthread_mutex_unlock(&g_spdk_mem_map_mutex);
@@ -655,10 +655,10 @@ spdk_mem_map_clear_translation(struct spdk_mem_map *map, uint64_t vaddr, uint64_
 inline uint64_t
 spdk_mem_map_translate(const struct spdk_mem_map *map, uint64_t vaddr, uint64_t *size)
 {
-	DEBUG_PRINT("vaddr = 0x%llx\n", vaddr);
-	if (size != NULL) {
-		DEBUG_PRINT("size = 0x%llx\n", *size);
-	}
+	// DEBUG_PRINT("vaddr = 0x%llx\n", vaddr);
+	// if (size != NULL) {
+	// 	DEBUG_PRINT("size = 0x%llx\n", *size);
+	// }
 	const struct map_1gb *map_1gb;
 	const struct map_2mb *map_2mb;
 	uint64_t idx_256tb;

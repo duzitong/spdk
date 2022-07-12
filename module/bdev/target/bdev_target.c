@@ -49,6 +49,13 @@
 
 #include "spdk/bdev_module.h"
 #include "spdk/log.h"
+#include <infiniband/verbs.h>
+#include <rdma/rdma_cma.h>
+
+static struct rdma_handshake {
+	void* base_addr;
+	uint32_t rkey;
+};
 
 struct target_ns_entry {
 	struct spdk_nvme_ctrlr	*ctrlr;
@@ -61,7 +68,7 @@ struct target_disk {
 	// act as circular buffer
 	void				*malloc_buf;
 	// real disk
-	struct target_ns_entry ns_entry;
+	// struct target_ns_entry ns_entry;
 
 	TAILQ_ENTRY(target_disk)	link;
 };
@@ -445,47 +452,48 @@ probe_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
  * Callback when a nvme controller is returned.
  * Find the namespace of the controller.
  */
-static void
-attach_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
-	  struct spdk_nvme_ctrlr *ctrlr, const struct spdk_nvme_ctrlr_opts *opts)
-{
-	int nsid;
-	struct spdk_nvme_ns *ns;
-	struct target_disk* disk = (struct target_disk*)cb_ctx;
+// static void
+// attach_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
+// 	  struct spdk_nvme_ctrlr *ctrlr, const struct spdk_nvme_ctrlr_opts *opts)
+// {
+// 	int nsid;
+// 	struct spdk_nvme_ns *ns;
+// 	struct target_disk* disk = (struct target_disk*)cb_ctx;
 
-	SPDK_DEBUGLOG(bdev_target, "Attached to %s\n", trid->traddr);
-	disk->ns_entry.ctrlr = ctrlr;
+// 	SPDK_DEBUGLOG(bdev_target, "Attached to %s\n", trid->traddr);
+// 	disk->ns_entry.ctrlr = ctrlr;
 
-	/*
-	 * Each controller has one or more namespaces.  An NVMe namespace is basically
-	 *  equivalent to a SCSI LUN.  The controller's IDENTIFY data tells us how
-	 *  many namespaces exist on the controller.  For Intel(R) P3X00 controllers,
-	 *  it will just be one namespace.
-	 *
-	 * Note that in NVMe, namespace IDs start at 1, not 0.
-	 */
-	int num_ns = 0;
-	for (nsid = spdk_nvme_ctrlr_get_first_active_ns(ctrlr); nsid != 0;
-	     nsid = spdk_nvme_ctrlr_get_next_active_ns(ctrlr, nsid)) {
-		ns = spdk_nvme_ctrlr_get_ns(ctrlr, nsid);
-		if (ns == NULL) {
-			continue;
-		}
-		SPDK_DEBUGLOG(bdev_target, "  Namespace ID: %d size: %juGB\n", spdk_nvme_ns_get_id(ns),
-	       spdk_nvme_ns_get_size(ns) / 1000000000);
-		disk->ns_entry.ns = ns;
-		num_ns++;
-	}
+// 	/*
+// 	 * Each controller has one or more namespaces.  An NVMe namespace is basically
+// 	 *  equivalent to a SCSI LUN.  The controller's IDENTIFY data tells us how
+// 	 *  many namespaces exist on the controller.  For Intel(R) P3X00 controllers,
+// 	 *  it will just be one namespace.
+// 	 *
+// 	 * Note that in NVMe, namespace IDs start at 1, not 0.
+// 	 */
+// 	int num_ns = 0;
+// 	for (nsid = spdk_nvme_ctrlr_get_first_active_ns(ctrlr); nsid != 0;
+// 	     nsid = spdk_nvme_ctrlr_get_next_active_ns(ctrlr, nsid)) {
+// 		ns = spdk_nvme_ctrlr_get_ns(ctrlr, nsid);
+// 		if (ns == NULL) {
+// 			continue;
+// 		}
+// 		SPDK_DEBUGLOG(bdev_target, "  Namespace ID: %d size: %juGB\n", spdk_nvme_ns_get_id(ns),
+// 	       spdk_nvme_ns_get_size(ns) / 1000000000);
+// 		disk->ns_entry.ns = ns;
+// 		num_ns++;
+// 	}
 
-	if (num_ns != 1) {
-		SPDK_ERRLOG("Unexpected # of namespaces %d\n", num_ns);
-	}
-}
+// 	if (num_ns != 1) {
+// 		SPDK_ERRLOG("Unexpected # of namespaces %d\n", num_ns);
+// 	}
+// }
 
 int
 create_target_disk(struct spdk_bdev **bdev, const char *name, const struct spdk_uuid *uuid,
 		   uint64_t num_blocks, uint32_t block_size, uint32_t optimal_io_boundary)
 {
+	SPDK_DEBUGLOG(bdev_target, "in create disk\n");
 	struct target_disk	*mdisk;
 	int rc;
 	struct spdk_nvme_transport_id trid = {};
@@ -519,25 +527,163 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const struct spdk_
 		target_disk_free(mdisk);
 		return -ENOMEM;
 	}
+	struct rdma_event_channel* rdma_channel = rdma_create_event_channel();
 
+	struct rdma_cm_id* cm_id = NULL;
+	
+	rdma_create_id(rdma_channel, &cm_id, NULL, RDMA_PS_TCP);
+	struct sockaddr_in addr;
+	struct addrinfo hints = {};
+	struct addrinfo* addr_res = NULL;
+	hints.ai_family = AF_INET;
+	hints.ai_flags = AI_PASSIVE;
 
-	/*
-	 * Attach a nvme controller locally
-	 */
-	spdk_nvme_trid_populate_transport(&trid, SPDK_NVME_TRANSPORT_PCIE);
-	snprintf(trid.subnqn, sizeof(trid.subnqn), "%s", SPDK_NVMF_DISCOVERY_NQN);
+	getaddrinfo("10.156.73.242", "4420", &hints, &addr_res);
+	memcpy(&addr, addr_res->ai_addr, sizeof(addr));
 
-	rc = spdk_nvme_probe(&trid, mdisk, probe_cb, attach_cb, NULL);
-	if (rc != 0) {
-		SPDK_ERRLOG("spdk_nvme_probe() failed");
-		rc = 1;
-		return rc;
+	rdma_resolve_addr(cm_id, NULL, addr_res->ai_addr, 1000);
+	struct rdma_cm_event* resolve_addr_event, *resolve_route_event, *connect_event;
+	rdma_get_cm_event(rdma_channel, &resolve_addr_event);
+	if (resolve_addr_event->event != RDMA_CM_EVENT_ADDR_RESOLVED) {
+		SPDK_ERRLOG("invalid event type\n");
+		return -EINVAL;
+	}
+	assert(cm_id == resolve_addr_event->id);
+	rdma_ack_cm_event(resolve_addr_event);
+
+	rdma_resolve_route(cm_id, 1000);
+	rdma_get_cm_event(rdma_channel, &resolve_route_event);
+	if (resolve_route_event->event != RDMA_CM_EVENT_ROUTE_RESOLVED) {
+		SPDK_ERRLOG("invalid event type\n");
+		return -EINVAL;
+	}
+	assert(cm_id == resolve_route_event->id);
+	rdma_ack_cm_event(resolve_route_event);
+
+	struct ibv_context* ibv_context = cm_id->verbs;
+	struct ibv_device_attr device_attr = {};
+	ibv_query_device(ibv_context, &device_attr);
+	struct ibv_pd* ibv_pd = ibv_alloc_pd(ibv_context);
+	struct ibv_mr* ibv_mr = ibv_reg_mr(ibv_pd,
+		mdisk->malloc_buf,
+		num_blocks * block_size,
+		IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+
+	struct ibv_cq* ibv_cq = ibv_create_cq(ibv_context, 4096, NULL, NULL, 0);
+
+	// no SRQ here - only one qp
+	// TODO: fine-tune these params; 
+	struct ibv_qp_init_attr init_attr = {
+		.send_cq = ibv_cq,
+		.recv_cq = ibv_cq,
+		.qp_type = IBV_QPT_RC,
+		.cap = {
+			.max_recv_sge = 1,
+			.max_send_sge = 1,
+			.max_send_wr = 1,
+			.max_recv_wr = 1,
+		}
+	};
+
+	int x = rdma_create_qp(cm_id, ibv_pd, &init_attr);
+	SPDK_DEBUGLOG(bdev_target, "rdma_create_qp returns %d\n", x);
+
+	struct ibv_recv_wr wr, *bad_wr = NULL;
+	struct ibv_sge sge, send_sge;
+
+	// TODO: use separate buffer
+	struct rdma_handshake* handshake = mdisk->malloc_buf;
+	handshake->base_addr = mdisk->malloc_buf;
+	handshake->rkey = ibv_mr->rkey;
+
+	SPDK_DEBUGLOG(bdev_target, "sending local addr %p rkey %d\n", mdisk->malloc_buf, handshake->rkey);
+
+	wr.wr_id = (uintptr_t)1;
+	wr.next = NULL;
+	wr.sg_list = &sge;
+	wr.num_sge = 1;
+
+	sge.addr = (uint64_t)mdisk->malloc_buf + sizeof(struct rdma_handshake);
+	sge.length = sizeof(struct rdma_handshake);
+	sge.lkey = ibv_mr->lkey;
+
+	ibv_post_recv(cm_id->qp, &wr, &bad_wr);
+
+	struct rdma_conn_param conn_param = {};
+	rdma_connect(cm_id, &conn_param);
+	rdma_get_cm_event(rdma_channel, &connect_event);
+	if (connect_event->event != RDMA_CM_EVENT_ESTABLISHED) {
+		SPDK_ERRLOG("invalid event type %d\n", connect_event->event);
+		return -EINVAL;
 	}
 
-	mdisk->ns_entry.qpair = spdk_nvme_ctrlr_alloc_io_qpair(mdisk->ns_entry.ctrlr, NULL, 0);
-	if (mdisk->ns_entry.qpair == NULL) {
-		SPDK_ERRLOG("ERROR: spdk_nvme_ctrlr_alloc_io_qpair() failed");
+	SPDK_DEBUGLOG(bdev_target, "connected. posting send...\n");
+
+	struct ibv_send_wr send_wr, *bad_send_wr = NULL;
+	memset(&send_wr, 0, sizeof(send_wr));
+
+	send_wr.wr_id = 2;
+	send_wr.opcode = IBV_WR_SEND;
+	send_wr.sg_list = &send_sge;
+	send_wr.num_sge = 1;
+	send_wr.send_flags = IBV_SEND_SIGNALED;
+
+	send_sge.addr = (uint64_t)mdisk->malloc_buf;
+	send_sge.length = sizeof(struct rdma_handshake);
+	send_sge.lkey = ibv_mr->lkey;
+
+	ibv_post_send(cm_id->qp, &send_wr, &bad_send_wr);
+	struct ibv_wc wc;
+	bool handshake_send_cpl = false;
+	bool handshake_recv_cpl = false;
+	while (!handshake_send_cpl || !handshake_recv_cpl)
+	{
+		int ret = ibv_poll_cq(ibv_cq, 1, &wc);
+		if (ret < 0) {
+			SPDK_ERRLOG("ibv_poll_cq failed\n");
+			return -EINVAL;
+		}
+
+		if (ret == 0) {
+			continue;
+		}
+
+		if (wc.wr_id == 1) {
+			// recv complete
+			struct rdma_handshake* remote_handshake = (struct rdma_handshake*)(mdisk->malloc_buf) + 1;
+			SPDK_DEBUGLOG(bdev_target, "received remote addr %p rkey %d\n", remote_handshake->base_addr, remote_handshake->rkey);
+			handshake_recv_cpl = true;
+		}
+		else if (wc.wr_id == 2) {
+			SPDK_DEBUGLOG(bdev_target, "send req complete\n");
+			handshake_send_cpl = true;
+		}
 	}
+
+	SPDK_DEBUGLOG(bdev_target, "rdma handshake complete\n");
+
+	
+
+
+	// /*
+	//  * Attach a nvme controller locally
+	//  */
+	// spdk_nvme_trid_populate_transport(&trid, SPDK_NVME_TRANSPORT_PCIE);
+	// snprintf(trid.subnqn, sizeof(trid.subnqn), "%s", SPDK_NVMF_DISCOVERY_NQN);
+	// SPDK_DEBUGLOG(bdev_target, "before probe\n");
+
+	// rc = spdk_nvme_probe(&trid, mdisk, probe_cb, attach_cb, NULL);
+	// if (rc != 0) {
+	// 	SPDK_ERRLOG("spdk_nvme_probe() failed");
+	// 	rc = 1;
+	// 	return rc;
+	// }
+
+	// mdisk->ns_entry.qpair = spdk_nvme_ctrlr_alloc_io_qpair(mdisk->ns_entry.ctrlr, NULL, 0);
+	// if (mdisk->ns_entry.qpair == NULL) {
+	// 	SPDK_ERRLOG("ERROR: spdk_nvme_ctrlr_alloc_io_qpair() failed");
+	// }
+	// SPDK_DEBUGLOG(bdev_target, "before alloc qp\n");
 
 	if (name) {
 		mdisk->disk.name = strdup(name);
@@ -572,6 +718,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const struct spdk_
 	mdisk->disk.fn_table = &target_fn_table;
 	mdisk->disk.module = &target_if;
 
+	SPDK_DEBUGLOG(bdev_target, "before reg\n");
 	rc = spdk_bdev_register(&mdisk->disk);
 	if (rc) {
 		target_disk_free(mdisk);
@@ -581,6 +728,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const struct spdk_
 	*bdev = &(mdisk->disk);
 
 	TAILQ_INSERT_TAIL(&g_target_disks, mdisk, link);
+	SPDK_DEBUGLOG(bdev_target, "leave create disk\n");
 
 	return rc;
 }

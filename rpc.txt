@@ -1,10 +1,4 @@
 log_set_flag bdev_target
-log_set_flag nvmf_tcp
-log_set_flag nvme
 log_set_level debug
 log_set_print_level debug
 bdev_target_create -b target0 512 4096
-nvmf_create_subsystem nqn.2016-06.io.spdk:cnode1 -a
-nvmf_subsystem_add_ns nqn.2016-06.io.spdk:cnode1 target0
-nvmf_create_transport -t tcp
-nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t tcp -a 127.0.0.1 -s 4420
