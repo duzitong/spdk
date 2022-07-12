@@ -392,12 +392,13 @@ wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *c
 	begin = wal_io->metadata->core_offset;
 	end = wal_io->metadata->core_offset + wal_io->metadata->core_offset;
 
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSTAT_CREATE_START, 0, 0, (uintptr_t)wal_io);
 	struct bstat *bstat = bstatBdevCreate(begin, end, wal_io->metadata->round,
 										bdev_io->u.bdev.offset_blocks+1);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSTAT_CREATE_END, 0, 0, (uintptr_t)wal_io);
 	
 	
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSL_INSERT_START, 0, 0, (uintptr_t)wal_io);
-
 	bslInsert(wal_io->wal_bdev->bsl, wal_io->metadata->core_offset, wal_io->metadata->core_offset + wal_io->metadata->core_length,
 				bstat, wal_io->wal_bdev->bslfn);
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSL_INSERT_END, 0, 0, (uintptr_t)wal_io);
@@ -1770,10 +1771,19 @@ SPDK_TRACE_REGISTER_FN(wal_trace, "wal", TRACE_GROUP_BDEV)
 			}
 		},
 		{
+			"WAL_BSTAT_CREATE_START", TRACE_BDEV_BSTAT_CREATE_START,
+			OWNER_BDEV, OBJECT_BDEV_IO, 1,
+			{}
+		},
+		{
+			"WAL_BSTAT_CREATE_END", TRACE_BDEV_BSTAT_CREATE_END,
+			OWNER_BDEV, OBJECT_BDEV_IO, 0,
+			{}
+		},
+		{
 			"WAL_BSL_INSERT_START", TRACE_BDEV_BSL_INSERT_START,
 			OWNER_BDEV, OBJECT_BDEV_IO, 1,
-			{
-			}
+			{}
 		},
 		{
 			"WAL_BSL_INSERT_END", TRACE_BDEV_BSL_INSERT_END,
