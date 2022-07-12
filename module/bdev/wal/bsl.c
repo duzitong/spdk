@@ -83,7 +83,7 @@ bskiplistFreeNodes *bslfnCreate(struct spdk_mempool *node_pool, struct spdk_memp
     bslfn = calloc(1, sizeof(*bslfn));
     bslfn->node_pool = node_pool;
     bslfn->bstat_pool = bstat_pool;
-    bslfn->header = bslfn->tail = bslCreateNode(BSKIPLIST_MAXLEVEL,-1, -1, NULL, pool);
+    bslfn->header = bslfn->tail = bslCreateNode(BSKIPLIST_MAXLEVEL,-1, -1, NULL, node_pool);
     bslfn->header->level[0].forward = NULL;
     return bslfn;
 }
