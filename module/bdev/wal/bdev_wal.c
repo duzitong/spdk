@@ -1458,7 +1458,7 @@ wal_bdev_start(struct wal_bdev *wal_bdev)
 	wal_bdev->bsl_node_pool = spdk_mempool_create("WAL_BSL_NODE_POOL", wal_bdev->bdev.blockcnt << 6, sizeof(bskiplistNode), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
 
 	wal_bdev->bsl = bslCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
-	wal_bdev->bslfn = bslfnCreate(wal_bdev->bsl_node_pool);
+	wal_bdev->bslfn = bslfnCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
 	// TODO: recover
 	wal_bdev->log_head = 0;
 	wal_bdev->log_tail = 0;
