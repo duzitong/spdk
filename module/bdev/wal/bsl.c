@@ -6,7 +6,7 @@ bstat *bstatClone(bstat *pb, struct spdk_mempool *pool);
 int bslRandomLevel(void);
 bskiplistNode *bslCreateNode(int level, long begin, long end, bstat *ele, struct spdk_mempool *pool);
 void bslPrintNode(bskiplistNode *bsln);
-void bslFreeNode(bskiplistNode *bsln);
+void bslFreeNode(bskiplistNode *bsln, struct spdk_mempool *bstat_pool, struct spdk_mempool *node_pool);
 void bslAdjustNodeBegin(bskiplistNode *bn, long end);
 void bslAdjustNodeEnd(bskiplistNode *bn, long begin);
 
@@ -70,6 +70,7 @@ bskiplist *bslCreate(struct spdk_mempool *node_pool, struct spdk_mempool *bstat_
     bsl = calloc(1, sizeof(*bsl));
     bsl->level = 1;
     bsl->node_pool = node_pool;
+    bsl->bstat_pool = bstat_pool;
     bsl->header = bslCreateNode(BSKIPLIST_MAXLEVEL,-1, -1, NULL, node_pool);
     for (j = 0; j < BSKIPLIST_MAXLEVEL; j++) {
         bsl->header->level[j].forward = NULL;
@@ -77,10 +78,11 @@ bskiplist *bslCreate(struct spdk_mempool *node_pool, struct spdk_mempool *bstat_
     return bsl;
 }
 
-bskiplistFreeNodes *bslfnCreate(struct spdk_mempool *pool) {
+bskiplistFreeNodes *bslfnCreate(struct spdk_mempool *node_pool, struct spdk_mempool *bstat_pool) {
     bskiplistFreeNodes *bslfn;
     bslfn = calloc(1, sizeof(*bslfn));
-    bslfn->pool = pool;
+    bslfn->node_pool = node_pool;
+    bslfn->bstat_pool = bstat_pool;
     bslfn->header = bslfn->tail = bslCreateNode(BSKIPLIST_MAXLEVEL,-1, -1, NULL, pool);
     bslfn->header->level[0].forward = NULL;
     return bslfn;
@@ -117,11 +119,11 @@ void bslPrintNode(bskiplistNode *bsln) {
     }
 }
 
-void bslFreeNode(bskiplistNode *bsln) {
+void bslFreeNode(bskiplistNode *bsln, struct spdk_mempool *bstat_pool, struct spdk_mempool *node_pool) {
     if (bsln->ele->type == LOCATION_MEM)
-        free(bsln->ele->l.memPointer);
-    free(bsln->ele);
-    free(bsln);
+        spdk_free(bsln->ele->l.memPointer);
+    spdk_mempool_put(bstat_pool, bsln->ele);
+    spdk_mempool_put(node_pool, bsln);
 }
 
 void bslfnPrint(bskiplistFreeNodes *bslfn) {
@@ -143,7 +145,7 @@ int bslfnFree(bskiplistFreeNodes *bslfn, int max) {
     x = bslfn->header->level[0].forward;
     while (x && i < max && x != bslfn->tail) {
         bslfn->header->level[0].forward = x->level[0].forward;
-        bslFreeNode(x);
+        bslFreeNode(x, bslfn->bstat_pool, bslfn->node_pool);
         x = bslfn->header->level[0].forward;
         i++;
     }

@@ -42,13 +42,14 @@ typedef struct bskiplist {
 
 typedef struct bskiplistFreeNodes {
     struct bskiplistNode *header, *tail;
-    struct spdk_mempool *pool;
+    struct spdk_mempool *node_pool;
+    struct spdk_mempool *bstat_pool;
 } bskiplistFreeNodes;
 
 bstat *bstatBdevCreate(long begin, long end, long round, long unsigned int bdevOffset, struct spdk_mempool *pool);
 bstat *bstatMemCreate(long begin, long end, long round, void *memPointer, struct spdk_mempool *pool);
 bskiplist *bslCreate(struct spdk_mempool *node_pool, struct spdk_mempool *bstat_pool);
-bskiplistFreeNodes *bslfnCreate(struct spdk_mempool *pool);
+bskiplistFreeNodes *bslfnCreate(struct spdk_mempool *pool, struct spdk_mempool *bstat_pool);
 void bslPrint(bskiplist *bsl, char full);
 void bslfnPrint(bskiplistFreeNodes *bslfn);
 int bslfnFree(bskiplistFreeNodes *bslfn, int max);
