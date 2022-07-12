@@ -1637,8 +1637,8 @@ replica_bdev_start(struct replica_bdev *replica_bdev)
 	 * of replica bdev is the number of base bdev times the minimum block count
 	 * of any base bdev.
 	 */
-	SPDK_DEBUGLOG(bdev_replica0, "min blockcount %" PRIu64 ",  numbasedev %u, strip size shift %u\n",
-		      min_blockcnt, replica_bdev->num_base_bdevs, replica_bdev->strip_size_shift);
+	// SPDK_DEBUGLOG(bdev_replica0, "min blockcount %" PRIu64 ",  numbasedev %u, strip size shift %u\n",
+	// 	      min_blockcnt, replica_bdev->num_base_bdevs, replica_bdev->strip_size_shift);
 	replica_bdev->bdev.blockcnt = min_blockcnt;
 
 	return 0;

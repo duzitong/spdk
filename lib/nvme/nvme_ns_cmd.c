@@ -387,22 +387,28 @@ _nvme_ns_cmd_rw(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
 		uint32_t io_flags, uint16_t apptag_mask, uint16_t apptag, bool check_sgl, int *rc)
 {
 	struct nvme_request	*req;
-	uint32_t		sector_size = _nvme_get_host_buffer_sector_size(ns, io_flags);
+	// uint32_t		sector_size = _nvme_get_host_buffer_sector_size(ns, io_flags);
+	uint32_t		sector_size = ns->sector_size;
 	uint32_t		sectors_per_max_io = _nvme_get_sectors_per_max_io(ns, io_flags);
 	uint32_t		sectors_per_stripe = ns->sectors_per_stripe;
+
+	printf("req sector size = %d, opc = %d\n", sector_size, opc);
 
 	assert(rc != NULL);
 	assert(*rc == 0);
 
-	req = nvme_allocate_request(qpair, payload, lba_count * sector_size, lba_count * ns->md_size,
+	req = nvme_allocate_request(qpair, payload, lba_count * sector_size, ns->md_size,
 				    cb_fn, cb_arg);
 	if (req == NULL) {
 		*rc = -ENOMEM;
 		return NULL;
 	}
 
+	printf("payload md buf = 0x%llx\n", payload->md);
+
 	req->payload_offset = payload_offset;
 	req->md_offset = md_offset;
+	req->payload_size += ns->md_size;
 
 	/* Zone append commands cannot be split. */
 	if (opc == SPDK_NVME_OPC_ZONE_APPEND) {
@@ -919,6 +925,8 @@ spdk_nvme_ns_cmd_write_with_md(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *
 	struct nvme_request *req;
 	struct nvme_payload payload;
 	int rc = 0;
+	
+	printf("write qp id = %d\n", qpair->id);
 
 	if (!_is_io_flags_valid(io_flags)) {
 		return -EINVAL;

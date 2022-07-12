@@ -1,0 +1,4 @@
+log_set_flag bdev_target
+log_set_level debug
+log_set_print_level debug
+bdev_target_create -b target0 512 4096

@@ -150,6 +150,7 @@ mem_map_notify_walk(struct spdk_mem_map *map, enum spdk_mem_map_notify_action ac
 		if (!map_1gb) {
 			if (contig_start != UINT64_MAX) {
 				/* End of of a virtually contiguous range */
+				DEBUG_PRINT("walk 1\n");
 				rc = map->ops.notify_cb(map->cb_ctx, map, action,
 							(void *)contig_start,
 							contig_end - contig_start + VALUE_2MB);
@@ -177,6 +178,7 @@ mem_map_notify_walk(struct spdk_mem_map *map, enum spdk_mem_map_notify_action ac
 			} else {
 				if (contig_start != UINT64_MAX) {
 					/* End of of a virtually contiguous range */
+					DEBUG_PRINT("walk 2\n");
 					rc = map->ops.notify_cb(map->cb_ctx, map, action,
 								(void *)contig_start,
 								contig_end - contig_start + VALUE_2MB);
@@ -379,6 +381,7 @@ spdk_mem_register(void *vaddr, size_t len)
 	}
 
 	TAILQ_FOREACH(map, &g_spdk_mem_maps, tailq) {
+		// DEBUG_PRINT("enter\n");
 		rc = map->ops.notify_cb(map->cb_ctx, map, SPDK_MEM_MAP_NOTIFY_REGISTER, seg_vaddr, seg_len);
 		if (rc != 0) {
 			pthread_mutex_unlock(&g_spdk_mem_map_mutex);
@@ -577,6 +580,7 @@ int
 spdk_mem_map_set_translation(struct spdk_mem_map *map, uint64_t vaddr, uint64_t size,
 			     uint64_t translation)
 {
+	// DEBUG_PRINT("vaddr = 0x%llx\n, size = 0x%llx\n, translation = 0x%llx\n", vaddr, size, translation);
 	uint64_t vfn_2mb;
 	struct map_1gb *map_1gb;
 	uint64_t idx_1gb;
@@ -623,6 +627,10 @@ spdk_mem_map_clear_translation(struct spdk_mem_map *map, uint64_t vaddr, uint64_
 inline uint64_t
 spdk_mem_map_translate(const struct spdk_mem_map *map, uint64_t vaddr, uint64_t *size)
 {
+	// DEBUG_PRINT("vaddr = 0x%llx\n", vaddr);
+	// if (size != NULL) {
+	// 	DEBUG_PRINT("size = 0x%llx\n", *size);
+	// }
 	const struct map_1gb *map_1gb;
 	const struct map_2mb *map_2mb;
 	uint64_t idx_256tb;

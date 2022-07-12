@@ -884,6 +884,8 @@ _nvme_qpair_submit_request(struct spdk_nvme_qpair *qpair, struct nvme_request *r
 		return -ENXIO;
 	}
 
+	printf("submit req 1, num_children = %d, qp state = %d, qp id = %d\n", req->num_children, nvme_qpair_get_state(qpair), qpair->id);
+
 	if (req->num_children) {
 		/*
 		 * This is a split (parent) request. Submit all of the children but not the parent
@@ -920,6 +922,7 @@ _nvme_qpair_submit_request(struct spdk_nvme_qpair *qpair, struct nvme_request *r
 
 	/* queue those requests which matches with opcode in err_cmd list */
 	if (spdk_unlikely(!TAILQ_EMPTY(&qpair->err_cmd_head))) {
+		printf("Err cmd\n");
 		TAILQ_FOREACH(cmd, &qpair->err_cmd_head, link) {
 			if (!cmd->do_not_submit) {
 				continue;
@@ -961,11 +964,13 @@ _nvme_qpair_submit_request(struct spdk_nvme_qpair *qpair, struct nvme_request *r
 	if (spdk_likely(nvme_qpair_get_state(qpair) == NVME_QPAIR_ENABLED) ||
 	    (req->cmd.opc == SPDK_NVME_OPC_FABRIC &&
 	     nvme_qpair_get_state(qpair) == NVME_QPAIR_CONNECTING)) {
+		printf("submit req 2: qp id = %d\n", qpair->id);
 		rc = nvme_transport_qpair_submit_request(qpair, req);
 	} else {
 		/* The controller is being reset - queue this request and
 		 *  submit it later when the reset is completed.
 		 */
+		printf("submit req 3\n");
 		return -EAGAIN;
 	}
 

@@ -132,6 +132,7 @@ DEPDIRS-bdev_pmem := $(BDEV_DEPS_THREAD)
 DEPDIRS-bdev_raid := $(BDEV_DEPS_THREAD)
 DEPDIRS-bdev_replica := $(BDEV_DEPS_THREAD)
 DEPDIRS-bdev_rbd := $(BDEV_DEPS_THREAD)
+DEPDIRS-bdev_target := $(BDEV_DEPS_THREAD) accel nvme
 DEPDIRS-bdev_uring := $(BDEV_DEPS_THREAD)
 DEPDIRS-bdev_virtio := $(BDEV_DEPS_THREAD) virtio
 DEPDIRS-bdev_wal := $(BDEV_DEPS_THREAD)

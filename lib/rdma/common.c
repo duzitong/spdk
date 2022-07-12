@@ -30,6 +30,7 @@ rdma_mem_notify(void *cb_ctx, struct spdk_mem_map *map,
 		enum spdk_mem_map_notify_action action,
 		void *vaddr, size_t size)
 {
+	SPDK_ERRLOG("enter\n");
 	struct spdk_rdma_mem_map *rmap = cb_ctx;
 	struct ibv_pd *pd = rmap->pd;
 	struct ibv_mr *mr;
@@ -44,6 +45,7 @@ rdma_mem_notify(void *cb_ctx, struct spdk_mem_map *map,
 		} else {
 			switch (rmap->role) {
 			case SPDK_RDMA_MEMORY_MAP_ROLE_TARGET:
+				SPDK_ERRLOG("rmap is target\n");
 				access_flags = IBV_ACCESS_LOCAL_WRITE;
 				if (pd->context->device->transport_type == IBV_TRANSPORT_IWARP) {
 					/* IWARP requires REMOTE_WRITE permission for RDMA_READ operation */
@@ -51,6 +53,7 @@ rdma_mem_notify(void *cb_ctx, struct spdk_mem_map *map,
 				}
 				break;
 			case SPDK_RDMA_MEMORY_MAP_ROLE_INITIATOR:
+				SPDK_ERRLOG("rmap is initiator\n");
 				access_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
 				break;
 			default:
@@ -122,8 +125,11 @@ spdk_rdma_create_mem_map(struct ibv_pd *pd, struct spdk_nvme_rdma_hooks *hooks,
 	}
 
 	if (hooks) {
+		SPDK_ERRLOG("hooks not null\n");
+		SPDK_ERRLOG("hooks->get_rkey == null? %d\n", hooks->get_rkey == NULL);
 		map = spdk_zmalloc(sizeof(*map), 0, NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
 	} else {
+		SPDK_ERRLOG("hooks is null\n");
 		map = calloc(1, sizeof(*map));
 	}
 	if (!map) {
@@ -184,6 +190,7 @@ int
 spdk_rdma_get_translation(struct spdk_rdma_mem_map *map, void *address,
 			  size_t length, struct spdk_rdma_memory_translation *translation)
 {
+	SPDK_ERRLOG("enter\n");
 	uint64_t real_length = length;
 
 	assert(map);
