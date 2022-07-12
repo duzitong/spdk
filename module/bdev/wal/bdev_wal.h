@@ -160,6 +160,11 @@ struct wal_bdev {
 	/* open thread */
 	struct spdk_thread		*open_thread;
 
+	/* mutex to set thread and pollers */
+	pthread_mutex_t			mutex;
+
+	bool					open_thread_set;
+
 	/* sequence id */
 	uint64_t	seq;
 
