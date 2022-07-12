@@ -120,10 +120,17 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 		return -ENOMEM;
 	}
 
-	wal_ch->wal_bdev = wal_bdev;
-	wal_ch->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_ch, 50);
-	wal_ch->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_bdev, 50);
-	wal_ch->stat_poller = SPDK_POLLER_REGISTER(wal_bdev_stat_report, wal_bdev, 30*1000*1000);
+	pthread_mutex_lock(&wal_bdev->mutex);
+	if (!wal_bdev->open_thread_set) {
+		wal_ch->wal_bdev = wal_bdev;
+
+		wal_bdev->open_thread = spdk_get_thread();
+		wal_ch->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_ch, 50);
+		wal_ch->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_bdev, 50);
+		wal_ch->stat_poller = SPDK_POLLER_REGISTER(wal_bdev_stat_report, wal_bdev, 30*1000*1000);
+	}
+	wal_bdev->open_thread_set = true;
+	pthread_mutex_unlock(&wal_bdev->mutex);
 
 	return 0;
 }
@@ -1171,8 +1178,6 @@ wal_bdev_configure(struct wal_bdev *wal_bdev)
 	wal_bdev_gen = &wal_bdev->bdev;
 
 	wal_bdev->state = WAL_BDEV_STATE_ONLINE;
-
-	wal_bdev->open_thread = spdk_get_thread();
 
 	SPDK_DEBUGLOG(bdev_wal, "io device register %p\n", wal_bdev);
 	SPDK_DEBUGLOG(bdev_wal, "blockcnt %" PRIu64 ", blocklen %u\n",

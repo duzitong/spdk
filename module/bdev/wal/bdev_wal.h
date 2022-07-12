@@ -161,6 +161,11 @@ struct wal_bdev {
 	/* open thread */
 	struct spdk_thread		*open_thread;
 
+	/* mutex to set thread and pollers */
+	pthread_mutex_t			mutex;
+
+	bool					open_thread_set;
+
 	/* bsl node mempool */
 	struct spdk_mempool		*bsl_node_pool;
 
