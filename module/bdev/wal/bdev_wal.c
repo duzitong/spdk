@@ -120,10 +120,9 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 		return -ENOMEM;
 	}
 
+	wal_ch->wal_bdev = wal_bdev;
 	pthread_mutex_lock(&wal_bdev->mutex);
 	if (!wal_bdev->open_thread_set) {
-		wal_ch->wal_bdev = wal_bdev;
-
 		wal_bdev->open_thread = spdk_get_thread();
 		wal_ch->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_ch, 50);
 		wal_ch->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_bdev, 50);
@@ -290,13 +289,10 @@ _wal_bdev_io_complete(void *arg)
 
 void
 wal_bdev_io_complete(struct wal_bdev_io *wal_io, enum spdk_bdev_io_status status)
-{
-	struct spdk_io_channel *ch = spdk_io_channel_from_ctx(wal_io->wal_ch);
-	struct spdk_thread *orig_thread = spdk_io_channel_get_thread(ch);
-	
+{	
 	wal_io->status = status;
-	if (orig_thread != spdk_get_thread()) {
-		spdk_thread_send_msg(orig_thread, _wal_bdev_io_complete, wal_io);
+	if (wal_io->orig_thread != spdk_get_thread()) {
+		spdk_thread_send_msg(wal_io->orig_thread, _wal_bdev_io_complete, wal_io);
 	} else {
 		_wal_bdev_io_complete(wal_io);
 	}
@@ -733,9 +729,10 @@ wal_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_io
 	wal_io->wal_bdev = bdev_io->bdev->ctxt;
 	wal_io->wal_ch = spdk_io_channel_get_ctx(ch);
 	wal_io->orig_io = bdev_io;
+	wal_io->orig_thread = spdk_get_thread();
 
 	/* Send this request to the open_thread if that's not what we're on. */
-	if (spdk_get_thread() != wal_io->wal_bdev->open_thread) {
+	if (wal_io->orig_thread != wal_io->wal_bdev->open_thread) {
 		spdk_thread_send_msg(wal_io->wal_bdev->open_thread, _wal_bdev_submit_request, bdev_io);
 	} else {
 		_wal_bdev_submit_request(bdev_io);

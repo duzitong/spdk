@@ -111,6 +111,9 @@ struct wal_bdev_io {
 	/* the original IO */
 	struct spdk_bdev_io	*orig_io;
 
+	/* the original thread */
+	struct spdk_bdev_io	*orig_thread;
+
 	/* save for completion on orig thread */
 	enum spdk_bdev_io_status status;
 
