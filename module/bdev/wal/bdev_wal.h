@@ -113,7 +113,7 @@ struct wal_bdev_io {
 	struct spdk_bdev_io	*orig_io;
 
 	/* the original thread */
-	struct spdk_bdev_io	*orig_thread;
+	struct spdk_thread	*orig_thread;
 
 	/* save for completion on orig thread */
 	enum spdk_bdev_io_status status;
@@ -166,8 +166,6 @@ struct wal_bdev {
 
 	/* mutex to set thread and pollers */
 	pthread_mutex_t			mutex;
-
-	bool					open_thread_set;
 
 	/* bsl node mempool */
 	struct spdk_mempool		*bsl_node_pool;
