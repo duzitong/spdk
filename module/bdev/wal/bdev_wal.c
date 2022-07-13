@@ -372,7 +372,7 @@ wal_base_bdev_read_complete_part(struct spdk_bdev_io *bdev_io, bool success, voi
 	spdk_bdev_free_io(bdev_io);
 
 	wal_io->remaining_base_bdev_io--;
-	wal_io->status = success && wal_io->status == SPDK_BDEV_IO_STATUS_SUCCESS 
+	wal_io->status = success && wal_io->status >= 0
 					? SPDK_BDEV_IO_STATUS_SUCCESS
 					: SPDK_BDEV_IO_STATUS_FAILED;
 
@@ -517,7 +517,7 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 	wal_io->remaining_base_bdev_io = 0;
 	read_cur = read_begin;
 
-	while (read_cur != read_end) {
+	while (read_cur != read_end + 1) {
 		while (bn && !wal_bdev_is_valid_entry(wal_bdev, bn->ele)) {
 			bn = bn->level[0].forward;
 		}
@@ -539,7 +539,7 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 				wal_bdev_read_request_error(ret, wal_io, &wal_bdev->core_bdev_info, wal_bdev->core_channel);
 				return;
 			}
-			read_cur = tmp;
+			read_cur = tmp + 1;
 			continue;
 		}
 
@@ -556,7 +556,7 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 				wal_bdev_read_request_error(ret, wal_io, &wal_bdev->log_bdev_info, wal_bdev->log_channel);
 				return;
 			}
-			read_cur = tmp;
+			read_cur = tmp + 1;
 			bn = bn->level[0].forward;
 			continue;
 		}
