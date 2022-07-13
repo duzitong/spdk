@@ -106,29 +106,29 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 
 	assert(wal_bdev != NULL);
 	assert(wal_bdev->state == WAL_BDEV_STATE_ONLINE);
-
-	wal_ch->log_channel = spdk_bdev_get_io_channel(wal_bdev->log_bdev_info.desc);
-	if (!wal_ch->log_channel) {
-		SPDK_ERRLOG("Unable to create io channel for log bdev\n");
-		return -ENOMEM;
-	}
-	
-	wal_ch->core_channel = spdk_bdev_get_io_channel(wal_bdev->core_bdev_info.desc);
-	if (!wal_ch->core_channel) {
-		spdk_put_io_channel(wal_ch->log_channel);
-		SPDK_ERRLOG("Unable to create io channel for core bdev\n");
-		return -ENOMEM;
-	}
-
-	wal_ch->wal_bdev = wal_bdev;
 	pthread_mutex_lock(&wal_bdev->mutex);
-	if (!wal_bdev->open_thread_set) {
-		wal_bdev->open_thread = spdk_get_thread();
+	if (!wal_bdev->open_thread == NULL) {
+		wal_ch->log_channel = spdk_bdev_get_io_channel(wal_bdev->log_bdev_info.desc);
+		if (!wal_ch->log_channel) {
+			SPDK_ERRLOG("Unable to create io channel for log bdev\n");
+			return -ENOMEM;
+		}
+		
+		wal_ch->core_channel = spdk_bdev_get_io_channel(wal_bdev->core_bdev_info.desc);
+		if (!wal_ch->core_channel) {
+			spdk_put_io_channel(wal_ch->log_channel);
+			SPDK_ERRLOG("Unable to create io channel for core bdev\n");
+			return -ENOMEM;
+		}
+
+		wal_ch->wal_bdev = wal_bdev;
+		
 		wal_ch->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_ch, 50);
 		wal_ch->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_bdev, 50);
 		wal_ch->stat_poller = SPDK_POLLER_REGISTER(wal_bdev_stat_report, wal_bdev, 30*1000*1000);
+
+		wal_bdev->open_thread = spdk_get_thread();
 	}
-	wal_bdev->open_thread_set = true;
 	pthread_mutex_unlock(&wal_bdev->mutex);
 
 	return 0;
@@ -1175,6 +1175,8 @@ wal_bdev_configure(struct wal_bdev *wal_bdev)
 	wal_bdev_gen = &wal_bdev->bdev;
 
 	wal_bdev->state = WAL_BDEV_STATE_ONLINE;
+	
+	pthread_mutex_init(&wal_bdev->mutex, NULL);
 
 	SPDK_DEBUGLOG(bdev_wal, "io device register %p\n", wal_bdev);
 	SPDK_DEBUGLOG(bdev_wal, "blockcnt %" PRIu64 ", blocklen %u\n",
