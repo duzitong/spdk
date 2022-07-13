@@ -35,6 +35,7 @@
 #define SPDK_BDEV_WAL_INTERNAL_H
 
 #include "spdk/bdev_module.h"
+#include "spdk/env.h"
 #include "spdk/thread.h"
 #include "spdk/trace.h"
 #include "spdk_internal/trace_defs.h"
@@ -112,7 +113,7 @@ struct wal_bdev_io {
 	struct spdk_bdev_io	*orig_io;
 
 	/* the original thread */
-	struct spdk_bdev_io	*orig_thread;
+	struct spdk_thread	*orig_thread;
 
 	/* save for completion on orig thread */
 	enum spdk_bdev_io_status status;
@@ -166,7 +167,28 @@ struct wal_bdev {
 	/* mutex to set thread and pollers */
 	pthread_mutex_t			mutex;
 
-	bool					open_thread_set;
+	uint32_t	channel_count;
+
+	/* IO channel of log bdev */
+	struct spdk_io_channel	*log_channel;
+
+	/* IO channel of core bdev */
+	struct spdk_io_channel  *core_channel;
+
+	/* poller to move data from log bdev to core bdev */
+	struct spdk_poller		*mover_poller;
+
+	/* poller to clean index */
+	struct spdk_poller		*cleaner_poller;
+
+	/* poller to report stat */
+	struct spdk_poller		*stat_poller;
+
+	/* bsl node mempool */
+	struct spdk_mempool		*bsl_node_pool;
+
+	/* bstat mempool */
+	struct spdk_mempool		*bstat_pool;
 
 	/* sequence id */
 	uint64_t	seq;
@@ -219,8 +241,6 @@ struct wal_log_info {
 
 struct wal_mover_context {
 	struct wal_bdev				*bdev;
-
-	struct wal_bdev_io_channel	*ch;
 
 	struct wal_metadata 		*metadata;
 
@@ -276,21 +296,6 @@ struct wal_config {
 struct wal_bdev_io_channel {
 	/* wal bdev */
 	struct wal_bdev			*wal_bdev;
-
-	/* IO channel of log bdev */
-	struct spdk_io_channel	*log_channel;
-
-	/* IO channel of core bdev */
-	struct spdk_io_channel  *core_channel;
-
-	/* poller to move data from log bdev to core bdev */
-	struct spdk_poller		*mover_poller;
-
-	/* poller to clean index */
-	struct spdk_poller		*cleaner_poller;
-
-	/* poller to report stat */
-	struct spdk_poller		*stat_poller;
 };
 
 /* TAIL heads for various wal bdev lists */

@@ -107,28 +107,31 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 	assert(wal_bdev != NULL);
 	assert(wal_bdev->state == WAL_BDEV_STATE_ONLINE);
 
-	wal_ch->log_channel = spdk_bdev_get_io_channel(wal_bdev->log_bdev_info.desc);
-	if (!wal_ch->log_channel) {
-		SPDK_ERRLOG("Unable to create io channel for log bdev\n");
-		return -ENOMEM;
-	}
-	
-	wal_ch->core_channel = spdk_bdev_get_io_channel(wal_bdev->core_bdev_info.desc);
-	if (!wal_ch->core_channel) {
-		spdk_put_io_channel(wal_ch->log_channel);
-		SPDK_ERRLOG("Unable to create io channel for core bdev\n");
-		return -ENOMEM;
-	}
-
 	wal_ch->wal_bdev = wal_bdev;
+
 	pthread_mutex_lock(&wal_bdev->mutex);
-	if (!wal_bdev->open_thread_set) {
+	if (wal_bdev->channel_count == 0) {
+		wal_bdev->log_channel = spdk_bdev_get_io_channel(wal_bdev->log_bdev_info.desc);
+		if (!wal_bdev->log_channel) {
+			SPDK_ERRLOG("Unable to create io channel for log bdev\n");
+			return -ENOMEM;
+		}
+		
+		wal_bdev->core_channel = spdk_bdev_get_io_channel(wal_bdev->core_bdev_info.desc);
+		if (!wal_bdev->core_channel) {
+			spdk_put_io_channel(wal_bdev->log_channel);
+			SPDK_ERRLOG("Unable to create io channel for core bdev\n");
+			return -ENOMEM;
+		}
+
+		
+		wal_bdev->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_bdev, 50);
+		wal_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_bdev, 50);
+		wal_bdev->stat_poller = SPDK_POLLER_REGISTER(wal_bdev_stat_report, wal_bdev, 30*1000*1000);
+
 		wal_bdev->open_thread = spdk_get_thread();
-		wal_ch->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_ch, 50);
-		wal_ch->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_bdev, 50);
-		wal_ch->stat_poller = SPDK_POLLER_REGISTER(wal_bdev_stat_report, wal_bdev, 30*1000*1000);
 	}
-	wal_bdev->open_thread_set = true;
+	wal_bdev->channel_count++;
 	pthread_mutex_unlock(&wal_bdev->mutex);
 
 	return 0;
@@ -148,20 +151,25 @@ static void
 wal_bdev_destroy_cb(void *io_device, void *ctx_buf)
 {
 	struct wal_bdev_io_channel *wal_ch = ctx_buf;
+	struct wal_bdev            *wal_bdev = wal_ch->wal_bdev;
 
 	SPDK_DEBUGLOG(bdev_wal, "wal_bdev_destroy_cb\n");
 
 	assert(wal_ch != NULL);
-	assert(wal_ch->log_channel);
-	assert(wal_ch->core_channel);
-	spdk_put_io_channel(wal_ch->log_channel);
-	spdk_put_io_channel(wal_ch->core_channel);
-	wal_ch->log_channel = NULL;
-	wal_ch->core_channel = NULL;
 
-	spdk_poller_unregister(&wal_ch->mover_poller);
-	spdk_poller_unregister(&wal_ch->cleaner_poller);
-	spdk_poller_unregister(&wal_ch->stat_poller);
+	pthread_mutex_lock(&wal_bdev->mutex);
+	wal_bdev->channel_count--;
+	if (wal_bdev->channel_count == 0) {
+		spdk_put_io_channel(wal_bdev->log_channel);
+		spdk_put_io_channel(wal_bdev->core_channel);
+		wal_bdev->log_channel = NULL;
+		wal_bdev->core_channel = NULL;
+
+		spdk_poller_unregister(&wal_bdev->mover_poller);
+		spdk_poller_unregister(&wal_bdev->cleaner_poller);
+		spdk_poller_unregister(&wal_bdev->stat_poller);
+	}
+	pthread_mutex_unlock(&wal_bdev->mutex);
 }
 
 /*
@@ -397,7 +405,7 @@ wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *c
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSTAT_CREATE_START, 0, 0, (uintptr_t)wal_io);
 	struct bstat *bstat = bstatBdevCreate(begin, end, wal_io->metadata->round,
-										bdev_io->u.bdev.offset_blocks+1);
+										bdev_io->u.bdev.offset_blocks+1, wal_io->wal_bdev->bstat_pool);
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSTAT_CREATE_END, 0, 0, (uintptr_t)wal_io);
 	
 	
@@ -474,7 +482,7 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 	if (bn && bn->begin <= read_begin && bn->end >= read_end 
         && wal_bdev_is_valid_entry(wal_bdev, bn->ele)) {
         // one entry in log bdev
-		ret = spdk_bdev_readv_blocks(wal_bdev->log_bdev_info.desc, wal_io->wal_ch->log_channel,
+		ret = spdk_bdev_readv_blocks(wal_bdev->log_bdev_info.desc, wal_bdev->log_channel,
                         bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
                         bn->ele->l.bdevOffset + read_begin - bn->ele->begin, bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift,
                         wal_base_bdev_read_complete, wal_io);
@@ -484,7 +492,7 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 			SPDK_NOTICELOG("bn begin: %ld, end: %ld\n.", bn->begin, bn->end);
 			SPDK_NOTICELOG("bn ele begin: %ld, end: %ld\n.", bn->ele->begin, bn->ele->end);
 			SPDK_NOTICELOG("read from log bdev offset: %ld, delta: %ld\n.", bn->ele->l.bdevOffset, read_begin - bn->ele->begin);
-			wal_bdev_read_request_error(ret, wal_io, &wal_bdev->log_bdev_info, wal_io->wal_ch->log_channel);
+			wal_bdev_read_request_error(ret, wal_io, &wal_bdev->log_bdev_info, wal_bdev->log_channel);
             return;
         }
         return;
@@ -492,13 +500,13 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 
     if (!bn || bn->begin > read_end) {
         // not found in index
-        ret = spdk_bdev_readv_blocks(wal_bdev->core_bdev_info.desc, wal_io->wal_ch->core_channel,
+        ret = spdk_bdev_readv_blocks(wal_bdev->core_bdev_info.desc, wal_bdev->core_channel,
                         bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
                         bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, wal_base_bdev_read_complete,
                         wal_io);
 
         if (ret != 0) {
-			wal_bdev_read_request_error(ret, wal_io, &wal_bdev->core_bdev_info, wal_io->wal_ch->core_channel);
+			wal_bdev_read_request_error(ret, wal_io, &wal_bdev->core_bdev_info, wal_bdev->core_channel);
             return;
         }
         return;
@@ -522,13 +530,13 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 			}
 
 			wal_io->remaining_base_bdev_io++;
-			ret = spdk_bdev_read_blocks(wal_bdev->core_bdev_info.desc, wal_io->wal_ch->core_channel,
+			ret = spdk_bdev_read_blocks(wal_bdev->core_bdev_info.desc, wal_bdev->core_channel,
 							wal_io->read_buf + (read_cur - read_begin) * wal_bdev->bdev.blocklen,
 							read_cur, tmp - read_cur + 1, wal_base_bdev_read_complete_part,
 							wal_io);
 
 			if (ret != 0) {
-				wal_bdev_read_request_error(ret, wal_io, &wal_bdev->core_bdev_info, wal_io->wal_ch->core_channel);
+				wal_bdev_read_request_error(ret, wal_io, &wal_bdev->core_bdev_info, wal_bdev->core_channel);
 				return;
 			}
 			read_cur = tmp;
@@ -539,13 +547,13 @@ wal_bdev_submit_read_request(struct wal_bdev_io *wal_io)
 			tmp = bn->end > read_end ? read_end : bn->end;
 			
 			wal_io->remaining_base_bdev_io++;
-			ret = spdk_bdev_read_blocks(wal_bdev->log_bdev_info.desc, wal_io->wal_ch->log_channel,
+			ret = spdk_bdev_read_blocks(wal_bdev->log_bdev_info.desc, wal_bdev->log_channel,
 							wal_io->read_buf + (read_cur - read_begin) * wal_bdev->bdev.blocklen,
 							bn->ele->l.bdevOffset + read_cur - bn->ele->begin, tmp - read_cur + 1, wal_base_bdev_read_complete_part,
 							wal_io);
 
 			if (ret != 0) {
-				wal_bdev_read_request_error(ret, wal_io, &wal_bdev->log_bdev_info, wal_io->wal_ch->log_channel);
+				wal_bdev_read_request_error(ret, wal_io, &wal_bdev->log_bdev_info, wal_bdev->log_channel);
 				return;
 			}
 			read_cur = tmp;
@@ -590,7 +598,7 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	wal_bdev = wal_io->wal_bdev;
 
 	base_info = &wal_bdev->log_bdev_info;
-	base_ch = wal_io->wal_ch->log_channel;
+	base_ch = wal_bdev->log_channel;
 
 	// use 1 block in log device for metadata
 	metadata = (struct wal_metadata *) spdk_zmalloc(wal_bdev->log_bdev_info.bdev->blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
@@ -1175,6 +1183,8 @@ wal_bdev_configure(struct wal_bdev *wal_bdev)
 	wal_bdev_gen = &wal_bdev->bdev;
 
 	wal_bdev->state = WAL_BDEV_STATE_ONLINE;
+	
+	pthread_mutex_init(&wal_bdev->mutex, NULL);
 
 	SPDK_DEBUGLOG(bdev_wal, "io device register %p\n", wal_bdev);
 	SPDK_DEBUGLOG(bdev_wal, "blockcnt %" PRIu64 ", blocklen %u\n",
@@ -1455,8 +1465,12 @@ static int
 wal_bdev_start(struct wal_bdev *wal_bdev)
 {
 	wal_bdev->log_max = wal_bdev->log_bdev_info.bdev->blockcnt - 2;  // last block used to track log head
-	wal_bdev->bsl = bslCreate();
-	wal_bdev->bslfn = bslfnCreate();
+
+	wal_bdev->bstat_pool = spdk_mempool_create("WAL_BSTAT_POOL", wal_bdev->bdev.blockcnt << 3, sizeof(bstat), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
+	wal_bdev->bsl_node_pool = spdk_mempool_create("WAL_BSL_NODE_POOL", wal_bdev->bdev.blockcnt << 3, sizeof(bskiplistNode), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
+
+	wal_bdev->bsl = bslCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
+	wal_bdev->bslfn = bslfnCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
 	// TODO: recover
 	wal_bdev->log_head = 0;
 	wal_bdev->log_tail = 0;
@@ -1505,8 +1519,7 @@ wal_bdev_examine(struct spdk_bdev *bdev)
 static int
 wal_bdev_mover(void *ctx)
 {
-	struct wal_bdev_io_channel *ch = ctx;
-	struct wal_bdev *bdev = ch->wal_bdev;
+	struct wal_bdev *bdev = ctx;
 	struct wal_metadata *metadata;
 	int ret;
 
@@ -1524,9 +1537,8 @@ wal_bdev_mover(void *ctx)
 
 	struct wal_mover_context *mover_ctx = calloc(1, sizeof(struct wal_mover_context));
 	mover_ctx->bdev = bdev;
-	mover_ctx->ch = ch;
 	mover_ctx->metadata = metadata;
-	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, ch->log_channel, metadata, bdev->log_head, 1, 
+	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, bdev->log_channel, metadata, bdev->log_head, 1, 
 									wal_bdev_mover_read_data, mover_ctx);
 	if (ret) {
 		SPDK_ERRLOG("Failed to read metadata during move: %d.\n", ret);
@@ -1540,7 +1552,6 @@ static void
 wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 {
 	struct wal_mover_context *mover_ctx = ctx;
-	struct wal_bdev_io_channel *ch = mover_ctx->ch;
 	struct wal_bdev *bdev = mover_ctx->bdev;
 	struct wal_metadata *metadata = mover_ctx->metadata;
 	int ret;
@@ -1565,7 +1576,7 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 								NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 	
 	mover_ctx->data = data;
-	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, ch->log_channel, data, bdev->log_head+1, metadata->length, 
+	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, bdev->log_channel, data, bdev->log_head+1, metadata->length, 
 									wal_bdev_mover_write_data, mover_ctx);
 	if (ret) {
 		SPDK_ERRLOG("Failed to read data during move: %d.\n", ret);
@@ -1577,7 +1588,6 @@ static void
 wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 {
 	struct wal_mover_context *mover_ctx = ctx;
-	struct wal_bdev_io_channel *ch = mover_ctx->ch;
 	struct wal_bdev *bdev = mover_ctx->bdev;
 	struct wal_metadata *metadata = mover_ctx->metadata;
 	int ret;
@@ -1590,7 +1600,7 @@ wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 		return;
 	}
 
-	ret = spdk_bdev_write_blocks(bdev->core_bdev_info.desc, ch->core_channel, mover_ctx->data,
+	ret = spdk_bdev_write_blocks(bdev->core_bdev_info.desc, bdev->core_channel, mover_ctx->data,
 									metadata->core_offset, metadata->core_length,
 									wal_bdev_mover_update_head, mover_ctx);
 	if (ret) {
@@ -1603,7 +1613,6 @@ static void
 wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 {
 	struct wal_mover_context *mover_ctx = ctx;
-	struct wal_bdev_io_channel *ch = mover_ctx->ch;
 	struct wal_bdev *bdev = mover_ctx->bdev;
 	struct wal_metadata *metadata = mover_ctx->metadata;
 	int ret;
@@ -1622,7 +1631,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 	info->head = metadata->next_offset;
 	mover_ctx->info = info;
 
-	ret = spdk_bdev_write_blocks(bdev->log_bdev_info.desc, ch->log_channel, info,
+	ret = spdk_bdev_write_blocks(bdev->log_bdev_info.desc, bdev->log_channel, info,
 									bdev->log_max, 1,
 									wal_bdev_mover_clean, mover_ctx);
 	if (ret) {

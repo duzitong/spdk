@@ -2,17 +2,17 @@
 #include "spdk/stdinc.h"
 #include "spdk/env.h"
 
-bstat *bstatClone(bstat *pb);
+bstat *bstatClone(bstat *pb, struct spdk_mempool *pool);
 int bslRandomLevel(void);
-bskiplistNode *bslCreateNode(int level, long begin, long end, bstat *ele);
+bskiplistNode *bslCreateNode(int level, long begin, long end, bstat *ele, struct spdk_mempool *pool);
 void bslPrintNode(bskiplistNode *bsln);
-void bslFreeNode(bskiplistNode *bsln);
+void bslFreeNode(bskiplistNode *bsln, struct spdk_mempool *bstat_pool, struct spdk_mempool *node_pool);
 void bslAdjustNodeBegin(bskiplistNode *bn, long end);
 void bslAdjustNodeEnd(bskiplistNode *bn, long begin);
 
 
-bstat *bstatBdevCreate(long begin, long end, long round, long unsigned int bdevOffset) {
-    bstat *pb = calloc(1, sizeof(*pb));
+bstat *bstatBdevCreate(long begin, long end, long round, long unsigned int bdevOffset, struct spdk_mempool *pool) {
+    bstat *pb = spdk_mempool_get(pool);
     pb->begin = begin;
     pb->end = end;
     pb->round = round;
@@ -21,8 +21,8 @@ bstat *bstatBdevCreate(long begin, long end, long round, long unsigned int bdevO
     return pb;
 }
 
-bstat *bstatMemCreate(long begin, long end, long round, void *memPointer) {
-    bstat *pb = calloc(1, sizeof(*pb));
+bstat *bstatMemCreate(long begin, long end, long round, void *memPointer, struct spdk_mempool *pool) {
+    bstat *pb = spdk_mempool_get(pool);
     pb->begin = begin;
     pb->end = end;
     pb->round = round;
@@ -31,8 +31,8 @@ bstat *bstatMemCreate(long begin, long end, long round, void *memPointer) {
     return pb;
 }
 
-bstat *bstatClone(bstat *pb) {
-    bstat *clone = calloc(1, sizeof(*clone));
+bstat *bstatClone(bstat *pb, struct spdk_mempool *pool) {
+    bstat *clone = spdk_mempool_get(pool);
     clone->begin = pb->begin;
     clone->end = pb->end;
     clone->type = pb->type;
@@ -53,9 +53,8 @@ int bslRandomLevel(void) {
 }
 
 /* Create a skiplist node with the specified number of levels. */
-bskiplistNode *bslCreateNode(int level, long begin, long end, bstat *ele) {
-    bskiplistNode *bn =
-        calloc(1, sizeof(*bn)+level*sizeof(struct bskiplistLevel));
+bskiplistNode *bslCreateNode(int level, long begin, long end, bstat *ele, struct spdk_mempool *pool) {
+    bskiplistNode *bn = spdk_mempool_get(pool);
     bn->begin = begin;
     bn->end = end;
     bn->ele = ele;
@@ -64,23 +63,27 @@ bskiplistNode *bslCreateNode(int level, long begin, long end, bstat *ele) {
 }
 
 /* Create a new skiplist. */
-bskiplist *bslCreate(void) {
+bskiplist *bslCreate(struct spdk_mempool *node_pool, struct spdk_mempool *bstat_pool) {
     int j;
     bskiplist *bsl;
 
     bsl = calloc(1, sizeof(*bsl));
     bsl->level = 1;
-    bsl->header = bslCreateNode(BSKIPLIST_MAXLEVEL,-1, -1, NULL);
+    bsl->node_pool = node_pool;
+    bsl->bstat_pool = bstat_pool;
+    bsl->header = bslCreateNode(BSKIPLIST_MAXLEVEL,-1, -1, NULL, node_pool);
     for (j = 0; j < BSKIPLIST_MAXLEVEL; j++) {
         bsl->header->level[j].forward = NULL;
     }
     return bsl;
 }
 
-bskiplistFreeNodes *bslfnCreate(void) {
+bskiplistFreeNodes *bslfnCreate(struct spdk_mempool *node_pool, struct spdk_mempool *bstat_pool) {
     bskiplistFreeNodes *bslfn;
     bslfn = calloc(1, sizeof(*bslfn));
-    bslfn->header = bslfn->tail = bslCreateNode(BSKIPLIST_MAXLEVEL,-1, -1, NULL);
+    bslfn->node_pool = node_pool;
+    bslfn->bstat_pool = bstat_pool;
+    bslfn->header = bslfn->tail = bslCreateNode(BSKIPLIST_MAXLEVEL,-1, -1, NULL, node_pool);
     bslfn->header->level[0].forward = NULL;
     return bslfn;
 }
@@ -116,11 +119,11 @@ void bslPrintNode(bskiplistNode *bsln) {
     }
 }
 
-void bslFreeNode(bskiplistNode *bsln) {
+void bslFreeNode(bskiplistNode *bsln, struct spdk_mempool *bstat_pool, struct spdk_mempool *node_pool) {
     if (bsln->ele->type == LOCATION_MEM)
-        free(bsln->ele->l.memPointer);
-    free(bsln->ele);
-    free(bsln);
+        spdk_free(bsln->ele->l.memPointer);
+    spdk_mempool_put(bstat_pool, bsln->ele);
+    spdk_mempool_put(node_pool, bsln);
 }
 
 void bslfnPrint(bskiplistFreeNodes *bslfn) {
@@ -142,7 +145,7 @@ int bslfnFree(bskiplistFreeNodes *bslfn, int max) {
     x = bslfn->header->level[0].forward;
     while (x && i < max && x != bslfn->tail) {
         bslfn->header->level[0].forward = x->level[0].forward;
-        bslFreeNode(x);
+        bslFreeNode(x, bslfn->bstat_pool, bslfn->node_pool);
         x = bslfn->header->level[0].forward;
         i++;
     }
@@ -195,11 +198,11 @@ bskiplistNode *bslInsert(bskiplist *bsl, long begin, long end, bstat *ele, bskip
         bsl->level = level;
     }
 
-    x = bslCreateNode(level,begin,end,ele);
+    x = bslCreateNode(level, begin, end, ele, bsl->node_pool);
 
     if (updatee[0]->level[0].forward == updateb[0]) {
         // in updateb[0] scope, split to 3 nodes
-        y = bslCreateNode(updateb[0]->height, end + 1, updateb[0]->end, bstatClone(updateb[0]->ele));
+        y = bslCreateNode(updateb[0]->height, end + 1, updateb[0]->end, bstatClone(updateb[0]->ele, bsl->bstat_pool), bsl->node_pool);
         updateb[0]->end = begin - 1;
 
         if (level < updateb[0]->height) {
