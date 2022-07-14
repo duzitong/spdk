@@ -53,9 +53,13 @@ static struct rdma_handshake {
 	uint32_t rkey;
 };
 
+// should be enough for IPv4
+char addr_buf[16];
+char port_buf[8];
 
 int main(int argc, char **argv)
 {
+	int rc;
 	struct spdk_env_opts opts;
 
 	spdk_env_opts_init(&opts);
@@ -63,6 +67,24 @@ int main(int argc, char **argv)
 	opts.name = "persist";
 	if (spdk_env_init(&opts) < 0) {
 		fprintf(stderr, "Unable to initialize SPDK env\n");
+		return 1;
+	}
+
+	int op;
+
+	while ((op = getopt(argc, argv, "a:p:")) != -1) {
+		switch (op) {
+			case 'a':
+				memcpy(addr_buf, optarg, strlen(optarg));
+				break;
+			case 'p':
+				memcpy(port_buf, optarg, strlen(optarg));
+				break;
+		}
+	}
+
+	if (!strlen(addr_buf) || !strlen(port_buf)) {
+		printf("not enough arguments.\n");
 		return 1;
 	}
 
@@ -80,20 +102,21 @@ int main(int argc, char **argv)
 	struct rdma_event_channel* rdma_channel = rdma_create_event_channel();
 
 	struct rdma_cm_id* cm_id = NULL;
-	
-	assert(rdma_create_id(rdma_channel, &cm_id, NULL, RDMA_PS_TCP) == 0);
+	rc = rdma_create_id(rdma_channel, &cm_id, NULL, RDMA_PS_TCP);
+	assert(rc == 0);
 
 	struct sockaddr_in addr;
 	struct addrinfo hints = {};
 	struct addrinfo* addr_res = NULL;
 	hints.ai_family = AF_INET;
 	hints.ai_flags = AI_PASSIVE;
-
-	assert(getaddrinfo("10.156.73.242", "4420", &hints, &addr_res) == 0);
+	rc = getaddrinfo(addr_buf, port_buf, &hints, &addr_res);
+	assert(rc == 0);
 	memcpy(&addr, addr_res->ai_addr, sizeof(addr));
-
-	assert(rdma_bind_addr(cm_id, (struct sockaddr*)&addr) == 0);
-	assert(rdma_listen(cm_id, 1) == 0);
+	rc = rdma_bind_addr(cm_id, (struct sockaddr*)&addr);
+	assert(rc == 0);
+	rc = rdma_listen(cm_id, 1);
+	assert(rc == 0);
 
 	printf("listening on port %d\n", ntohs(addr.sin_port));
 
@@ -140,8 +163,8 @@ int main(int argc, char **argv)
 	int err = errno;
 	printf("err = %d\n", err);
 	struct rdma_cm_id* cm_id_2 = connect_event->id;
-
-	assert(rdma_ack_cm_event(connect_event) == 0);
+	rc = rdma_ack_cm_event(connect_event);
+	assert(rc == 0);
 	printf("acked conn request\n");
 
 	struct ibv_recv_wr wr, *bad_wr = NULL;
@@ -160,10 +183,11 @@ int main(int argc, char **argv)
 	sge.addr = (uint64_t)(handshake + 1);
 	sge.length = sizeof(struct rdma_handshake);
 	sge.lkey = ibv_mr->lkey;
-
-	assert(ibv_post_recv(cm_id_2->qp, &wr, &bad_wr) == 0);
+	rc = ibv_post_recv(cm_id_2->qp, &wr, &bad_wr);
+	assert(rc == 0);
 	struct rdma_conn_param cm_param;
-	assert(rdma_accept(cm_id_2, &cm_param) == 0);
+	rc = rdma_accept(cm_id_2, &cm_param);
+	assert(rc == 0);
 
 	rdma_get_cm_event(rdma_channel, &established_event);
 	if (established_event->event != RDMA_CM_EVENT_ESTABLISHED) {
@@ -185,8 +209,9 @@ int main(int argc, char **argv)
 	send_sge.addr = (uint64_t)handshake;
 	send_sge.length = sizeof(struct rdma_handshake);
 	send_sge.lkey = ibv_mr->lkey;
-
-	assert(ibv_post_send(cm_id_2->qp, &send_wr, &bad_send_wr) == 0);
+	
+	rc = ibv_post_send(cm_id_2->qp, &send_wr, &bad_send_wr);
+	assert(rc == 0);
 	struct ibv_wc wc;
 	bool handshake_send_cpl = false;
 	bool handshake_recv_cpl = false;

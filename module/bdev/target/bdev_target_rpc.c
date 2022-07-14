@@ -42,6 +42,8 @@
 struct rpc_construct_target {
 	char *name;
 	char *uuid;
+	char *ip;
+	char *port;
 	uint64_t num_blocks;
 	uint32_t block_size;
 	uint32_t optimal_io_boundary;
@@ -52,11 +54,15 @@ free_rpc_construct_target(struct rpc_construct_target *r)
 {
 	free(r->name);
 	free(r->uuid);
+	free(r->ip);
+	free(r->port);
 }
 
 static const struct spdk_json_object_decoder rpc_construct_target_decoders[] = {
 	{"name", offsetof(struct rpc_construct_target, name), spdk_json_decode_string, true},
 	{"uuid", offsetof(struct rpc_construct_target, uuid), spdk_json_decode_string, true},
+	{"ip", offsetof(struct rpc_construct_target, ip), spdk_json_decode_string, true},
+	{"port", offsetof(struct rpc_construct_target, port), spdk_json_decode_string, true},
 	{"num_blocks", offsetof(struct rpc_construct_target, num_blocks), spdk_json_decode_uint64},
 	{"block_size", offsetof(struct rpc_construct_target, block_size), spdk_json_decode_uint32},
 	{"optimal_io_boundary", offsetof(struct rpc_construct_target, optimal_io_boundary), spdk_json_decode_uint32, true},
@@ -102,7 +108,7 @@ rpc_bdev_target_create(struct spdk_jsonrpc_request *request,
 		uuid = &decoded_uuid;
 	}
 
-	rc = create_target_disk(&bdev, req.name, uuid, req.num_blocks, req.block_size,
+	rc = create_target_disk(&bdev, req.name, uuid, req.ip, req.port, req.num_blocks, req.block_size,
 				req.optimal_io_boundary);
 	if (rc) {
 		spdk_jsonrpc_send_error_response(request, rc, spdk_strerror(-rc));
