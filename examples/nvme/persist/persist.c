@@ -135,7 +135,7 @@ int main(int argc, char **argv)
 	struct ibv_pd* ibv_pd = ibv_alloc_pd(ibv_context);
 	struct ibv_mr* ibv_mr = ibv_reg_mr(ibv_pd,
 		circular_buffer,
-		BUFFER_SIZE,
+		BUFFER_SIZE + 2 * sizeof(struct rdma_handshake),
 		IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
 
 	struct ibv_cq* ibv_cq = ibv_create_cq(ibv_context, 4096, NULL, NULL, 0);
@@ -187,6 +187,10 @@ int main(int argc, char **argv)
 	assert(rc == 0);
 	struct rdma_conn_param cm_param;
 	rc = rdma_accept(cm_id_2, &cm_param);
+
+	if (rc != 0) {
+		printf("accept err = %d\n", err);
+	}
 	assert(rc == 0);
 
 	rdma_get_cm_event(rdma_channel, &established_event);

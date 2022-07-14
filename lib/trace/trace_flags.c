@@ -403,7 +403,6 @@ spdk_trace_add_register_fn(struct spdk_trace_register_fn *reg_fn)
 		if (reg_fn->tgroup_id == _reg_fn->tgroup_id) {
 			SPDK_ERRLOG("group %d, %s has duplicate tgroup_id with %s\n",
 				    reg_fn->tgroup_id, reg_fn->name, _reg_fn->name);
-			assert(false);
 			return;
 		}
 

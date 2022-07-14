@@ -598,7 +598,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	struct ibv_pd* ibv_pd = ibv_alloc_pd(ibv_context);
 	struct ibv_mr* ibv_mr = ibv_reg_mr(ibv_pd,
 		mdisk->malloc_buf,
-		num_blocks * block_size,
+		num_blocks * block_size + 2 * sizeof(struct rdma_handshake),
 		IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
 
 	struct ibv_cq* ibv_cq = ibv_create_cq(ibv_context, 4096, NULL, NULL, 0);
@@ -613,8 +613,8 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 		.recv_cq = ibv_cq,
 		.qp_type = IBV_QPT_RC,
 		.cap = {
-			.max_send_sge = 16,
-			.max_send_wr = 16,
+			.max_send_sge = 1,
+			.max_send_wr = 1,
 			.max_recv_sge = 1,
 			.max_recv_wr = 1,
 		}
