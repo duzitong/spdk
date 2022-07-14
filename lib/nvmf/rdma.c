@@ -1418,7 +1418,6 @@ nvmf_rdma_fill_wr_sgl(struct spdk_nvmf_rdma_poll_group *rgroup,
 		      struct ibv_send_wr *wr,
 		      uint32_t total_length)
 {
-	SPDK_ERRLOG("enter\n");
 	struct spdk_rdma_memory_translation mem_translation;
 	struct ibv_sge	*sg_ele;
 	struct iovec *iov;
