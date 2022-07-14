@@ -570,7 +570,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	hints.ai_family = AF_INET;
 	hints.ai_flags = AI_PASSIVE;
 
-	getaddrinfo("10.156.73.242", "4420", &hints, &addr_res);
+	getaddrinfo(ip, port, &hints, &addr_res);
 	memcpy(&addr, addr_res->ai_addr, sizeof(addr));
 
 	rdma_resolve_addr(cm_id, NULL, addr_res->ai_addr, 1000);
