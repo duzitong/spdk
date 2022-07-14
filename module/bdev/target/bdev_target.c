@@ -69,16 +69,28 @@ struct target_disk {
 	void				*malloc_buf;
 	// real disk
 	// struct target_ns_entry ns_entry;
+	struct rdma_cm_id* cm_id;
+	struct ibv_mr* mr;
+	struct ibv_cq* cq;
+	struct rdma_handshake* remote_handshake;
 
 	TAILQ_ENTRY(target_disk)	link;
 };
 
-struct target_metadata {
-	uint32_t seq_num;
-	// offset in the circular buffer, to provide a same memory view for all
-	// data nodes
-	uint32_t buffer_offset;
-	uint32_t checksum;
+struct wal_metadata {
+	uint64_t	version;
+	
+	uint64_t	seq;
+
+	uint64_t	next_offset;
+
+	uint64_t	length;
+
+	uint64_t	core_offset;
+
+	uint64_t	core_length;
+
+	uint64_t	round;
 };
 
 struct target_task {
@@ -90,7 +102,7 @@ struct target_task {
 struct target_channel {
 	struct spdk_io_channel		*accel_channel;
 	struct spdk_poller		*completion_poller;
-	struct spdk_poller* background_poller;
+	struct spdk_poller* rdma_poller;
 	TAILQ_HEAD(, target_task)	completed_tasks;
 };
 
@@ -200,32 +212,28 @@ bdev_target_readv(struct target_disk *mdisk, struct spdk_io_channel *ch,
 	SPDK_DEBUGLOG(bdev_target, "read %zu bytes from offset %#" PRIx64 ", iovcnt=%d\n",
 		      len, offset, iovcnt);
 
-	task->status = SPDK_BDEV_IO_STATUS_SUCCESS;
-	task->num_outstanding = 0;
-
-	for (i = 0; i < iovcnt; i++) {
-		SPDK_DEBUGLOG(bdev_target, "submit read task\n");
-		task->num_outstanding++;
-		res = spdk_accel_submit_copy(ch, iov[i].iov_base,
-					     src, iov[i].iov_len, 0, target_done, task);
-
-		if (res != 0) {
-			target_done(task, res);
-			break;
-		}
-
+	// simply memcpy from local memory
+	// need to use RDMA read if the memory is from Application.
+	for (int i = 0; i < iovcnt; i++) {
+		memcpy(iov[i].iov_base, src, iov[i].iov_len);
 		src += iov[i].iov_len;
-		len -= iov[i].iov_len;
 	}
+
+	spdk_bdev_io_complete(spdk_bdev_io_from_ctx(task), SPDK_BDEV_IO_STATUS_SUCCESS);
 }
 
 static void
-bdev_target_writev(struct target_disk *mdisk, struct spdk_io_channel *ch,
+bdev_target_writev_with_md(struct target_disk *mdisk, struct spdk_io_channel *ch,
 		   struct target_task *task,
-		   struct iovec *iov, int iovcnt, size_t len, uint64_t offset)
+		   struct wal_metadata* md, struct iovec *iov, int iovcnt, size_t len, uint64_t offset)
 {
 	int64_t res = 0;
 	void *dst = mdisk->malloc_buf + offset;
+	// for RDMA write
+	void* rdma_src = dst;
+	void* rdma_dst = mdisk->remote_handshake->base_addr + offset;
+	uint64_t wr_id = (uint64_t)spdk_bdev_io_from_ctx(task);
+	
 	int i;
 
 	if (bdev_target_check_iov_len(iov, iovcnt, len)) {
@@ -237,24 +245,43 @@ bdev_target_writev(struct target_disk *mdisk, struct spdk_io_channel *ch,
 	SPDK_DEBUGLOG(bdev_target, "wrote %zu bytes to offset %#" PRIx64 ", iovcnt=%d\n",
 		      len, offset, iovcnt);
 	
-	SPDK_DEBUGLOG(bdev_target, "write iov[0] = %s\n", (char*)iov[0].iov_base);
-
 	task->status = SPDK_BDEV_IO_STATUS_SUCCESS;
 	task->num_outstanding = 0;
 
+	memcpy(dst, md, mdisk->disk.md_len);
+	dst += mdisk->disk.md_len;
+
 	for (i = 0; i < iovcnt; i++) {
-		SPDK_DEBUGLOG(bdev_target, "submit write task\n");
-		task->num_outstanding++;
-		res = spdk_accel_submit_copy(ch, dst, iov[i].iov_base,
-					     iov[i].iov_len, 0, target_done, task);
+		// SPDK_DEBUGLOG(bdev_target, "submit write task\n");
+		// task->num_outstanding++;
+		// res = spdk_accel_submit_copy(ch, dst, iov[i].iov_base,
+		// 			     iov[i].iov_len, 0, target_done, task);
 
-		if (res != 0) {
-			target_done(task, res);
-			break;
-		}
+		// if (res != 0) {
+		// 	target_done(task, res);
+		// 	break;
+		// }
 
+		// dst += iov[i].iov_len;
+		memcpy(dst, iov[i].iov_base, iov[0].iov_len);
 		dst += iov[i].iov_len;
 	}
+
+	// TODO: RDMA write
+	struct ibv_send_wr wr, *bad_wr = NULL;
+	struct ibv_sge sge;
+	wr.wr_id = wr_id;
+	wr.opcode = IBV_WR_RDMA_WRITE;
+	wr.num_sge = 1;
+	wr.sg_list = &sge;
+	wr.wr.rdma.remote_addr = (uint64_t)rdma_dst;
+	wr.wr.rdma.rkey = mdisk->remote_handshake->rkey;
+
+	sge.addr = (uint64_t)rdma_src;
+	sge.length = len + mdisk->disk.md_len;
+	sge.lkey = mdisk->mr->lkey;
+
+	ibv_post_send(mdisk->cm_id->qp, &wr, &bad_wr);
 }
 
 static int
@@ -281,9 +308,7 @@ static void _log_md(struct spdk_bdev_io* bdev_io) {
 static int _bdev_target_submit_request(struct target_channel *mch, struct spdk_bdev_io *bdev_io)
 {
 	uint32_t block_size = bdev_io->bdev->blocklen;
-	_log_md(bdev_io);
-	struct target_metadata* md = (struct target_metadata*) bdev_io->u.bdev.iovs[0].iov_base;
-	bdev_io->u.bdev.iovs[0].iov_base += TARGET_MD_LEN;
+	// _log_md(bdev_io);
 
 	if (bdev_io->u.bdev.iovs[0].iov_base == NULL) {
 		SPDK_DEBUGLOG(bdev_target, "Received read req where iov_base is null\n");
@@ -316,9 +341,16 @@ static int _bdev_target_submit_request(struct target_channel *mch, struct spdk_b
 		return 0;
 
 	case SPDK_BDEV_IO_TYPE_WRITE:
-		bdev_target_writev((struct target_disk *)bdev_io->bdev->ctxt,
+		if (bdev_io->u.bdev.md_buf == NULL) {
+			SPDK_ERRLOG("write req must have md\n");
+			target_complete_task((struct target_task *)bdev_io->driver_ctx, mch,
+						SPDK_BDEV_IO_STATUS_FAILED);
+			return 0;
+		}
+		bdev_target_writev_with_md((struct target_disk *)bdev_io->bdev->ctxt,
 				   mch->accel_channel,
 				   (struct target_task *)bdev_io->driver_ctx,
+				   bdev_io->u.bdev.md_buf,
 				   bdev_io->u.bdev.iovs,
 				   bdev_io->u.bdev.iovcnt,
 				   bdev_io->u.bdev.num_blocks * block_size,
@@ -439,14 +471,14 @@ static const struct spdk_bdev_fn_table target_fn_table = {
 	.write_config_json	= bdev_target_write_json_config,
 };
 
-static bool
-probe_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
-	 struct spdk_nvme_ctrlr_opts *opts)
-{
-	SPDK_DEBUGLOG(bdev_target, "Attaching to %s\n", trid->traddr);
+// static bool
+// probe_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
+// 	 struct spdk_nvme_ctrlr_opts *opts)
+// {
+// 	SPDK_DEBUGLOG(bdev_target, "Attaching to %s\n", trid->traddr);
 
-	return true;
-}
+// 	return true;
+// }
 
 /*
  * Callback when a nvme controller is returned.
@@ -520,7 +552,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const struct spdk_
 	 * TODO: need to pass a hint so we know which socket to allocate
 	 *  from on multi-socket systems.
 	 */
-	mdisk->malloc_buf = spdk_zmalloc(num_blocks * block_size, 2 * 1024 * 1024, NULL,
+	mdisk->malloc_buf = spdk_zmalloc(num_blocks * block_size + 2 * sizeof(struct rdma_handshake), 2 * 1024 * 1024, NULL,
 					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 	if (!mdisk->malloc_buf) {
 		SPDK_ERRLOG("malloc_buf spdk_zmalloc() failed\n");
@@ -571,6 +603,9 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const struct spdk_
 
 	struct ibv_cq* ibv_cq = ibv_create_cq(ibv_context, 4096, NULL, NULL, 0);
 
+	mdisk->cq = ibv_cq;
+	mdisk->mr = ibv_mr;
+
 	// no SRQ here - only one qp
 	// TODO: fine-tune these params; 
 	struct ibv_qp_init_attr init_attr = {
@@ -578,9 +613,9 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const struct spdk_
 		.recv_cq = ibv_cq,
 		.qp_type = IBV_QPT_RC,
 		.cap = {
+			.max_send_sge = 16,
+			.max_send_wr = 16,
 			.max_recv_sge = 1,
-			.max_send_sge = 1,
-			.max_send_wr = 1,
 			.max_recv_wr = 1,
 		}
 	};
@@ -592,20 +627,22 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const struct spdk_
 	struct ibv_sge sge, send_sge;
 
 	// TODO: use separate buffer
-	struct rdma_handshake* handshake = mdisk->malloc_buf;
+	struct rdma_handshake* handshake = mdisk->malloc_buf + num_blocks * block_size;
+	struct rdma_handshake* remote_handshake = handshake + 1;
 	handshake->base_addr = mdisk->malloc_buf;
 	handshake->rkey = ibv_mr->rkey;
 
-	SPDK_DEBUGLOG(bdev_target, "sending local addr %p rkey %d\n", mdisk->malloc_buf, handshake->rkey);
+	SPDK_DEBUGLOG(bdev_target, "sending local addr %p rkey %d\n", handshake->base_addr, handshake->rkey);
 
 	wr.wr_id = (uintptr_t)1;
 	wr.next = NULL;
 	wr.sg_list = &sge;
 	wr.num_sge = 1;
 
-	sge.addr = (uint64_t)mdisk->malloc_buf + sizeof(struct rdma_handshake);
+	sge.addr = (uint64_t)remote_handshake;
 	sge.length = sizeof(struct rdma_handshake);
 	sge.lkey = ibv_mr->lkey;
+	mdisk->remote_handshake = remote_handshake;
 
 	ibv_post_recv(cm_id->qp, &wr, &bad_wr);
 
@@ -616,6 +653,8 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const struct spdk_
 		SPDK_ERRLOG("invalid event type %d\n", connect_event->event);
 		return -EINVAL;
 	}
+
+	assert(connect_event->id == cm_id);
 
 	SPDK_DEBUGLOG(bdev_target, "connected. posting send...\n");
 
@@ -628,7 +667,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const struct spdk_
 	send_wr.num_sge = 1;
 	send_wr.send_flags = IBV_SEND_SIGNALED;
 
-	send_sge.addr = (uint64_t)mdisk->malloc_buf;
+	send_sge.addr = (uint64_t)handshake;
 	send_sge.length = sizeof(struct rdma_handshake);
 	send_sge.lkey = ibv_mr->lkey;
 
@@ -650,7 +689,6 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const struct spdk_
 
 		if (wc.wr_id == 1) {
 			// recv complete
-			struct rdma_handshake* remote_handshake = (struct rdma_handshake*)(mdisk->malloc_buf) + 1;
 			SPDK_DEBUGLOG(bdev_target, "received remote addr %p rkey %d\n", remote_handshake->base_addr, remote_handshake->rkey);
 			handshake_recv_cpl = true;
 		}
@@ -661,9 +699,6 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const struct spdk_
 	}
 
 	SPDK_DEBUGLOG(bdev_target, "rdma handshake complete\n");
-
-	
-
 
 	// /*
 	//  * Attach a nvme controller locally
@@ -689,7 +724,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const struct spdk_
 		mdisk->disk.name = strdup(name);
 	} else {
 		/* Auto-generate a name */
-		mdisk->disk.name = spdk_sprintf_alloc("Malloc%d", target_disk_count);
+		mdisk->disk.name = spdk_sprintf_alloc("Target%d", target_disk_count);
 		target_disk_count++;
 	}
 	if (!mdisk->disk.name) {
@@ -700,10 +735,13 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const struct spdk_
 
 	mdisk->disk.write_cache = 0;
 	mdisk->disk.blocklen = block_size;
-	mdisk->disk.md_len = TARGET_MD_LEN;
-	mdisk->disk.md_interleave = true;
+	mdisk->disk.md_len = block_size;
+	mdisk->disk.md_interleave = false;
 	mdisk->disk.dif_type = SPDK_DIF_DISABLE;
 	mdisk->disk.blockcnt = num_blocks;
+
+	mdisk->cm_id = cm_id;
+
 	if (optimal_io_boundary) {
 		mdisk->disk.optimal_io_boundary = optimal_io_boundary;
 		mdisk->disk.split_on_optimal_io_boundary = true;
@@ -766,15 +804,35 @@ target_completion_poller(void *ctx)
 }
 
 static int
-target_background_poller(void *ctx)
+target_rdma_poller(void *ctx)
 {
-	struct target_channel *ch = ctx;
+	struct target_disk *tdisk = ctx;
 
+	struct ibv_wc wc;
+
+	// TODO: batch polling may be faster?
+	while (true) {
+		int cnt = ibv_poll_cq(tdisk->cq, 1, &wc);
+		if (cnt < 0) {
+			// TODO: what to do when poll cq fails?
+			SPDK_ERRLOG("ibv_poll_cq failed\n");
+			return SPDK_POLLER_BUSY;
+		}
+		else if (cnt == 0) {
+			return SPDK_POLLER_IDLE;
+		}
+		else {
+			assert(cnt == 1);
+			struct spdk_bdev_io* io = (struct spdk_bdev_io*)wc.wr_id;
+			spdk_bdev_io_complete(io, SPDK_BDEV_IO_STATUS_SUCCESS);
+		}
+	}
 }
 
 static int
 target_create_channel_cb(void *io_device, void *ctx)
 {
+	struct target_disk* tdisk = io_device;
 	struct target_channel *ch = ctx;
 
 	ch->accel_channel = spdk_accel_engine_get_io_channel();
@@ -783,6 +841,7 @@ target_create_channel_cb(void *io_device, void *ctx)
 		return -ENOMEM;
 	}
 
+	// TODO: remove
 	ch->completion_poller = SPDK_POLLER_REGISTER(target_completion_poller, ch, 0);
 	if (!ch->completion_poller) {
 		SPDK_ERRLOG("Failed to register target completion poller\n");
@@ -790,10 +849,9 @@ target_create_channel_cb(void *io_device, void *ctx)
 		return -ENOMEM;
 	}
 
-	ch->background_poller = SPDK_POLLER_REGISTER(target_background_poller, ch, 0);
-	if (!ch->background_poller) {
-		SPDK_ERRLOG("Failed to register target background poller\n");
-		spdk_put_io_channel(ch->accel_channel);
+	ch->rdma_poller = SPDK_POLLER_REGISTER(target_rdma_poller, tdisk, 0);
+	if (!ch->rdma_poller) {
+		SPDK_ERRLOG("Failed to register target rdma poller\n");
 		return -ENOMEM;
 	}
 
@@ -811,7 +869,7 @@ target_destroy_channel_cb(void *io_device, void *ctx)
 
 	spdk_put_io_channel(ch->accel_channel);
 	spdk_poller_unregister(&ch->completion_poller);
-	spdk_poller_unregister(&ch->background_poller);
+	spdk_poller_unregister(&ch->rdma_poller);
 }
 
 static int bdev_target_initialize(void)

@@ -66,9 +66,8 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	circular_buffer = spdk_zmalloc(BUFFER_SIZE, 2 * 1024 * 1024, NULL,
+	circular_buffer = spdk_zmalloc(BUFFER_SIZE + 2 * sizeof(struct rdma_handshake), 2 * 1024 * 1024, NULL,
 					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-
 	
 	// int n = 0;
 	// struct ibv_device** ibv_list = ibv_get_device_list(&n);
@@ -148,8 +147,7 @@ int main(int argc, char **argv)
 	struct ibv_recv_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge, send_sge;
 
-	// TODO: use separate buffer
-	struct rdma_handshake* handshake = circular_buffer;
+	struct rdma_handshake* handshake = circular_buffer + BUFFER_SIZE;
 	handshake->base_addr = circular_buffer;
 	handshake->rkey = ibv_mr->rkey;
 	printf("sending local addr %p rkey %d\n", handshake->base_addr, handshake->rkey);
@@ -159,7 +157,7 @@ int main(int argc, char **argv)
 	wr.sg_list = &sge;
 	wr.num_sge = 1;
 
-	sge.addr = (uint64_t)circular_buffer + sizeof(struct rdma_handshake);
+	sge.addr = (uint64_t)(handshake + 1);
 	sge.length = sizeof(struct rdma_handshake);
 	sge.lkey = ibv_mr->lkey;
 
@@ -184,7 +182,7 @@ int main(int argc, char **argv)
 	send_wr.num_sge = 1;
 	send_wr.send_flags = IBV_SEND_SIGNALED;
 
-	send_sge.addr = (uint64_t)circular_buffer;
+	send_sge.addr = (uint64_t)handshake;
 	send_sge.length = sizeof(struct rdma_handshake);
 	send_sge.lkey = ibv_mr->lkey;
 
@@ -206,7 +204,7 @@ int main(int argc, char **argv)
 
 		if (wc.wr_id == 1) {
 			// recv complete
-			struct rdma_handshake* remote_handshake = (struct rdma_handshake*)circular_buffer + 1;
+			struct rdma_handshake* remote_handshake = handshake + 1;
 			printf("received remote addr %p rkey %d\n", remote_handshake->base_addr, remote_handshake->rkey);
 			handshake_recv_cpl = true;
 		}
@@ -217,10 +215,8 @@ int main(int argc, char **argv)
 	}
 
 	printf("rdma handshake complete\n");
-
-
-
-
-
+	printf("press anything to quit...\n");
+	char buf[128];
+	scanf("%s", buf);
 	return 0;
 }
