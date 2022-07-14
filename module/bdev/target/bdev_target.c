@@ -849,7 +849,7 @@ target_create_channel_cb(void *io_device, void *ctx)
 		return -ENOMEM;
 	}
 
-	ch->rdma_poller = SPDK_POLLER_REGISTER(target_rdma_poller, tdisk, 50);
+	ch->rdma_poller = SPDK_POLLER_REGISTER(target_rdma_poller, tdisk, 0);
 	if (!ch->rdma_poller) {
 		SPDK_ERRLOG("Failed to register target rdma poller\n");
 		return -ENOMEM;
