@@ -392,8 +392,6 @@ _nvme_ns_cmd_rw(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
 	uint32_t		sectors_per_max_io = _nvme_get_sectors_per_max_io(ns, io_flags);
 	uint32_t		sectors_per_stripe = ns->sectors_per_stripe;
 
-	printf("req sector size = %d, opc = %d\n", sector_size, opc);
-
 	assert(rc != NULL);
 	assert(*rc == 0);
 
@@ -403,8 +401,6 @@ _nvme_ns_cmd_rw(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
 		*rc = -ENOMEM;
 		return NULL;
 	}
-
-	printf("payload md buf = 0x%llx\n", payload->md);
 
 	req->payload_offset = payload_offset;
 	req->md_offset = md_offset;
@@ -925,8 +921,6 @@ spdk_nvme_ns_cmd_write_with_md(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *
 	struct nvme_request *req;
 	struct nvme_payload payload;
 	int rc = 0;
-	
-	printf("write qp id = %d\n", qpair->id);
 
 	if (!_is_io_flags_valid(io_flags)) {
 		return -EINVAL;

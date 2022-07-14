@@ -522,8 +522,8 @@ static const struct spdk_bdev_fn_table target_fn_table = {
 // }
 
 int
-create_target_disk(struct spdk_bdev **bdev, const char *name, const struct spdk_uuid *uuid,
-		   uint64_t num_blocks, uint32_t block_size, uint32_t optimal_io_boundary)
+create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, const char* port,
+			const struct spdk_uuid *uuid, uint64_t num_blocks, uint32_t block_size, uint32_t optimal_io_boundary)
 {
 	SPDK_DEBUGLOG(bdev_target, "in create disk\n");
 	struct target_disk	*mdisk;
