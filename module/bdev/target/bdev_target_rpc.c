@@ -108,7 +108,7 @@ rpc_bdev_target_create(struct spdk_jsonrpc_request *request,
 		uuid = &decoded_uuid;
 	}
 
-	rc = create_target_disk(&bdev, req.name, uuid, req.ip, req.port, req.num_blocks, req.block_size,
+	rc = create_target_disk(&bdev, req.name, req.ip, req.port, uuid, req.num_blocks, req.block_size,
 				req.optimal_io_boundary);
 	if (rc) {
 		spdk_jsonrpc_send_error_response(request, rc, spdk_strerror(-rc));
