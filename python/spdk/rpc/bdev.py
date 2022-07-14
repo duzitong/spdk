@@ -264,7 +264,6 @@ def bdev_malloc_delete(client, name):
     return client.call('bdev_malloc_delete', params)
 
 
-@deprecated_alias('construct_target_bdev')
 def bdev_target_create(client, num_blocks, block_size, ip=None, port=None, name=None, uuid=None, optimal_io_boundary=None):
     """Construct a target block device.
 
@@ -294,7 +293,6 @@ def bdev_target_create(client, num_blocks, block_size, ip=None, port=None, name=
     return client.call('bdev_target_create', params)
 
 
-@deprecated_alias('delete_target_bdev')
 def bdev_target_delete(client, name):
     """Delete target block device.
 
@@ -305,7 +303,6 @@ def bdev_target_delete(client, name):
     return client.call('bdev_target_delete', params)
 
 
-@deprecated_alias('construct_null_bdev')
 def bdev_null_create(client, num_blocks, block_size, name, uuid=None, md_size=None,
                      dif_type=None, dif_is_head_of_md=None):
     """Construct a null block device.
