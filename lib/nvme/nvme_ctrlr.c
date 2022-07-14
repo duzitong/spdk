@@ -480,7 +480,6 @@ spdk_nvme_ctrlr_alloc_io_qpair(struct spdk_nvme_ctrlr *ctrlr,
 	}
 
 	qpair = nvme_ctrlr_create_io_qpair(ctrlr, &opts);
-	printf("qid = %d\n", qpair->id);
 
 	if (qpair == NULL || opts.create_only == true) {
 		return qpair;
