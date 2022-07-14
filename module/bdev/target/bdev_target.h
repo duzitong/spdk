@@ -40,7 +40,7 @@
 #include "spdk/nvme.h"
 #include "spdk/bdev.h"
 
-#define TARGET_BLOCK_SIZE 4096
+#define TARGET_BLOCK_SIZE 512
 // #define TARGET_MD_LEN 8
 
 typedef void (*spdk_delete_target_complete)(void *cb_arg, int bdeverrno);

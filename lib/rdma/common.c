@@ -122,11 +122,8 @@ spdk_rdma_create_mem_map(struct ibv_pd *pd, struct spdk_nvme_rdma_hooks *hooks,
 	}
 
 	if (hooks) {
-		SPDK_ERRLOG("hooks not null\n");
-		SPDK_ERRLOG("hooks->get_rkey == null? %d\n", hooks->get_rkey == NULL);
 		map = spdk_zmalloc(sizeof(*map), 0, NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
 	} else {
-		SPDK_ERRLOG("hooks is null\n");
 		map = calloc(1, sizeof(*map));
 	}
 	if (!map) {
