@@ -167,8 +167,6 @@ struct wal_bdev {
 	/* mutex to set thread and pollers */
 	pthread_mutex_t			mutex;
 
-	uint32_t	channel_count;
-
 	/* IO channel of log bdev */
 	struct spdk_io_channel	*log_channel;
 

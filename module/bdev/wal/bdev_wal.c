@@ -110,7 +110,7 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 	wal_ch->wal_bdev = wal_bdev;
 
 	pthread_mutex_lock(&wal_bdev->mutex);
-	if (wal_bdev->channel_count == 0) {
+	if (wal_bdev->open_thread == NULL) {
 		wal_bdev->log_channel = spdk_bdev_get_io_channel(wal_bdev->log_bdev_info.desc);
 		if (!wal_bdev->log_channel) {
 			SPDK_ERRLOG("Unable to create io channel for log bdev\n");
@@ -131,7 +131,6 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 
 		wal_bdev->open_thread = spdk_get_thread();
 	}
-	wal_bdev->channel_count++;
 	pthread_mutex_unlock(&wal_bdev->mutex);
 
 	return 0;
@@ -158,8 +157,7 @@ wal_bdev_destroy_cb(void *io_device, void *ctx_buf)
 	assert(wal_ch != NULL);
 
 	pthread_mutex_lock(&wal_bdev->mutex);
-	wal_bdev->channel_count--;
-	if (wal_bdev->channel_count == 0) {
+	if (wal_bdev->open_thread == spdk_get_thread()) {
 		spdk_put_io_channel(wal_bdev->log_channel);
 		spdk_put_io_channel(wal_bdev->core_channel);
 		wal_bdev->log_channel = NULL;
@@ -168,6 +166,8 @@ wal_bdev_destroy_cb(void *io_device, void *ctx_buf)
 		spdk_poller_unregister(&wal_bdev->mover_poller);
 		spdk_poller_unregister(&wal_bdev->cleaner_poller);
 		spdk_poller_unregister(&wal_bdev->stat_poller);
+		
+		wal_bdev->open_thread = NULL;
 	}
 	pthread_mutex_unlock(&wal_bdev->mutex);
 }
