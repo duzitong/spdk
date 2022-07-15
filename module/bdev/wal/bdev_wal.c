@@ -76,6 +76,7 @@ static int	wal_bdev_init(void);
 static void	wal_bdev_event_base_bdev(enum spdk_bdev_event_type type, struct spdk_bdev *bdev,
 		void *event_ctx);
 static bool wal_bdev_is_valid_entry(struct wal_bdev *bdev, struct bstat *bstat);
+static int wal_bdev_submit_pending_writes(void *ctx);
 static int wal_bdev_mover(void *ctx);
 static void wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
 static void wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
@@ -110,7 +111,7 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 	wal_ch->wal_bdev = wal_bdev;
 
 	pthread_mutex_lock(&wal_bdev->mutex);
-	if (wal_bdev->channel_count == 0) {
+	if (wal_bdev->open_thread == NULL) {
 		wal_bdev->log_channel = spdk_bdev_get_io_channel(wal_bdev->log_bdev_info.desc);
 		if (!wal_bdev->log_channel) {
 			SPDK_ERRLOG("Unable to create io channel for log bdev\n");
@@ -125,13 +126,13 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 		}
 
 		
-		wal_bdev->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_bdev, 50);
+		wal_bdev->pending_writes_poller = SPDK_POLLER_REGISTER(wal_bdev_submit_pending_writes, wal_bdev, 0);
+		wal_bdev->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_bdev, 10);
 		wal_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_bdev, 50);
 		wal_bdev->stat_poller = SPDK_POLLER_REGISTER(wal_bdev_stat_report, wal_bdev, 30*1000*1000);
 
 		wal_bdev->open_thread = spdk_get_thread();
 	}
-	wal_bdev->channel_count++;
 	pthread_mutex_unlock(&wal_bdev->mutex);
 
 	return 0;
@@ -158,16 +159,18 @@ wal_bdev_destroy_cb(void *io_device, void *ctx_buf)
 	assert(wal_ch != NULL);
 
 	pthread_mutex_lock(&wal_bdev->mutex);
-	wal_bdev->channel_count--;
-	if (wal_bdev->channel_count == 0) {
+	if (wal_bdev->open_thread == spdk_get_thread()) {
 		spdk_put_io_channel(wal_bdev->log_channel);
 		spdk_put_io_channel(wal_bdev->core_channel);
 		wal_bdev->log_channel = NULL;
 		wal_bdev->core_channel = NULL;
 
+		spdk_poller_unregister(&wal_bdev->pending_writes_poller);
 		spdk_poller_unregister(&wal_bdev->mover_poller);
 		spdk_poller_unregister(&wal_bdev->cleaner_poller);
 		spdk_poller_unregister(&wal_bdev->stat_poller);
+		
+		wal_bdev->open_thread = NULL;
 	}
 	pthread_mutex_unlock(&wal_bdev->mutex);
 }
@@ -603,14 +606,17 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	// use 1 block in log device for metadata
 	metadata = (struct wal_metadata *) spdk_zmalloc(wal_bdev->log_bdev_info.bdev->blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 
-	if (!metadata) {
-		goto write_no_mem;
+	if (spdk_unlikely(!metadata)) {
+		SPDK_ERRLOG("wal bdev cannot alloc metadata.\n");
+		wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_NOMEM);
 	}
 
 	metadata->version = METADATA_VERSION;
 	metadata->seq = ++wal_bdev->seq;
 	metadata->core_offset = bdev_io->u.bdev.offset_blocks;
 	metadata->core_length =  bdev_io->u.bdev.num_blocks;
+
+	wal_io->metadata = metadata;
 
 	log_blocks = (bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift) + 1;
 	next_tail = wal_bdev->log_tail + log_blocks;
@@ -632,8 +638,6 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	metadata->length = log_blocks - 1;
 	metadata->round = wal_bdev->tail_round;
 
-	wal_io->metadata = metadata;
-
 	ret = spdk_bdev_writev_blocks_with_md(base_info->desc, base_ch,
 					bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt, metadata,
 					log_offset, metadata->length, wal_base_bdev_write_complete,
@@ -642,20 +646,16 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	if (spdk_likely(ret == 0)) {
 		
 	} else if (ret == -ENOMEM) {
-		goto write_no_mem;
+		wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
+					_wal_bdev_submit_write_request);
 	} else {
 		SPDK_ERRLOG("bdev io submit error due to %d, it should not happen\n", ret);
 		wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
 	}
 	return;
 write_no_space:
-	SPDK_ERRLOG("bdev io submit error due to no enough space left on log device.\n");
-	// TODO: queue write requests
-	wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
-	return;
-write_no_mem:
-	wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
-				_wal_bdev_submit_write_request);
+	SPDK_DEBUGLOG(wal_bdev, "queue bdev io submit due to no enough space left on log device.\n");
+	TAILQ_INSERT_TAIL(&wal_bdev->pending_writes, wal_io, tailq);
 	return;
 }
 
@@ -1471,6 +1471,7 @@ wal_bdev_start(struct wal_bdev *wal_bdev)
 
 	wal_bdev->bsl = bslCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
 	wal_bdev->bslfn = bslfnCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
+	TAILQ_INIT(&wal_bdev->pending_writes);
 	// TODO: recover
 	wal_bdev->log_head = 0;
 	wal_bdev->log_tail = 0;
@@ -1515,6 +1516,62 @@ wal_bdev_examine(struct spdk_bdev *bdev)
 
 	spdk_bdev_module_examine_done(&g_wal_if);
 }
+
+static int
+wal_bdev_submit_pending_writes(void *ctx)
+{
+	struct wal_bdev *wal_bdev = ctx;
+	struct wal_bdev_io	*wal_io;
+	struct wal_base_bdev_info	*base_info;
+	struct spdk_io_channel		*base_ch;
+	int		ret;
+	uint64_t log_blocks, next_tail, log_offset;
+
+	while (!TAILQ_EMPTY(&wal_bdev->pending_writes)) {
+		wal_io = TAILQ_FIRST(&wal_bdev->pending_writes);
+
+		base_info = &wal_bdev->log_bdev_info;
+		base_ch = wal_bdev->log_channel;
+
+		log_blocks = (wal_io->metadata->core_length << wal_bdev->blocklen_shift) + 1;
+		next_tail = wal_bdev->log_tail + log_blocks;
+		if (next_tail >= wal_bdev->log_max) {
+			if (spdk_unlikely(log_blocks > wal_bdev->log_head)) {
+				return SPDK_POLLER_BUSY;
+			} else {
+				log_offset = 0;
+				wal_bdev->log_tail = log_blocks;
+				wal_bdev->tail_round++;
+			}
+		} else if (wal_bdev->tail_round > wal_bdev->head_round && next_tail > wal_bdev->log_head) {
+			return SPDK_POLLER_BUSY;
+		} else {
+			log_offset = wal_bdev->log_tail;
+			wal_bdev->log_tail += log_blocks;
+		}
+		wal_io->metadata->next_offset = wal_bdev->log_tail;
+		wal_io->metadata->length = log_blocks - 1;
+		wal_io->metadata->round = wal_bdev->tail_round;
+
+		ret = spdk_bdev_writev_blocks_with_md(base_info->desc, base_ch,
+						wal_io->orig_io->u.bdev.iovs, wal_io->orig_io->u.bdev.iovcnt, wal_io->metadata,
+						log_offset, wal_io->metadata->length, wal_base_bdev_write_complete,
+						wal_io);
+
+		if (spdk_likely(ret == 0)) {
+			TAILQ_REMOVE(&wal_bdev->pending_writes, wal_io, tailq);
+		} else if (ret == -ENOMEM) {	
+			// retry next time
+		} else {
+			SPDK_ERRLOG("pending write submit error due to %d, it should not happen\n", ret);
+			wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
+		}
+		return SPDK_POLLER_BUSY;
+	}
+
+	return SPDK_POLLER_IDLE;
+}
+
 
 static int
 wal_bdev_mover(void *ctx)
