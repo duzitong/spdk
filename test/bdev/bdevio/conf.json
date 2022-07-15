@@ -1,0 +1,36 @@
+{
+    "subsystems": [
+       {
+         "subsystem": "bdev",
+         "config": [
+           {
+             "method": "bdev_target_create",
+             "params": {
+               "name": "Target0",
+               "num_blocks": 1048576,
+               "block_size": 512,
+               "ip": "10.156.73.242",
+               "port": "4420"
+             }
+           },
+           {
+             "method": "bdev_malloc_create",
+             "params": {
+               "name": "Malloc1",
+               "num_blocks": 1048576,
+               "block_size": 512
+             }
+           },
+           {
+             "method": "bdev_wal_create",
+             "params": {
+               "name": "Wal1",
+               "log_bdev": "Target0",
+               "core_bdev": "Malloc1"
+             }
+           }
+         ]
+       }
+     ]
+   }
+   
