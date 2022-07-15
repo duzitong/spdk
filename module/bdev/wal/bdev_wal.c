@@ -165,6 +165,7 @@ wal_bdev_destroy_cb(void *io_device, void *ctx_buf)
 		wal_bdev->log_channel = NULL;
 		wal_bdev->core_channel = NULL;
 
+		spdk_poller_unregister(&wal_bdev->pending_writes_poller);
 		spdk_poller_unregister(&wal_bdev->mover_poller);
 		spdk_poller_unregister(&wal_bdev->cleaner_poller);
 		spdk_poller_unregister(&wal_bdev->stat_poller);
