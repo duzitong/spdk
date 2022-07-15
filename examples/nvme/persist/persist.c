@@ -115,7 +115,7 @@ int main(int argc, char **argv)
 	memcpy(&addr, addr_res->ai_addr, sizeof(addr));
 	rc = rdma_bind_addr(cm_id, (struct sockaddr*)&addr);
 	assert(rc == 0);
-	rc = rdma_listen(cm_id, 1);
+	rc = rdma_listen(cm_id, 3);
 	assert(rc == 0);
 
 	printf("listening on port %d\n", ntohs(addr.sin_port));
@@ -185,8 +185,7 @@ int main(int argc, char **argv)
 	sge.lkey = ibv_mr->lkey;
 	rc = ibv_post_recv(cm_id_2->qp, &wr, &bad_wr);
 	assert(rc == 0);
-	struct rdma_conn_param cm_param;
-	rc = rdma_accept(cm_id_2, &cm_param);
+	rc = rdma_accept(cm_id_2, NULL);
 
 	if (rc != 0) {
 		printf("accept err = %d\n", err);
