@@ -605,8 +605,9 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	// use 1 block in log device for metadata
 	metadata = (struct wal_metadata *) spdk_zmalloc(wal_bdev->log_bdev_info.bdev->blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 
-	if (!metadata) {
-		goto write_no_mem;
+	if (spdk_unlikely(!metadata)) {
+		SPDK_ERRLOG("wal bdev cannot alloc metadata.\n");
+		wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_NOMEM);
 	}
 
 	metadata->version = METADATA_VERSION;
@@ -644,7 +645,8 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	if (spdk_likely(ret == 0)) {
 		
 	} else if (ret == -ENOMEM) {
-		goto write_no_mem;
+		wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
+					_wal_bdev_submit_write_request);
 	} else {
 		SPDK_ERRLOG("bdev io submit error due to %d, it should not happen\n", ret);
 		wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
@@ -653,10 +655,6 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 write_no_space:
 	SPDK_NOTICELOG("queue bdev io submit due to no enough space left on log device.\n");
 	TAILQ_INSERT_TAIL(&wal_bdev->pending_writes, wal_io, tailq);
-	return;
-write_no_mem:
-	wal_bdev_queue_io_wait(wal_io, base_info->bdev, base_ch,
-				_wal_bdev_submit_write_request);
 	return;
 }
 
@@ -1524,6 +1522,7 @@ wal_bdev_submit_pending_writes(void *ctx)
 	struct wal_bdev_io	*wal_io;
 	struct wal_base_bdev_info	*base_info;
 	struct spdk_io_channel		*base_ch;
+	int		ret;
 	uint64_t log_blocks, next_tail, log_offset;
 
 	while (!TAILQ_EMPTY(&wal_bdev->pending_writes)) {
@@ -1558,11 +1557,11 @@ wal_bdev_submit_pending_writes(void *ctx)
 						wal_io);
 
 		if (spdk_likely(ret == 0)) {
-			
-		} else if (ret == -ENOMEM) {
-			goto write_no_mem;
+			TAILQ_REMOVE(&wal_bdev->pending_writes, wal_io, tailq);
+		} else if (ret == -ENOMEM) {	
+			// retry next time
 		} else {
-			SPDK_ERRLOG("bdev io submit error due to %d, it should not happen\n", ret);
+			SPDK_ERRLOG("pending write submit error due to %d, it should not happen\n", ret);
 			wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
 		}
 		return SPDK_POLLER_BUSY;
