@@ -123,6 +123,9 @@ struct wal_bdev_io {
 	uint16_t	remaining_base_bdev_io;
 
 	void	*read_buf;
+
+	/* link next for pending writes */
+	TAILQ_ENTRY(wal_bdev_io)	tailq;
 };
 
 /*
@@ -167,13 +170,14 @@ struct wal_bdev {
 	/* mutex to set thread and pollers */
 	pthread_mutex_t			mutex;
 
-	uint32_t	channel_count;
-
 	/* IO channel of log bdev */
 	struct spdk_io_channel	*log_channel;
 
 	/* IO channel of core bdev */
 	struct spdk_io_channel  *core_channel;
+
+	/* poller to complete pending writes */
+	struct spdk_poller		*pending_writes_poller;
 
 	/* poller to move data from log bdev to core bdev */
 	struct spdk_poller		*mover_poller;
@@ -216,6 +220,9 @@ struct wal_bdev {
 
 	/* indicate whether there's ongoing moving task */
 	bool		moving;
+
+	/* pending writes due to no enough space on log device */
+	TAILQ_HEAD(, wal_bdev_io)	pending_writes;
 };
 
 struct wal_metadata {
