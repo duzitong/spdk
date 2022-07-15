@@ -654,7 +654,7 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	}
 	return;
 write_no_space:
-	SPDK_NOTICELOG("queue bdev io submit due to no enough space left on log device.\n");
+	SPDK_DEBUGLOG(wal_bdev, "queue bdev io submit due to no enough space left on log device.\n");
 	TAILQ_INSERT_TAIL(&wal_bdev->pending_writes, wal_io, tailq);
 	return;
 }
@@ -1471,6 +1471,7 @@ wal_bdev_start(struct wal_bdev *wal_bdev)
 
 	wal_bdev->bsl = bslCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
 	wal_bdev->bslfn = bslfnCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
+	TAILQ_INIT(&wal_bdev->pending_writes);
 	// TODO: recover
 	wal_bdev->log_head = 0;
 	wal_bdev->log_tail = 0;
