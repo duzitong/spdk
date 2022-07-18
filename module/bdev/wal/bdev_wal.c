@@ -1464,10 +1464,18 @@ wal_bdev_add_base_devices(struct wal_bdev_config *wal_cfg)
 static int
 wal_bdev_start(struct wal_bdev *wal_bdev)
 {
+	int mempool_size;
+
 	wal_bdev->log_max = wal_bdev->log_bdev_info.bdev->blockcnt - 2;  // last block used to track log head
 
-	wal_bdev->bstat_pool = spdk_mempool_create("WAL_BSTAT_POOL", wal_bdev->bdev.blockcnt << 3, sizeof(bstat), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
-	wal_bdev->bsl_node_pool = spdk_mempool_create("WAL_BSL_NODE_POOL", wal_bdev->bdev.blockcnt << 3, sizeof(bskiplistNode), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
+	mempool_size = wal_bdev->log_bdev_info.bdev->blockcnt < wal_bdev->core_bdev_info.bdev->blockcnt 
+				? wal_bdev->log_bdev_info.bdev->blockcnt
+				: wal_bdev->core_bdev_info.bdev->blockcnt;
+	mempool_size = spdk_align32pow2(mempool_size);
+	mempool_size = (1 << 16) < mempool_size ? (1 << 16) : mempool_size;
+
+	wal_bdev->bstat_pool = spdk_mempool_create("WAL_BSTAT_POOL", mempool_size, sizeof(bstat), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
+	wal_bdev->bsl_node_pool = spdk_mempool_create("WAL_BSL_NODE_POOL", mempool_size, sizeof(bskiplistNode), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
 
 	wal_bdev->bsl = bslCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
 	wal_bdev->bslfn = bslfnCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
