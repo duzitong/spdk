@@ -157,6 +157,8 @@ wal_bdev_destroy_cb(void *io_device, void *ctx_buf)
 	SPDK_DEBUGLOG(bdev_wal, "wal_bdev_destroy_cb\n");
 
 	assert(wal_ch != NULL);
+	
+	wal_bdev->destruct_called
 
 	pthread_mutex_lock(&wal_bdev->mutex);
 	if (wal_bdev->open_thread == spdk_get_thread()) {
@@ -1623,6 +1625,10 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 
 	spdk_bdev_free_io(bdev_io);
 
+	if (spdk_unlikely(bdev->destruct_called)) {
+		return;
+	}
+
 	if (spdk_unlikely(!success)) {
 		SPDK_ERRLOG("Failed to read metadata during move.\n");
 		wal_bdev_mover_free(mover_ctx);
@@ -1659,6 +1665,10 @@ wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 
 	spdk_bdev_free_io(bdev_io);
 
+	if (spdk_unlikely(bdev->destruct_called)) {
+		return;
+	}
+
 	if (spdk_unlikely(!success)) {
 		SPDK_ERRLOG("Failed to read data during move.\n");
 		wal_bdev_mover_free(mover_ctx);
@@ -1684,6 +1694,10 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 	struct wal_log_info *info;
 
 	spdk_bdev_free_io(bdev_io);
+
+	if (spdk_unlikely(bdev->destruct_called)) {
+		return;
+	}
 
 	if (spdk_unlikely(!success)) {
 		SPDK_ERRLOG("Failed to write data during move.\n");
@@ -1712,6 +1726,10 @@ wal_bdev_mover_clean(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 	struct wal_bdev *bdev = mover_ctx->bdev;
 
 	spdk_bdev_free_io(bdev_io);
+	
+	if (spdk_unlikely(bdev->destruct_called)) {
+		return;
+	}
 
 	if (spdk_unlikely(!success)) {
 		SPDK_ERRLOG("Failed to update head to log bdev during move.\n");
