@@ -1474,7 +1474,7 @@ wal_bdev_start(struct wal_bdev *wal_bdev)
 	mempool_size = spdk_align64pow2(mempool_size) << 2;
 
 	if (mempool_size > 8192) {
-		SPDK_ERRORLOG("Too big mempool\n");
+		SPDK_ERRLOG("Too big mempool\n");
 		return 1;
 	}
 
