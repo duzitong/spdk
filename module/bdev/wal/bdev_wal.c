@@ -149,9 +149,6 @@ _wal_bdev_destroy_cb(void *arg)
 	wal_bdev->log_channel = NULL;
 	wal_bdev->core_channel = NULL;
 
-	spdk_mempool_free(wal_bdev->bstat_pool);
-	spdk_mempool_free(wal_bdev->bsl_node_pool);
-
 	spdk_poller_unregister(&wal_bdev->pending_writes_poller);
 	spdk_poller_unregister(&wal_bdev->mover_poller);
 	spdk_poller_unregister(&wal_bdev->cleaner_poller);
@@ -1640,7 +1637,7 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 
 	spdk_bdev_free_io(bdev_io);
 
-	if (spdk_unlikely(bdev->destruct_called)) {
+	if (spdk_unlikely(bdev->destruct_called || bdev->destroy_started)) {
 		return;
 	}
 
@@ -1680,7 +1677,7 @@ wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 
 	spdk_bdev_free_io(bdev_io);
 
-	if (spdk_unlikely(bdev->destruct_called)) {
+	if (spdk_unlikely(bdev->destruct_called || bdev->destroy_started)) {
 		return;
 	}
 
@@ -1710,7 +1707,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 
 	spdk_bdev_free_io(bdev_io);
 
-	if (spdk_unlikely(bdev->destruct_called)) {
+	if (spdk_unlikely(bdev->destruct_called || bdev->destroy_started)) {
 		return;
 	}
 
@@ -1742,7 +1739,7 @@ wal_bdev_mover_clean(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 
 	spdk_bdev_free_io(bdev_io);
 	
-	if (spdk_unlikely(bdev->destruct_called)) {
+	if (spdk_unlikely(bdev->destruct_called || bdev->destroy_started)) {
 		return;
 	}
 
