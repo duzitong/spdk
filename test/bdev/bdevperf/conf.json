@@ -19,7 +19,7 @@
             "trtype": "PCIe",
             "traddr": "0000:85:00.0"
           }
-        }
+        },
         {
           "method": "bdev_wal_create",
           "params": {
