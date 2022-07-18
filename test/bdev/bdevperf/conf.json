@@ -4,29 +4,28 @@
       "subsystem": "bdev",
       "config": [
         {
-          "method": "bdev_target_create",
+          "method": "bdev_malloc_create",
           "params": {
-            "name": "Target0",
-            "num_blocks": 512000,
+            "name": "Malloc0",
+            "num_blocks": 1024000,
             "block_size": 512,
-            "ip": "10.156.72.94",
-            "port": "4420"
+            "md": true
           }
         },
         {
           "method": "bdev_nvme_attach_controller",
           "params": {
-            "name": "Nvme0",
+            "name": "Nvme0n1",
             "trtype": "PCIe",
-            "traddr": "0000:85:00.0"
+            "traddr": 
           }
         },
         {
           "method": "bdev_wal_create",
           "params": {
             "name": "Wal1",
-            "log_bdev": "Target0",
-            "core_bdev": "Nvme0n1"
+            "log_bdev": "Malloc0",
+            "core_bdev": "Malloc1"
           }
         }
       ]
