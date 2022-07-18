@@ -157,8 +157,6 @@ wal_bdev_destroy_cb(void *io_device, void *ctx_buf)
 	SPDK_DEBUGLOG(bdev_wal, "wal_bdev_destroy_cb\n");
 
 	assert(wal_ch != NULL);
-	
-	wal_bdev->destruct_called
 
 	pthread_mutex_lock(&wal_bdev->mutex);
 	if (wal_bdev->open_thread == spdk_get_thread()) {
