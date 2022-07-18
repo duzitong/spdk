@@ -464,7 +464,7 @@ target_create_channel_cb(void *io_device, void *ctx)
 	struct target_channel *ch = ctx;
 	ch->tdisk = tdisk;
 
-	tdisk->rdma_poller = SPDK_POLLER_REGISTER(target_rdma_poller, tdisk, 50);
+	tdisk->rdma_poller = SPDK_POLLER_REGISTER(target_rdma_poller, tdisk, 0);
 	if (!tdisk->rdma_poller) {
 		SPDK_ERRLOG("Failed to register target rdma poller\n");
 		return -ENOMEM;
