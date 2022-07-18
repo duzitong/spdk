@@ -1471,8 +1471,12 @@ wal_bdev_start(struct wal_bdev *wal_bdev)
 	mempool_size = wal_bdev->log_bdev_info.bdev->blockcnt < wal_bdev->core_bdev_info.bdev->blockcnt 
 				? wal_bdev->log_bdev_info.bdev->blockcnt
 				: wal_bdev->core_bdev_info.bdev->blockcnt;
-	mempool_size = spdk_align64pow2(mempool_size);
-	mempool_size = (1 << 24) < mempool_size ? (1 << 24) : mempool_size;
+	mempool_size = spdk_align64pow2(mempool_size) << 2;
+
+	if (mempool_size > 8192) {
+		SPDK_ERRORLOG("Too big mempool\n");
+		return 1;
+	}
 
 	wal_bdev->bstat_pool = spdk_mempool_create("WAL_BSTAT_POOL", mempool_size, sizeof(bstat), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
 	wal_bdev->bsl_node_pool = spdk_mempool_create("WAL_BSL_NODE_POOL", mempool_size, sizeof(bskiplistNode), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
