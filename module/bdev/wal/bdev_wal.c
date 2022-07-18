@@ -128,7 +128,7 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 		
 		wal_bdev->pending_writes_poller = SPDK_POLLER_REGISTER(wal_bdev_submit_pending_writes, wal_bdev, 0);
 		wal_bdev->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_bdev, 10);
-		wal_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_bdev, 50);
+		wal_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_bdev, 10);
 		wal_bdev->stat_poller = SPDK_POLLER_REGISTER(wal_bdev_stat_report, wal_bdev, 30*1000*1000);
 
 		wal_bdev->open_thread = spdk_get_thread();
@@ -1471,12 +1471,7 @@ wal_bdev_start(struct wal_bdev *wal_bdev)
 	mempool_size = wal_bdev->log_bdev_info.bdev->blockcnt < wal_bdev->core_bdev_info.bdev->blockcnt 
 				? wal_bdev->log_bdev_info.bdev->blockcnt
 				: wal_bdev->core_bdev_info.bdev->blockcnt;
-	mempool_size = spdk_align64pow2(mempool_size) << 2;
-
-	if (mempool_size > 8192) {
-		SPDK_ERRLOG("Too big mempool\n");
-		return 1;
-	}
+	mempool_size = spdk_align64pow2(mempool_size);
 
 	wal_bdev->bstat_pool = spdk_mempool_create("WAL_BSTAT_POOL", mempool_size, sizeof(bstat), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
 	wal_bdev->bsl_node_pool = spdk_mempool_create("WAL_BSL_NODE_POOL", mempool_size, sizeof(bskiplistNode), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);

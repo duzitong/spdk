@@ -7,7 +7,7 @@
           "method": "bdev_malloc_create",
           "params": {
             "name": "Malloc0",
-            "num_blocks": 4096,
+            "num_blocks": 1024,
             "block_size": 512,
             "md": true
           }
@@ -21,11 +21,18 @@
           }
         },
         {
+          "method": "bdev_split_create",
+          "params": {
+            "base_bdev": "Nvme0n1",
+            "split_count": 8000
+          }
+        },
+        {
           "method": "bdev_wal_create",
           "params": {
             "name": "Wal1",
             "log_bdev": "Malloc0",
-            "core_bdev": "Nvme0n1"
+            "core_bdev": "Nvme0n1p1"
           }
         }
       ]
