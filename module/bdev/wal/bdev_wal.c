@@ -111,7 +111,7 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 	wal_ch->wal_bdev = wal_bdev;
 
 	pthread_mutex_lock(&wal_bdev->mutex);
-	if (wal_bdev->open_thread == NULL) {
+	if (wal_bdev->ch_count == 0) {
 		wal_bdev->log_channel = spdk_bdev_get_io_channel(wal_bdev->log_bdev_info.desc);
 		if (!wal_bdev->log_channel) {
 			SPDK_ERRLOG("Unable to create io channel for log bdev\n");
@@ -133,9 +133,31 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 
 		wal_bdev->open_thread = spdk_get_thread();
 	}
+	wal_bdev->ch_count++;
 	pthread_mutex_unlock(&wal_bdev->mutex);
 
 	return 0;
+}
+
+static void
+_wal_bdev_destroy_cb(void *arg)
+{
+	struct wal_bdev	*wal_bdev = arg;
+
+	spdk_put_io_channel(wal_bdev->log_channel);
+	spdk_put_io_channel(wal_bdev->core_channel);
+	wal_bdev->log_channel = NULL;
+	wal_bdev->core_channel = NULL;
+
+	spdk_mempool_free(wal_bdev->bstat_pool);
+	spdk_mempool_free(wal_bdev->bsl_node_pool);
+
+	spdk_poller_unregister(&wal_bdev->pending_writes_poller);
+	spdk_poller_unregister(&wal_bdev->mover_poller);
+	spdk_poller_unregister(&wal_bdev->cleaner_poller);
+	spdk_poller_unregister(&wal_bdev->stat_poller);
+	
+	wal_bdev->open_thread = NULL;
 }
 
 /*
@@ -159,18 +181,14 @@ wal_bdev_destroy_cb(void *io_device, void *ctx_buf)
 	assert(wal_ch != NULL);
 
 	pthread_mutex_lock(&wal_bdev->mutex);
-	if (wal_bdev->open_thread == spdk_get_thread()) {
-		spdk_put_io_channel(wal_bdev->log_channel);
-		spdk_put_io_channel(wal_bdev->core_channel);
-		wal_bdev->log_channel = NULL;
-		wal_bdev->core_channel = NULL;
-
-		spdk_poller_unregister(&wal_bdev->pending_writes_poller);
-		spdk_poller_unregister(&wal_bdev->mover_poller);
-		spdk_poller_unregister(&wal_bdev->cleaner_poller);
-		spdk_poller_unregister(&wal_bdev->stat_poller);
-		
-		wal_bdev->open_thread = NULL;
+	wal_bdev->ch_count--;
+	if (wal_bdev->ch_count == 0) {
+		if (wal_bdev->open_thread != spdk_get_thread()) {
+			spdk_thread_send_msg(wal_bdev->open_thread,
+					     _wal_bdev_destroy_cb, wal_bdev);
+		} else {
+			_wal_bdev_destroy_cb(wal_bdev);
+		}
 	}
 	pthread_mutex_unlock(&wal_bdev->mutex);
 }
@@ -734,8 +752,8 @@ wal_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_io
 {
 	struct wal_bdev_io *wal_io = (struct wal_bdev_io *)bdev_io->driver_ctx;
 
-	wal_io->wal_bdev = bdev_io->bdev->ctxt;
 	wal_io->wal_ch = spdk_io_channel_get_ctx(ch);
+	wal_io->wal_bdev = wal_io->wal_ch->wal_bdev;
 	wal_io->orig_io = bdev_io;
 	wal_io->orig_thread = spdk_get_thread();
 
