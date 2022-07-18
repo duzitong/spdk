@@ -13,9 +13,6 @@ void bslAdjustNodeEnd(bskiplistNode *bn, long begin);
 
 bstat *bstatBdevCreate(long begin, long end, long round, long unsigned int bdevOffset, struct spdk_mempool *pool) {
     bstat *pb = spdk_mempool_get(pool);
-    if (!pb) {
-        pb = spdk_zmalloc(sizeof(*pb), 0, NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
-    }
     pb->begin = begin;
     pb->end = end;
     pb->round = round;
@@ -26,9 +23,6 @@ bstat *bstatBdevCreate(long begin, long end, long round, long unsigned int bdevO
 
 bstat *bstatMemCreate(long begin, long end, long round, void *memPointer, struct spdk_mempool *pool) {
     bstat *pb = spdk_mempool_get(pool);
-    if (!pb) {
-        pb = spdk_zmalloc(sizeof(*pb), 0, NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
-    }
     pb->begin = begin;
     pb->end = end;
     pb->round = round;
@@ -39,9 +33,6 @@ bstat *bstatMemCreate(long begin, long end, long round, void *memPointer, struct
 
 bstat *bstatClone(bstat *pb, struct spdk_mempool *pool) {
     bstat *clone = spdk_mempool_get(pool);
-    if (!clone) {
-        clone = spdk_zmalloc(sizeof(*clone), 0, NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
-    }
     clone->begin = pb->begin;
     clone->end = pb->end;
     clone->type = pb->type;
@@ -64,9 +55,6 @@ int bslRandomLevel(void) {
 /* Create a skiplist node with the specified number of levels. */
 bskiplistNode *bslCreateNode(int level, long begin, long end, bstat *ele, struct spdk_mempool *pool) {
     bskiplistNode *bn = spdk_mempool_get(pool);
-    if (!bn) {
-        bn = spdk_zmalloc(sizeof(*bn), 0, NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
-    }
     bn->begin = begin;
     bn->end = end;
     bn->ele = ele;
