@@ -621,7 +621,7 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	log_blocks = (bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift) + 1;
 	next_tail = wal_bdev->log_tail + log_blocks;
 	if (next_tail >= wal_bdev->log_max) {
-		if (spdk_unlikely(log_blocks > wal_bdev->log_head)) {
+		if (spdk_unlikely(wal_bdev->tail_round > wal_bdev->head_round || log_blocks > wal_bdev->log_head)) {
 			goto write_no_space;
 		} else {
 			log_offset = 0;
@@ -1543,7 +1543,7 @@ wal_bdev_submit_pending_writes(void *ctx)
 		log_blocks = (wal_io->metadata->core_length << wal_bdev->blocklen_shift) + 1;
 		next_tail = wal_bdev->log_tail + log_blocks;
 		if (next_tail >= wal_bdev->log_max) {
-			if (spdk_unlikely(log_blocks > wal_bdev->log_head)) {
+			if (spdk_unlikely(wal_bdev->tail_round > wal_bdev->head_round || log_blocks > wal_bdev->log_head)) {
 				return SPDK_POLLER_BUSY;
 			} else {
 				log_offset = 0;
