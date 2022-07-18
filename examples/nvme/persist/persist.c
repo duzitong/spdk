@@ -56,6 +56,7 @@ static struct rdma_handshake {
 // should be enough for IPv4
 char addr_buf[16];
 char port_buf[8];
+char cpu_buf[8] = "0x40";
 
 int main(int argc, char **argv)
 {
@@ -64,16 +65,9 @@ int main(int argc, char **argv)
 
 	spdk_env_opts_init(&opts);
 
-	opts.name = "persist";
-	opts.core_mask = "0x40";
-	if (spdk_env_init(&opts) < 0) {
-		fprintf(stderr, "Unable to initialize SPDK env\n");
-		return 1;
-	}
-
 	int op;
 
-	while ((op = getopt(argc, argv, "a:p:")) != -1) {
+	while ((op = getopt(argc, argv, "a:p:m:")) != -1) {
 		switch (op) {
 			case 'a':
 				memcpy(addr_buf, optarg, strlen(optarg));
@@ -81,11 +75,21 @@ int main(int argc, char **argv)
 			case 'p':
 				memcpy(port_buf, optarg, strlen(optarg));
 				break;
+			case 'm':
+				memcpy(cpu_buf, optarg, strlen(optarg));
+				break;
 		}
 	}
 
 	if (!strlen(addr_buf) || !strlen(port_buf)) {
 		printf("not enough arguments.\n");
+		return 1;
+	}
+
+	opts.name = "persist";
+	opts.core_mask = cpu_buf;
+	if (spdk_env_init(&opts) < 0) {
+		fprintf(stderr, "Unable to initialize SPDK env\n");
 		return 1;
 	}
 
