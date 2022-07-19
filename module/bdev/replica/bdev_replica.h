@@ -124,6 +124,9 @@ struct replica_bdev {
 	/* array of base bdev info */
 	struct replica_base_bdev_info	*base_bdev_info;
 
+	/* use md or not */
+	bool				md;
+
 	/* block length bit shift for optimized calculation */
 	uint32_t			blocklen_shift;
 
@@ -170,6 +173,8 @@ struct replica_bdev_config {
 
 	/* number of base bdevs */
 	uint8_t				num_base_bdevs;
+
+	bool				md;
 
 	TAILQ_ENTRY(replica_bdev_config)	link;
 };

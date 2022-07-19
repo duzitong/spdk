@@ -418,7 +418,7 @@ def bdev_replica_get_bdevs(client, category):
     return client.call('bdev_replica_get_bdevs', params)
 
 
-def bdev_replica_create(client, name, base_bdevs):
+def bdev_replica_create(client, name, base_bdevs, md=0):
     """Create replica bdev.
 
     Args:
@@ -428,7 +428,7 @@ def bdev_replica_create(client, name, base_bdevs):
     Returns:
         None
     """
-    params = {'name': name, 'base_bdevs': base_bdevs}
+    params = {'name': name, 'base_bdevs': base_bdevs, 'md': md>0}
 
     return client.call('bdev_replica_create', params)
 

@@ -462,10 +462,17 @@ replica_bdev_submit_write_request(struct replica_bdev_io *replica_io)
 		base_info = &replica_bdev->base_bdev_info[i];
 		base_ch = replica_io->replica_ch->base_channel[i];
 
-		ret = spdk_bdev_writev_blocks(base_info->desc, base_ch,
-						bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
-						bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, replica_base_bdev_rw_complete,
-						replica_io);
+		if (replica_bdev->md) {
+			ret = spdk_bdev_writev_blocks_with_md(base_info->desc, base_ch,
+							bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt, bdev_io->u.bdev.md_buf,
+							bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, replica_base_bdev_rw_complete,
+							replica_io);
+		} else {
+			ret = spdk_bdev_writev_blocks(base_info->desc, base_ch,
+							bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
+							bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, replica_base_bdev_rw_complete,
+							replica_io);
+		}
 
 		if (ret == 0) {
 			replica_io->base_bdev_io_submitted++;
@@ -956,7 +963,7 @@ replica_bdev_config_find_by_name(const char *replica_name)
  * _replica_cfg - Pointer to newly added configuration
  */
 int
-replica_bdev_config_add(const char *replica_name, uint8_t num_base_bdevs,
+replica_bdev_config_add(const char *replica_name, uint8_t num_base_bdevs, bool md,
 		     struct replica_bdev_config **_replica_cfg)
 {
 	struct replica_bdev_config *replica_cfg;
@@ -994,6 +1001,8 @@ replica_bdev_config_add(const char *replica_name, uint8_t num_base_bdevs,
 		SPDK_ERRLOG("unable to allocate memory\n");
 		return -ENOMEM;
 	}
+
+	replica_cfg->md = true;
 
 	TAILQ_INSERT_TAIL(&g_replica_config.replica_bdev_config_head, replica_cfg, link);
 	g_replica_config.total_replica_bdev++;
@@ -1185,6 +1194,7 @@ replica_bdev_create(struct replica_bdev_config *replica_cfg)
 		free(replica_bdev);
 		return -ENOMEM;
 	}
+	replica_bdev->md = replica_cfg->md;
 
 	replica_bdev->state = REPLICA_BDEV_STATE_CONFIGURING;
 	replica_bdev->config = replica_cfg;
@@ -1304,6 +1314,11 @@ replica_bdev_configure(struct replica_bdev *replica_bdev)
 
 	replica_bdev_gen = &replica_bdev->bdev;
 	replica_bdev_gen->blocklen = blocklen;
+
+	if (replica_bdev->md) {
+		replica_bdev_gen->md_len = blocklen;
+		replica_bdev_gen->md_interleave = false;
+	}
 
 	rc = replica_bdev_start(replica_bdev);
 	if (rc != 0) {

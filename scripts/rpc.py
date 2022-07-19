@@ -1991,11 +1991,13 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
 
         rpc.bdev.bdev_replica_create(args.client,
                                   name=args.name,
-                                  base_bdevs=base_bdevs)
+                                  base_bdevs=base_bdevs,
+                                  md=args.md)
     p = subparsers.add_parser('bdev_replica_create', aliases=['construct_replica_bdev'],
                               help='Create new replica bdev')
     p.add_argument('-n', '--name', help='replica bdev name', required=True)
     p.add_argument('-b', '--base-bdevs', help='base bdevs name, whitespace separated list in quotes', required=True)
+    p.add_argument('-m', '--md', help="""md support, default 0 (disabled)""", type=int)
     p.set_defaults(func=bdev_replica_create)
 
     def bdev_replica_delete(args):
