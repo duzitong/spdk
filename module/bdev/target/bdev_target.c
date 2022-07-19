@@ -188,12 +188,18 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 		   struct target_task *task,
 		   struct wal_metadata* md, struct iovec *iov, int iovcnt, size_t len, uint64_t offset)
 {
+	// if (offset > 512 * 1024 * 1024) {
+	// 	SPDK_ERRLOG("offset %ld is too large\n", offset);
+	// 	spdk_bdev_io_complete(spdk_bdev_io_from_ctx(task),
+	// 			      SPDK_BDEV_IO_STATUS_FAILED);
+	// 	return;
+	// }
 	void *dst = mdisk->malloc_buf + offset;
 	// for RDMA write
 	void* rdma_src = dst;
 	void* rdma_dst = mdisk->remote_handshake->base_addr + offset;
 	int rc;
-	uint64_t wr_id = (uint64_t)spdk_bdev_io_from_ctx(task);
+	struct spdk_bdev_io* bdev_io = spdk_bdev_io_from_ctx(task);
 	
 	if (bdev_target_check_iov_len(iov, iovcnt, len)) {
 		spdk_bdev_io_complete(spdk_bdev_io_from_ctx(task),
@@ -217,10 +223,13 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 		dst += iov[i].iov_len;
 	}
 
-	// TODO: RDMA write
 	struct ibv_send_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge;
-	wr.wr_id = wr_id;
+	memset(&wr, 0, sizeof(wr));
+	wr.wr_id = (uint64_t)bdev_io;
+	wr.next = NULL;
+	// TODO: inline?
+	wr.send_flags = IBV_SEND_SIGNALED;
 	wr.opcode = IBV_WR_RDMA_WRITE;
 	wr.num_sge = 1;
 	wr.sg_list = &sge;
@@ -233,11 +242,22 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 
 	rc = ibv_post_send(mdisk->cm_id->qp, &wr, &bad_wr);
 	if (rc != 0) {
-		SPDK_ERRLOG("RDMA write failed\n");
+		SPDK_ERRLOG("RDMA write failed with errno = %d\n", rc);
+		SPDK_NOTICELOG("Local: %p %d; Remote: %p %d; Len = %d\n",
+			(void*)sge.addr, sge.lkey, (void*)wr.wr.rdma.remote_addr, wr.wr.rdma.rkey,
+			sge.length);
 		spdk_bdev_io_complete(spdk_bdev_io_from_ctx(task),
 				      SPDK_BDEV_IO_STATUS_FAILED);
 		return;
 	}
+	// else {
+	// 	SPDK_NOTICELOG("RDMA write succeed\n");
+	// 	SPDK_NOTICELOG("IO: %p, Local: %p %d; Remote: %p %d; Len = %d\n",
+	// 		bdev_io, (void*)sge.addr, sge.lkey, (void*)wr.wr.rdma.remote_addr, wr.wr.rdma.rkey,
+	// 		sge.length);
+	// 	// spdk_bdev_io_complete(spdk_bdev_io_from_ctx(task),
+	// 	// 		      SPDK_BDEV_IO_STATUS_PENDING);
+	// }
 }
 
 static void _log_md(struct spdk_bdev_io* bdev_io) {
@@ -409,7 +429,7 @@ static const struct spdk_bdev_fn_table target_fn_table = {
 static int
 target_rdma_poller(void *ctx)
 {
-	SPDK_DEBUGLOG(bdev_target, "enter\n");
+	int rc = SPDK_POLLER_IDLE;
 	struct target_disk *tdisk = ctx;
 
 	struct ibv_wc wc;
@@ -424,12 +444,14 @@ target_rdma_poller(void *ctx)
 		}
 		else if (cnt == 0) {
 			SPDK_DEBUGLOG(bdev_target, "no item in cq\n");
-			return SPDK_POLLER_BUSY;
+			return rc;
 		}
 		else {
 			assert(cnt == 1);
 			struct spdk_bdev_io* io = (struct spdk_bdev_io*)wc.wr_id;
+			// SPDK_NOTICELOG("received io %p\n", io);
 			spdk_bdev_io_complete(io, SPDK_BDEV_IO_STATUS_SUCCESS);
+			rc = SPDK_POLLER_BUSY;
 		}
 	}
 }
@@ -533,6 +555,8 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	struct ibv_context* ibv_context = cm_id->verbs;
 	struct ibv_device_attr device_attr = {};
 	ibv_query_device(ibv_context, &device_attr);
+	SPDK_DEBUGLOG(bdev_target, "max wr sge = %d, max wr num = %d, max cqe = %d\n",
+		device_attr.max_sge, device_attr.max_qp_wr, device_attr.max_cqe);
 	struct ibv_pd* ibv_pd = ibv_alloc_pd(ibv_context);
 	struct ibv_mr* ibv_mr = ibv_reg_mr(ibv_pd,
 		mdisk->malloc_buf,
@@ -551,8 +575,8 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 		.recv_cq = ibv_cq,
 		.qp_type = IBV_QPT_RC,
 		.cap = {
-			.max_send_sge = 1,
-			.max_send_wr = 1,
+			.max_send_sge = device_attr.max_sge,
+			.max_send_wr = 1024,
 			.max_recv_sge = 1,
 			.max_recv_wr = 1,
 		}
@@ -733,7 +757,6 @@ delete_target_disk(const char *name, spdk_delete_target_complete cb_fn, void *cb
 
 static int bdev_target_initialize(void)
 {
-	SPDK_ERRLOG("enter\n");
 	return 0;
 }
 

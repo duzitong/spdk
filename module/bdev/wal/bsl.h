@@ -3,7 +3,7 @@
 
 #include "spdk/env.h"
 
-#define BSKIPLIST_MAXLEVEL 32 /* Should be enough for 2^64 elements */
+#define BSKIPLIST_MAXLEVEL 28 /* make bskiplist node size to 256 */
 
 #define BSKIPLIST_P 0.3      /* Skiplist P = 0.3 */
 
