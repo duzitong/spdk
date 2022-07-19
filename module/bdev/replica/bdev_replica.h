@@ -221,7 +221,7 @@ int replica_bdev_create(struct replica_bdev_config *replica_cfg);
 int replica_bdev_add_base_devices(struct replica_bdev_config *replica_cfg);
 void replica_bdev_remove_base_devices(struct replica_bdev_config *replica_cfg,
 				   replica_bdev_destruct_cb cb_fn, void *cb_ctx);
-int replica_bdev_config_add(const char *replica_name, uint8_t num_base_bdevs,
+int replica_bdev_config_add(const char *replica_name, uint8_t num_base_bdevs, bool md,
 			 struct replica_bdev_config **_replica_cfg);
 int replica_bdev_config_add_base_bdev(struct replica_bdev_config *replica_cfg,
 				   const char *base_bdev_name, uint8_t slot);

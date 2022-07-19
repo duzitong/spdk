@@ -462,7 +462,7 @@ replica_bdev_submit_write_request(struct replica_bdev_io *replica_io)
 		base_info = &replica_bdev->base_bdev_info[i];
 		base_ch = replica_io->replica_ch->base_channel[i];
 
-		if (replica_bdev->md) {
+		if (replica_bdev->md && bdev_io->u.bdev.md_buf) {
 			ret = spdk_bdev_writev_blocks_with_md(base_info->desc, base_ch,
 							bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt, bdev_io->u.bdev.md_buf,
 							bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, replica_base_bdev_rw_complete,
