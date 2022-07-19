@@ -15,7 +15,7 @@
         {
           "method": "bdev_replica_create",
           "params": {
-            "name": "Replica0",
+            "name": "ReplicaMem",
             "base_bdevs": [
               "Malloc0"
             ],
@@ -31,11 +31,20 @@
           }
         },
         {
+          "method": "bdev_replica_create",
+          "params": {
+            "name": "ReplicaSSD",
+            "base_bdevs": [
+              "Nvme0n1"
+            ]
+          }
+        },
+        {
           "method": "bdev_wal_create",
           "params": {
             "name": "Wal1",
-            "log_bdev": "Replica0",
-            "core_bdev": "Nvme0n1"
+            "log_bdev": "ReplicaMem",
+            "core_bdev": "ReplicaSSD"
           }
         }
       ]

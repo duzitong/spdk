@@ -200,7 +200,7 @@ decode_base_bdevs(const struct spdk_json_val *val, void *out)
 static const struct spdk_json_object_decoder rpc_bdev_replica_create_decoders[] = {
 	{"name", offsetof(struct rpc_bdev_replica_create, name), spdk_json_decode_string},
 	{"base_bdevs", offsetof(struct rpc_bdev_replica_create, base_bdevs), decode_base_bdevs},
-	{"md", offsetof(struct rpc_bdev_replica_create, md), spdk_json_decode_bool},
+	{"md", offsetof(struct rpc_bdev_replica_create, md), spdk_json_decode_bool, true},
 };
 
 /*
