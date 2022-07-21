@@ -19,6 +19,7 @@
 #include "spdk/conf.h"
 #include "spdk/zipf.h"
 #include "spdk/histogram_data.h"
+#include "spdk/likely.h"
 
 #define BDEVPERF_CONFIG_MAX_FILENAME 1024
 #define BDEVPERF_CONFIG_UNDEFINED -1
@@ -542,6 +543,8 @@ bdevperf_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 	uint64_t		offset_in_ios;
 	uint64_t		tsc_diff;
 
+	job = task->job;
+	
 	tsc_diff = spdk_get_ticks() - task->submit_tsc;
 	if (spdk_unlikely(job->min_tsc > tsc_diff)) {
 		job->min_tsc = tsc_diff;
@@ -551,7 +554,6 @@ bdevperf_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 	}
 	spdk_histogram_data_tally(job->histogram, tsc_diff);
 
-	job = task->job;
 	md_check = spdk_bdev_get_dif_type(job->bdev) == SPDK_DIF_DISABLE;
 
 	if (!success) {
