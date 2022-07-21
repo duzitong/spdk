@@ -53,6 +53,7 @@ static int g_show_performance_real_time = 0;
 static uint64_t g_show_performance_period_in_usec = 1000000;
 static uint64_t g_show_performance_period_num = 0;
 static uint64_t g_show_performance_ema_period = 0;
+static uint64_t g_tsc_rate;
 static int g_run_rc = 0;
 static bool g_shutdown = false;
 static uint64_t g_shutdown_tsc;
@@ -137,6 +138,7 @@ struct bdevperf_job {
 	/* latency stats */
 	uint64_t					min_tsc;
 	uint64_t					max_tsc;
+	uint64_t					total_tsc;
 	struct spdk_histogram_data	*histogram;
 	/* END */
 
@@ -239,7 +241,7 @@ check_cutoff(void *ctx, uint64_t start, uint64_t end, uint64_t count,
 
 	so_far_pct = (double)so_far / total;
 	while (so_far_pct >= **cutoff && **cutoff > 0) {
-		printf("%9.5f%% : %9.3fus\n", **cutoff * 100, (double)end * 1000 * 1000 / spdk_get_ticks_hz());
+		printf("%9.5f%% : %9.3fus\n", **cutoff * 100, (double)end * 1000 * 1000 / g_tsc_rate);
 		(*cutoff)++;
 	}
 }
@@ -249,6 +251,7 @@ performance_dump_job(struct bdevperf_aggregate_stats *stats, struct bdevperf_job
 {
 	double io_per_second, mb_per_second, failed_per_second, timeout_per_second;
 	const double *cutoff = g_latency_cutoffs;
+	double average_latency, min_latency, max_latency;
 
 	printf("\r Job: %s (Core Mask 0x%s)\n", spdk_thread_get_name(job->thread),
 	       spdk_cpuset_fmt(spdk_thread_get_cpumask(job->thread)));
@@ -274,6 +277,14 @@ performance_dump_job(struct bdevperf_aggregate_stats *stats, struct bdevperf_job
 
 	printf("Summary latency data for %-43.43s:\n", job->name);
 	printf("=================================================================================\n");
+
+	average_latency = ((double)job->total_tsc / job->io_completed) * 1000 * 1000 / g_tsc_rate;
+	min_latency = (double)job->min_tsc * 1000 * 1000 / g_tsc_rate;
+
+	max_latency = (double)job->max_tsc * 1000 * 1000 / g_tsc_rate;
+
+	printf("Average: %10.2f, Min: %10.2f, Max: %10.2f\n",
+			average_latency, min_latency, max_latency);
 
 	spdk_histogram_data_iterate(job->histogram, check_cutoff, &cutoff);
 
@@ -546,6 +557,7 @@ bdevperf_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 	job = task->job;
 
 	tsc_diff = spdk_get_ticks() - task->submit_tsc;
+	job->total_tsc += tsc_diff;
 	if (spdk_unlikely(job->min_tsc > tsc_diff)) {
 		job->min_tsc = tsc_diff;
 	}
@@ -1908,6 +1920,8 @@ bdevperf_run(void *arg1)
 		/* Do not perform any tests until RPC is received */
 		return;
 	}
+
+	g_tsc_rate = spdk_get_ticks_hz();
 
 	bdevperf_construct_job_configs();
 }
