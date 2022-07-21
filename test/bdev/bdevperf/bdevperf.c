@@ -239,7 +239,7 @@ check_cutoff(void *ctx, uint64_t start, uint64_t end, uint64_t count,
 
 	so_far_pct = (double)so_far / total;
 	while (so_far_pct >= **cutoff && **cutoff > 0) {
-		printf("%9.5f%% : %9.3fus\n", **cutoff * 100, (double)end * 1000 * 1000 / spdk_get_ticks_hz(););
+		printf("%9.5f%% : %9.3fus\n", **cutoff * 100, (double)end * 1000 * 1000 / spdk_get_ticks_hz());
 		(*cutoff)++;
 	}
 }
