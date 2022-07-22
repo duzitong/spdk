@@ -46,6 +46,7 @@
 #include "spdk/thread.h"
 #include "spdk/queue.h"
 #include "spdk/string.h"
+#include "spdk/trace.h"
 
 #include "spdk/bdev_module.h"
 #include "spdk/log.h"
@@ -214,6 +215,7 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 	task->status = SPDK_BDEV_IO_STATUS_SUCCESS;
 	task->num_outstanding = 0;
 
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_WRITE_MEMCPY_START, 0, 0, (uintptr_t)bdev_io);
 	if (md != NULL) {
 		memcpy(dst, md, mdisk->disk.md_len);
 		dst += mdisk->disk.md_len;
@@ -223,6 +225,7 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 		memcpy(dst, iov[i].iov_base, iov[0].iov_len);
 		dst += iov[i].iov_len;
 	}
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_WRITE_MEMCPY_END, 0, 0, (uintptr_t)bdev_io);
 
 	struct ibv_send_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge;
@@ -241,7 +244,9 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 	sge.length = len + mdisk->disk.md_len;
 	sge.lkey = mdisk->mr->lkey;
 
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_RDMA_POST_SEND_WRITE_START, 0, 0, (uintptr_t)bdev_io);
 	rc = ibv_post_send(mdisk->cm_id->qp, &wr, &bad_wr);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_RDMA_POST_SEND_WRITE_END, 0, 0, (uintptr_t)bdev_io);
 	if (rc != 0) {
 		SPDK_ERRLOG("RDMA write failed with errno = %d\n", rc);
 		SPDK_NOTICELOG("Local: %p %d; Remote: %p %d; Len = %d\n",
@@ -448,6 +453,7 @@ target_rdma_poller(void *ctx)
 		rc = SPDK_POLLER_BUSY;
 		for (int i = 0; i < cnt; i++) {
 			struct spdk_bdev_io* io = (struct spdk_bdev_io*)tdisk->wc_buf[i].wr_id;
+			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_CQ_POLL, 0, 0, (uintptr_t)io);
 			// SPDK_NOTICELOG("received io %p\n", io);
 			spdk_bdev_io_complete(io, SPDK_BDEV_IO_STATUS_SUCCESS);
 		}
@@ -765,3 +771,69 @@ bdev_target_deinitialize(void)
 }
 
 SPDK_LOG_REGISTER_COMPONENT(bdev_target)
+
+SPDK_TRACE_REGISTER_FN(target_trace, "target", TRACE_GROUP_BDEV)
+{
+	struct spdk_trace_tpoint_opts opts[] = {
+		{
+			"BDEV_IO_START", TRACE_BDEV_IO_START,
+			OWNER_BDEV, OBJECT_BDEV_IO, 1,
+			{
+				{ "type", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "ctx", SPDK_TRACE_ARG_TYPE_PTR, 8 },
+				{ "offset", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "len", SPDK_TRACE_ARG_TYPE_INT, 8 }
+			}
+		},
+		{
+			"BDEV_IO_DONE", TRACE_BDEV_IO_DONE,
+			OWNER_BDEV, OBJECT_BDEV_IO, 0,
+			{{ "ctx", SPDK_TRACE_ARG_TYPE_PTR, 8 }}
+		},
+		{
+			"BDEV_IOCH_CREATE", TRACE_BDEV_IOCH_CREATE,
+			OWNER_BDEV, OBJECT_NONE, 1,
+			{
+				{ "name", SPDK_TRACE_ARG_TYPE_STR, 40 },
+				{ "thread_id", SPDK_TRACE_ARG_TYPE_INT, 8}
+			}
+		},
+		{
+			"BDEV_IOCH_DESTROY", TRACE_BDEV_IOCH_DESTROY,
+			OWNER_BDEV, OBJECT_NONE, 0,
+			{
+				{ "name", SPDK_TRACE_ARG_TYPE_STR, 40 },
+				{ "thread_id", SPDK_TRACE_ARG_TYPE_INT, 8}
+			}
+		},
+		{
+			"TARGET_W_MEMCPY_START", TRACE_BDEV_WRITE_MEMCPY_START,
+			OWNER_BDEV, OBJECT_BDEV_IO, 1,
+			{}
+		},
+		{
+			"TARGET_W_MEMCPY_END", TRACE_BDEV_WRITE_MEMCPY_END,
+			OWNER_BDEV, OBJECT_BDEV_IO, 0,
+			{}
+		},
+		{
+			"TARGET_IB_WRITE_START", TRACE_BDEV_RDMA_POST_SEND_WRITE_START,
+			OWNER_BDEV, OBJECT_BDEV_IO, 1,
+			{}
+		},
+		{
+			"TARGET_IB_WRITE_END", TRACE_BDEV_RDMA_POST_SEND_WRITE_END,
+			OWNER_BDEV, OBJECT_BDEV_IO, 1,
+			{}
+		},
+		{
+			"TARGET_CQ_POLL", TRACE_BDEV_CQ_POLL,
+			OWNER_BDEV, OBJECT_BDEV_IO, 0,
+			{}
+		},
+	};
+
+	spdk_trace_register_owner(OWNER_BDEV, 'b');
+	spdk_trace_register_object(OBJECT_BDEV_IO, 'i');
+	spdk_trace_register_description_ext(opts, SPDK_COUNTOF(opts));
+}
