@@ -515,10 +515,6 @@ nvme_tcp_pdu_set_data_buf(struct nvme_tcp_pdu *pdu,
 
 		pdu->data_iovcnt = NVME_TCP_MAX_SGL_DESCRIPTORS - pdu_sgl->iovcnt;
 	}
-	pdu->data_iovcnt,
-	pdu->data_len,
-	pdu->sgl.iovcnt,
-	pdu->sgl.total_size);
 }
 
 static void
