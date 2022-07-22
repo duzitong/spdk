@@ -18,6 +18,8 @@
 #include "spdk/bit_array.h"
 #include "spdk/conf.h"
 #include "spdk/zipf.h"
+#include "spdk/histogram_data.h"
+#include "spdk/likely.h"
 
 #define BDEVPERF_CONFIG_MAX_FILENAME 1024
 #define BDEVPERF_CONFIG_UNDEFINED -1
@@ -32,6 +34,7 @@ struct bdevperf_task {
 	uint64_t			offset_blocks;
 	struct bdevperf_task		*task_to_abort;
 	enum spdk_bdev_io_type		io_type;
+	uint64_t		submit_tsc;
 	TAILQ_ENTRY(bdevperf_task)	link;
 	struct spdk_bdev_io_wait_entry	bdev_io_wait;
 };
@@ -50,6 +53,7 @@ static int g_show_performance_real_time = 0;
 static uint64_t g_show_performance_period_in_usec = 1000000;
 static uint64_t g_show_performance_period_num = 0;
 static uint64_t g_show_performance_ema_period = 0;
+static uint64_t g_tsc_rate;
 static int g_run_rc = 0;
 static bool g_shutdown = false;
 static uint64_t g_shutdown_tsc;
@@ -68,6 +72,25 @@ static double g_zipf_theta;
 
 static struct spdk_cpuset g_all_cpuset;
 static struct spdk_poller *g_perf_timer = NULL;
+
+static const double g_latency_cutoffs[] = {
+	0.01,
+	0.10,
+	0.25,
+	0.50,
+	0.75,
+	0.90,
+	0.95,
+	0.98,
+	0.99,
+	0.995,
+	0.999,
+	0.9999,
+	0.99999,
+	0.999999,
+	0.9999999,
+	-1,
+};
 
 static void bdevperf_submit_single(struct bdevperf_job *job, struct bdevperf_task *task);
 static void rpc_perform_tests_cb(void);
@@ -111,6 +134,14 @@ struct bdevperf_job {
 	struct spdk_poller		*reset_timer;
 	struct spdk_bit_array		*outstanding;
 	struct spdk_zipf		*zipf;
+
+	/* latency stats */
+	uint64_t					min_tsc;
+	uint64_t					max_tsc;
+	uint64_t					total_tsc;
+	struct spdk_histogram_data	*histogram;
+	/* END */
+
 	TAILQ_HEAD(, bdevperf_task)	task_list;
 };
 
@@ -198,9 +229,29 @@ get_ema_io_per_second(struct bdevperf_job *job, uint64_t ema_period)
 }
 
 static void
+check_cutoff(void *ctx, uint64_t start, uint64_t end, uint64_t count,
+	     uint64_t total, uint64_t so_far)
+{
+	double so_far_pct;
+	double **cutoff = ctx;
+
+	if (count == 0) {
+		return;
+	}
+
+	so_far_pct = (double)so_far / total;
+	while (so_far_pct >= **cutoff && **cutoff > 0) {
+		printf("%9.5f%% : %9.3fus\n", **cutoff * 100, (double)end * 1000 * 1000 / g_tsc_rate);
+		(*cutoff)++;
+	}
+}
+
+static void
 performance_dump_job(struct bdevperf_aggregate_stats *stats, struct bdevperf_job *job)
 {
 	double io_per_second, mb_per_second, failed_per_second, timeout_per_second;
+	const double *cutoff = g_latency_cutoffs;
+	double average_latency, min_latency, max_latency;
 
 	printf("\r Job: %s (Core Mask 0x%s)\n", spdk_thread_get_name(job->thread),
 	       spdk_cpuset_fmt(spdk_thread_get_cpumask(job->thread)));
@@ -223,6 +274,22 @@ performance_dump_job(struct bdevperf_aggregate_stats *stats, struct bdevperf_job
 		printf("\t %-20s: %10.2f Fail/s %8.2f TO/s\n",
 		       "", failed_per_second, timeout_per_second);
 	}
+
+	printf("Summary latency data for %-43.43s:\n", job->name);
+	printf("=================================================================================\n");
+
+	average_latency = ((double)job->total_tsc / job->io_completed) * 1000 * 1000 / g_tsc_rate;
+	min_latency = (double)job->min_tsc * 1000 * 1000 / g_tsc_rate;
+
+	max_latency = (double)job->max_tsc * 1000 * 1000 / g_tsc_rate;
+
+	printf("Average: %10.2f, Min: %10.2f, Max: %10.2f\n",
+			average_latency, min_latency, max_latency);
+
+	spdk_histogram_data_iterate(job->histogram, check_cutoff, &cutoff);
+
+	printf("\n");
+
 	stats->total_io_per_second += io_per_second;
 	stats->total_mb_per_second += mb_per_second;
 	stats->total_failed_per_second += failed_per_second;
@@ -485,8 +552,20 @@ bdevperf_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 	int			iovcnt;
 	bool			md_check;
 	uint64_t		offset_in_ios;
+	uint64_t		tsc_diff;
 
 	job = task->job;
+
+	tsc_diff = spdk_get_ticks() - task->submit_tsc;
+	job->total_tsc += tsc_diff;
+	if (spdk_unlikely(job->min_tsc > tsc_diff)) {
+		job->min_tsc = tsc_diff;
+	}
+	if (spdk_unlikely(job->max_tsc < tsc_diff)) {
+		job->max_tsc = tsc_diff;
+	}
+	spdk_histogram_data_tally(job->histogram, tsc_diff);
+
 	md_check = spdk_bdev_get_dif_type(job->bdev) == SPDK_DIF_DISABLE;
 
 	if (!success) {
@@ -647,6 +726,8 @@ bdevperf_submit_task(void *arg)
 
 	desc = job->bdev_desc;
 	ch = job->ch;
+
+	task->submit_tsc = spdk_get_ticks();
 
 	switch (task->io_type) {
 	case SPDK_BDEV_IO_TYPE_WRITE:
@@ -1299,6 +1380,9 @@ bdevperf_construct_job(struct spdk_bdev *bdev, struct job_config *config,
 		}
 	}
 
+	job->min_tsc = UINT64_MAX;
+	job->histogram = spdk_histogram_data_alloc();
+
 	TAILQ_INIT(&job->task_list);
 
 	task_num = job->queue_depth;
@@ -1836,6 +1920,8 @@ bdevperf_run(void *arg1)
 		/* Do not perform any tests until RPC is received */
 		return;
 	}
+
+	g_tsc_rate = spdk_get_ticks_hz();
 
 	bdevperf_construct_job_configs();
 }
