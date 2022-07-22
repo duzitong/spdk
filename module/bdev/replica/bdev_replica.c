@@ -1002,7 +1002,7 @@ replica_bdev_config_add(const char *replica_name, uint8_t num_base_bdevs, bool m
 		return -ENOMEM;
 	}
 
-	replica_cfg->md = true;
+	replica_cfg->md = md;
 
 	TAILQ_INSERT_TAIL(&g_replica_config.replica_bdev_config_head, replica_cfg, link);
 	g_replica_config.total_replica_bdev++;
