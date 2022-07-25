@@ -567,7 +567,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 		num_blocks * block_size + 2 * sizeof(struct rdma_handshake),
 		IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
 
-	struct ibv_cq* ibv_cq = ibv_create_cq(ibv_context, 4096, NULL, NULL, 0);
+	struct ibv_cq* ibv_cq = ibv_create_cq(ibv_context, 256, NULL, NULL, 0);
 
 	mdisk->cq = ibv_cq;
 	mdisk->mr = ibv_mr;
@@ -613,6 +613,11 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	ibv_post_recv(cm_id->qp, &wr, &bad_wr);
 
 	struct rdma_conn_param conn_param = {};
+
+	conn_param.responder_resources = device_attr.max_qp_rd_atom;
+	conn_param.retry_count = 7;
+	conn_param.rnr_retry_count = 7;
+
 	rdma_connect(cm_id, &conn_param);
 	rdma_get_cm_event(rdma_channel, &connect_event);
 	if (connect_event->event != RDMA_CM_EVENT_ESTABLISHED) {
@@ -844,7 +849,7 @@ SPDK_TRACE_REGISTER_FN(target_trace, "target", TRACE_GROUP_BDEV)
 			{
 				{ "name", SPDK_TRACE_ARG_TYPE_STR, 40 },
 				{ "thread_id", SPDK_TRACE_ARG_TYPE_INT, 8}
-				}
+			}
 		},
 	};
 

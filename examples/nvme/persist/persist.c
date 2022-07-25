@@ -190,7 +190,13 @@ int main(int argc, char **argv)
 	sge.lkey = ibv_mr->lkey;
 	rc = ibv_post_recv(cm_id_2->qp, &wr, &bad_wr);
 	assert(rc == 0);
-	rc = rdma_accept(cm_id_2, NULL);
+
+	struct rdma_accept_param conn_param = {};
+
+	conn_param.responder_resources = device_attr.max_qp_rd_atom;
+	conn_param.retry_count = 7;
+	conn_param.rnr_retry_count = 7;
+	rc = rdma_accept(cm_id_2, &conn_param);
 
 	if (rc != 0) {
 		printf("accept err = %d\n", err);
