@@ -527,7 +527,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 
 	struct rdma_cm_id* cm_id = NULL;
 	
-	rdma_create_id(rdma_channel, &cm_id, NULL, RDMA_PS_TCP);
+	rdma_create_id(rdma_channel, &cm_id, NULL, RDMA_PS_IB);
 	struct sockaddr_in addr;
 	struct addrinfo hints = {};
 	struct addrinfo* addr_res = NULL;

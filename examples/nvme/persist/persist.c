@@ -107,7 +107,7 @@ int main(int argc, char **argv)
 	struct rdma_event_channel* rdma_channel = rdma_create_event_channel();
 
 	struct rdma_cm_id* cm_id = NULL;
-	rc = rdma_create_id(rdma_channel, &cm_id, NULL, RDMA_PS_TCP);
+	rc = rdma_create_id(rdma_channel, &cm_id, NULL, RDMA_PS_IB);
 	assert(rc == 0);
 
 	struct sockaddr_in addr;
