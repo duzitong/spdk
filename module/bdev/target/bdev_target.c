@@ -215,7 +215,7 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 	task->status = SPDK_BDEV_IO_STATUS_SUCCESS;
 	task->num_outstanding = 0;
 
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_WRITE_MEMCPY_START, 0, 0, (uintptr_t)bdev_io, mdisk->disk.name, spdk_thread_get_id(spdk_get_thread()));
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_WRITE_MEMCPY_START, 0, 0, (uintptr_t)bdev_io);
 	if (md != NULL) {
 		memcpy(dst, md, mdisk->disk.md_len);
 		dst += mdisk->disk.md_len;
@@ -225,7 +225,7 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 		memcpy(dst, iov[i].iov_base, iov[0].iov_len);
 		dst += iov[i].iov_len;
 	}
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_WRITE_MEMCPY_END, 0, 0, (uintptr_t)bdev_io, mdisk->disk.name, spdk_thread_get_id(spdk_get_thread()));
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_WRITE_MEMCPY_END, 0, 0, (uintptr_t)bdev_io);
 
 	struct ibv_send_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge;
@@ -244,9 +244,9 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 	sge.length = len + mdisk->disk.md_len;
 	sge.lkey = mdisk->mr->lkey;
 
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_RDMA_POST_SEND_WRITE_START, 0, 0, (uintptr_t)bdev_io, mdisk->disk.name, spdk_thread_get_id(spdk_get_thread()));
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_RDMA_POST_SEND_WRITE_START, 0, 0, (uintptr_t)bdev_io);
 	rc = ibv_post_send(mdisk->cm_id->qp, &wr, &bad_wr);
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_RDMA_POST_SEND_WRITE_END, 0, 0, (uintptr_t)bdev_io, mdisk->disk.name, spdk_thread_get_id(spdk_get_thread()));
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_RDMA_POST_SEND_WRITE_END, 0, 0, (uintptr_t)bdev_io);
 	if (rc != 0) {
 		SPDK_ERRLOG("RDMA write failed with errno = %d\n", rc);
 		SPDK_NOTICELOG("Local: %p %d; Remote: %p %d; Len = %d\n",
@@ -615,6 +615,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	struct rdma_conn_param conn_param = {};
 
 	conn_param.responder_resources = device_attr.max_qp_rd_atom;
+	conn_param.initiator_depth = device_attr.max_qp_init_rd_atom;
 	conn_param.retry_count = 7;
 	conn_param.rnr_retry_count = 7;
 
@@ -815,40 +816,30 @@ SPDK_TRACE_REGISTER_FN(target_trace, "target", TRACE_GROUP_BDEV)
 			"TARGET_W_MEMCPY_START", TRACE_BDEV_WRITE_MEMCPY_START,
 			OWNER_BDEV, OBJECT_BDEV_IO, 1,
 			{
-				{ "name", SPDK_TRACE_ARG_TYPE_STR, 40 },
-				{ "thread_id", SPDK_TRACE_ARG_TYPE_INT, 8}
 			}
 		},
 		{
 			"TARGET_W_MEMCPY_END", TRACE_BDEV_WRITE_MEMCPY_END,
 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
 			{
-				{ "name", SPDK_TRACE_ARG_TYPE_STR, 40 },
-				{ "thread_id", SPDK_TRACE_ARG_TYPE_INT, 8}
 			}
 		},
 		{
 			"TARGET_IB_WRITE_START", TRACE_BDEV_RDMA_POST_SEND_WRITE_START,
 			OWNER_BDEV, OBJECT_BDEV_IO, 1,
 			{
-				{ "name", SPDK_TRACE_ARG_TYPE_STR, 40 },
-				{ "thread_id", SPDK_TRACE_ARG_TYPE_INT, 8}
 			}
 		},
 		{
 			"TARGET_IB_WRITE_END", TRACE_BDEV_RDMA_POST_SEND_WRITE_END,
 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
 			{
-				{ "name", SPDK_TRACE_ARG_TYPE_STR, 40 },
-				{ "thread_id", SPDK_TRACE_ARG_TYPE_INT, 8}
 			}
 		},
 		{
 			"TARGET_CQ_POLL", TRACE_BDEV_CQ_POLL,
 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
 			{
-				{ "name", SPDK_TRACE_ARG_TYPE_STR, 40 },
-				{ "thread_id", SPDK_TRACE_ARG_TYPE_INT, 8}
 			}
 		},
 	};

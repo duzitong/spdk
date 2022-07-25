@@ -194,6 +194,7 @@ int main(int argc, char **argv)
 	struct rdma_conn_param conn_param = {};
 
 	conn_param.responder_resources = device_attr.max_qp_rd_atom;
+	conn_param.initiator_depth = device_attr.max_qp_init_rd_atom;
 	conn_param.retry_count = 7;
 	conn_param.rnr_retry_count = 7;
 	rc = rdma_accept(cm_id_2, &conn_param);
