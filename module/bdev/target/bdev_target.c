@@ -273,6 +273,7 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_CQ_POLL_END, 0, 0, (uintptr_t)mdisk->cq);
 		for (int i = 0; i < cnt; i++) {
 			struct spdk_bdev_io* io = (struct spdk_bdev_io*)mdisk->wc_buf[i].wr_id;
+			assert(io == bdev_io);
 			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_CQ_POLL, 0, 0, (uintptr_t)io);
 			// SPDK_NOTICELOG("received io %p\n", io);
 			spdk_bdev_io_complete(io, SPDK_BDEV_IO_STATUS_SUCCESS);
