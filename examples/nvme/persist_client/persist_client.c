@@ -119,6 +119,7 @@ int main(int argc, char **argv)
 				break;
 			case 'm':
 				memcpy(cpu_buf, optarg, strlen(optarg));
+				break;
 			case 'n':
 				memcpy(num_runs, optarg, strlen(optarg));
 				break;
@@ -339,7 +340,7 @@ int main(int argc, char **argv)
 		spdk_histogram_data_tally(histogram, tsc_diff);
 	}
 
-	double *cutoff = g_latency_cutoffs;
+	const double *cutoff = g_latency_cutoffs;
 
 	spdk_histogram_data_iterate(histogram, check_cutoff, &cutoff);
 }
