@@ -202,6 +202,7 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 	void* rdma_dst = mdisk->remote_handshake->base_addr + offset;
 	int rc;
 	struct spdk_bdev_io* bdev_io = spdk_bdev_io_from_ctx(task);
+	int cnt = 0;
 	
 	if (bdev_target_check_iov_len(iov, iovcnt, len)) {
 		spdk_bdev_io_complete(spdk_bdev_io_from_ctx(task),
@@ -248,6 +249,7 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_RDMA_POST_SEND_WRITE_START, 0, 0, (uintptr_t)bdev_io);
 	rc = ibv_post_send(mdisk->cm_id->qp, &wr, &bad_wr);
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_RDMA_POST_SEND_WRITE_END, 0, 0, (uintptr_t)bdev_io);
+	
 	if (rc != 0) {
 		SPDK_ERRLOG("RDMA write failed with errno = %d\n", rc);
 		SPDK_NOTICELOG("Local: %p %d; Remote: %p %d; Len = %d\n",
@@ -256,6 +258,16 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 		spdk_bdev_io_complete(spdk_bdev_io_from_ctx(task),
 				      SPDK_BDEV_IO_STATUS_FAILED);
 		return;
+	}
+
+	while (cnt == 0) {
+		cnt = ibv_poll_cq(mdisk->cq, 1, mdisk->wc_buf);
+		for (int i = 0; i < cnt; i++) {
+			struct spdk_bdev_io* io = (struct spdk_bdev_io*)mdisk->wc_buf[i].wr_id;
+			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_CQ_POLL, 0, 0, (uintptr_t)io);
+			// SPDK_NOTICELOG("received io %p\n", io);
+			spdk_bdev_io_complete(io, SPDK_BDEV_IO_STATUS_SUCCESS);
+		}
 	}
 	// else {
 	// 	SPDK_NOTICELOG("RDMA write succeed\n");
@@ -467,7 +479,7 @@ target_create_channel_cb(void *io_device, void *ctx)
 	struct target_channel *ch = ctx;
 	ch->tdisk = tdisk;
 
-	tdisk->rdma_poller = SPDK_POLLER_REGISTER(target_rdma_poller, tdisk, 0);
+	//tdisk->rdma_poller = SPDK_POLLER_REGISTER(target_rdma_poller, tdisk, 0);
 	if (!tdisk->rdma_poller) {
 		SPDK_ERRLOG("Failed to register target rdma poller\n");
 		return -ENOMEM;
@@ -481,7 +493,7 @@ target_destroy_channel_cb(void *io_device, void *ctx)
 {
 	struct target_disk *tdisk = io_device;
 
-	spdk_poller_unregister(&tdisk->rdma_poller);
+	//spdk_poller_unregister(&tdisk->rdma_poller);
 }
 
 
