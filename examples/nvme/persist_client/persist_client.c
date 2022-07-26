@@ -40,12 +40,14 @@
 #include "spdk/string.h"
 #include "spdk/log.h"
 #include "spdk/assert.h"
+#include "spdk/histogram_data.h"
 #include <errno.h>
 
 #include <infiniband/verbs.h>
 #include <rdma/rdma_cma.h>
 
 #define BUFFER_SIZE 512 * 1024 * 1024
+#define BLOCK_SIZE 4096
 void* circular_buffer;
 
 static struct rdma_handshake {
@@ -57,8 +59,46 @@ static struct rdma_handshake {
 char addr_buf[16];
 char port_buf[8];
 char cpu_buf[8] = "0x40";
+char num_runs[16];
 
 struct rdma_handshake *local_handshake, *remote_handshake;
+
+static const double g_latency_cutoffs[] = {
+	0.01,
+	0.10,
+	0.25,
+	0.50,
+	0.75,
+	0.90,
+	0.95,
+	0.98,
+	0.99,
+	0.995,
+	0.999,
+	0.9999,
+	0.99999,
+	0.999999,
+	0.9999999,
+	-1,
+};
+
+static void
+check_cutoff(void *ctx, uint64_t start, uint64_t end, uint64_t count,
+	     uint64_t total, uint64_t so_far)
+{
+	double so_far_pct;
+	double **cutoff = ctx;
+
+	if (count == 0) {
+		return;
+	}
+
+	so_far_pct = (double)so_far / total;
+	while (so_far_pct >= **cutoff && **cutoff > 0) {
+		printf("%9.5f%% : %9.3fus\n", **cutoff * 100, (double)end * 1000 * 1000 / spdk_get_ticks_hz());
+		(*cutoff)++;
+	}
+}
 
 int main(int argc, char **argv)
 {
@@ -69,7 +109,7 @@ int main(int argc, char **argv)
 
 	int op;
 
-	while ((op = getopt(argc, argv, "a:p:m:")) != -1) {
+	while ((op = getopt(argc, argv, "a:p:m:n:")) != -1) {
 		switch (op) {
 			case 'a':
 				memcpy(addr_buf, optarg, strlen(optarg));
@@ -79,6 +119,8 @@ int main(int argc, char **argv)
 				break;
 			case 'm':
 				memcpy(cpu_buf, optarg, strlen(optarg));
+			case 'n':
+				memcpy(num_runs, optarg, strlen(optarg));
 				break;
 		}
 	}
@@ -259,8 +301,43 @@ int main(int argc, char **argv)
 
 	printf("rdma handshake complete\n");
 
-	printf("press anything to quit...\n");
-	char buf[128];
-	scanf("%s", buf);
-	return 0;
+	struct spdk_histogram_data *histogram = spdk_histogram_data_alloc();
+	uint64_t runs = atoi(num_runs);
+	int i;
+	for (i = 3; i < runs+3; i++) {
+		uint64_t start_tsc = spdk_get_ticks();
+		struct ibv_send_wr wr, *bad_wr = NULL;
+		struct ibv_sge sge;
+		memset(&wr, 0, sizeof(wr));
+		wr.wr_id = i;
+		wr.next = NULL;
+		// TODO: inline?
+		wr.send_flags = IBV_SEND_SIGNALED;
+		wr.opcode = IBV_WR_RDMA_WRITE;
+		wr.num_sge = 1;
+		wr.sg_list = &sge;
+		wr.wr.rdma.remote_addr = (uint64_t)remote_handshake->base_addr + i * BLOCK_SIZE;
+		wr.wr.rdma.rkey = remote_handshake->rkey;
+
+		sge.addr = (uint64_t)circular_buffer + i * BLOCK_SIZE;
+		sge.length = BLOCK_SIZE;
+		sge.lkey = data_mr->lkey;
+
+		rc = ibv_post_send(cm_id->qp, &wr, &bad_wr);
+
+		if (rc) {
+			continue;
+		}
+
+		int cnt = 0;
+		while (cnt == 0) {
+			cnt = ibv_poll_cq(mdisk->cq, 1, mdisk->wc_buf);
+		}
+		uint64_t tsc_diff = spdk_get_ticks() - start_tsc;
+		spdk_histogram_data_tally(histogram, tsc_diff);
+	}
+
+	double *cutoff = g_latency_cutoffs;
+
+	spdk_histogram_data_iterate(job->histogram, check_cutoff, &cutoff);
 }
