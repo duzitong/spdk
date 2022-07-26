@@ -47,6 +47,7 @@
 #include "spdk/queue.h"
 #include "spdk/string.h"
 #include "spdk/trace.h"
+#include "spdk/likely.h"
 
 #include "spdk/bdev_module.h"
 #include "spdk/log.h"
@@ -257,7 +258,7 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 	rc = ibv_post_send(mdisk->cm_id->qp, &wr, &bad_wr);
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_RDMA_POST_SEND_WRITE_END, 0, 0, (uintptr_t)bdev_io);
 
-	if (rc != 0) {
+	if (spdk_unlikely(rc != 0)) {
 		SPDK_ERRLOG("RDMA write failed with errno = %d\n", rc);
 		SPDK_NOTICELOG("Local: %p %d; Remote: %p %d; Len = %d\n",
 			(void*)sge.addr, sge.lkey, (void*)wr.wr.rdma.remote_addr, wr.wr.rdma.rkey,
@@ -267,13 +268,9 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 		return;
 	}
 
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_CQ_POLL_START, 0, 0, (uintptr_t)bdev_io);
 	while (cnt == 0) {
-		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_CQ_POLLING_START, 0, 0, (uintptr_t)bdev_io);
 		cnt = ibv_poll_cq(mdisk->cq, 1, mdisk->wc_buf);
-		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_CQ_POLLING_END, 0, 0, (uintptr_t)bdev_io);
 		if (cnt > 0) {
-			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_CQ_POLL_END, 0, 0, (uintptr_t)bdev_io);
 			spdk_bdev_io_complete(bdev_io, SPDK_BDEV_IO_STATUS_SUCCESS);
 		}
 		// for (int i = 0; i < cnt; i++) {
