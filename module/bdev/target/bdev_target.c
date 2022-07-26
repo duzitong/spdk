@@ -219,6 +219,7 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 	if (md != NULL) {
 		memcpy(dst, md, mdisk->disk.md_len);
 		dst += mdisk->disk.md_len;
+		len += mdisk->disk.md_len;
 	}
 
 	for (int i = 0; i < iovcnt; i++) {
@@ -241,7 +242,7 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 	wr.wr.rdma.rkey = mdisk->remote_handshake->rkey;
 
 	sge.addr = (uint64_t)rdma_src;
-	sge.length = len + mdisk->disk.md_len;
+	sge.length = len;
 	sge.lkey = mdisk->mr->lkey;
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_RDMA_POST_SEND_WRITE_START, 0, 0, (uintptr_t)bdev_io);
@@ -435,7 +436,6 @@ static const struct spdk_bdev_fn_table target_fn_table = {
 static int
 target_rdma_poller(void *ctx)
 {
-	int rc = SPDK_POLLER_IDLE;
 	struct target_disk *tdisk = ctx;
 
 	// TODO: batch polling may be faster?
@@ -443,21 +443,20 @@ target_rdma_poller(void *ctx)
 	if (cnt < 0) {
 		// TODO: what to do when poll cq fails?
 		SPDK_ERRLOG("ibv_poll_cq failed\n");
-		return SPDK_POLLER_BUSY;
 	}
 	else if (cnt == 0) {
 		SPDK_DEBUGLOG(bdev_target, "no item in cq\n");
-		return rc;
 	}
 	else {
-		rc = SPDK_POLLER_BUSY;
 		for (int i = 0; i < cnt; i++) {
 			struct spdk_bdev_io* io = (struct spdk_bdev_io*)tdisk->wc_buf[i].wr_id;
-			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_CQ_POLL, 0, 0, (uintptr_t)io, tdisk->disk.name, spdk_thread_get_id(spdk_get_thread()));
+			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_CQ_POLL, 0, 0, (uintptr_t)io);
 			// SPDK_NOTICELOG("received io %p\n", io);
 			spdk_bdev_io_complete(io, SPDK_BDEV_IO_STATUS_SUCCESS);
 		}
 	}
+
+	return SPDK_POLLER_BUSY;
 }
 
 static int
