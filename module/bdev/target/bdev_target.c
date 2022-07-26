@@ -535,9 +535,9 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	 *  from on multi-socket systems.
 	 */
 	mdisk->malloc_buf = spdk_zmalloc(num_blocks * block_size, 2 * 1024 * 1024, NULL,
-					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-	mdisk->local_handshake = spdk_zmalloc(sizeof(*mdisk->local_handshake), 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-	mdisk->remote_handshake = spdk_zmalloc(sizeof(*mdisk->remote_handshake), 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+					 SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
+	mdisk->local_handshake = spdk_zmalloc(sizeof(*mdisk->local_handshake), 0, NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
+	mdisk->remote_handshake = spdk_zmalloc(sizeof(*mdisk->remote_handshake), 0, NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
 	if (!mdisk->malloc_buf || !mdisk->local_handshake || !mdisk->remote_handshake) {
 		SPDK_ERRLOG("malloc_buf spdk_zmalloc() failed\n");
 		target_disk_free(mdisk);
@@ -669,6 +669,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	send_sge.length = sizeof(struct rdma_handshake);
 	send_sge.lkey = local_handshake_mr->lkey;
 
+	SPDK_NOTICELOG("sending local addr %p rkey %d\n", mdisk->local_handshake->base_addr, mdisk->local_handshake->rkey);
 	ibv_post_send(cm_id->qp, &send_wr, &bad_send_wr);
 	struct ibv_wc wc;
 	bool handshake_send_cpl = false;
