@@ -147,7 +147,7 @@ int main(int argc, char **argv)
 	struct ibv_mr* data_mr = ibv_reg_mr(ibv_pd,
 		circular_buffer,
 		BUFFER_SIZE,
-		IBV_ACCESS_REMOTE_WRITE);
+		IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
 	struct ibv_mr* lhs_mr = ibv_reg_mr(ibv_pd,
 		local_handshake,
 		sizeof(struct rdma_handshake),
