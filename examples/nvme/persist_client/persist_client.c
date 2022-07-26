@@ -308,6 +308,8 @@ int main(int argc, char **argv)
 		uint64_t start_tsc = spdk_get_ticks();
 		struct ibv_send_wr wr, *bad_wr = NULL;
 		struct ibv_sge sge;
+		struct ibv_wc wc_buf[1];
+
 		memset(&wr, 0, sizeof(wr));
 		wr.wr_id = i;
 		wr.next = NULL;
@@ -331,7 +333,7 @@ int main(int argc, char **argv)
 
 		int cnt = 0;
 		while (cnt == 0) {
-			cnt = ibv_poll_cq(mdisk->cq, 1, mdisk->wc_buf);
+			cnt = ibv_poll_cq(ibv_cq, 1, wc_buf);
 		}
 		uint64_t tsc_diff = spdk_get_ticks() - start_tsc;
 		spdk_histogram_data_tally(histogram, tsc_diff);
@@ -339,5 +341,5 @@ int main(int argc, char **argv)
 
 	double *cutoff = g_latency_cutoffs;
 
-	spdk_histogram_data_iterate(job->histogram, check_cutoff, &cutoff);
+	spdk_histogram_data_iterate(histogram, check_cutoff, &cutoff);
 }
