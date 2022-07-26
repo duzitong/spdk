@@ -529,7 +529,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	 * TODO: need to pass a hint so we know which socket to allocate
 	 *  from on multi-socket systems.
 	 */
-	mdisk->malloc_buf = spdk_zmalloc(num_blocks * block_size, 2 * 1024 * 1024, NULL,
+	mdisk->malloc_buf = spdk_zmalloc(num_blocks * block_size + 1, 2 * 1024 * 1024, NULL,
 					 SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
 	mdisk->local_handshake = spdk_zmalloc(sizeof(*mdisk->local_handshake), 0, NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
 	mdisk->remote_handshake = spdk_zmalloc(sizeof(*mdisk->remote_handshake), 0, NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
@@ -580,7 +580,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	struct ibv_pd* ibv_pd = ibv_alloc_pd(ibv_context);
 	struct ibv_mr* data_mr = ibv_reg_mr(ibv_pd,
 		mdisk->malloc_buf,
-		num_blocks * block_size,
+		num_blocks * block_size + 1,
 		IBV_ACCESS_LOCAL_WRITE);
 	struct ibv_mr* local_handshake_mr = ibv_reg_mr(ibv_pd,
 		mdisk->local_handshake,
@@ -661,7 +661,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	// TODO: use separate buffer
 	mdisk->local_handshake->base_addr = mdisk->malloc_buf;
 	mdisk->local_handshake->rkey = data_mr->rkey;
-	
+
 	SPDK_NOTICELOG("sending local addr %p rkey %d\n", mdisk->local_handshake->base_addr, mdisk->local_handshake->rkey);
 	ibv_post_send(cm_id->qp, &send_wr, &bad_send_wr);
 	struct ibv_wc wc;
