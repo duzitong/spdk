@@ -278,6 +278,11 @@ performance_dump_job(struct bdevperf_aggregate_stats *stats, struct bdevperf_job
 	printf("Summary latency data for %-43.43s:\n", job->name);
 	printf("=================================================================================\n");
 
+	if (g_tsc_rate != spdk_get_ticks_hz()) {
+		g_tsc_rate = spdk_get_ticks_hz();
+		printf("CPU hz changed to %d", g_tsc_rate);
+	}
+
 	average_latency = ((double)job->total_tsc / job->io_completed) * 1000 * 1000 / g_tsc_rate;
 	min_latency = (double)job->min_tsc * 1000 * 1000 / g_tsc_rate;
 
