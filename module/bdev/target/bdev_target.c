@@ -268,7 +268,9 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 	}
 
 	while (cnt == 0) {
+		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_CQ_POLL_START, 0, 0, (uintptr_t)mdisk->cq);
 		cnt = ibv_poll_cq(mdisk->cq, 1, mdisk->wc_buf);
+		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_CQ_POLL_END, 0, 0, (uintptr_t)mdisk->cq);
 		for (int i = 0; i < cnt; i++) {
 			struct spdk_bdev_io* io = (struct spdk_bdev_io*)mdisk->wc_buf[i].wr_id;
 			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_CQ_POLL, 0, 0, (uintptr_t)io);
@@ -604,9 +606,9 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 		.qp_type = IBV_QPT_RC,
 		.cap = {
 			.max_send_sge = device_attr.max_sge,
-			.max_send_wr = 1024,
-			.max_recv_sge = 1,
-			.max_recv_wr = 1,
+			.max_send_wr = 256,
+			.max_recv_sge = device_attr.max_sge,
+			.max_recv_wr = 256,
 		}
 	};
 
@@ -858,6 +860,18 @@ SPDK_TRACE_REGISTER_FN(target_trace, "target", TRACE_GROUP_BDEV)
 		},
 		{
 			"TARGET_CQ_POLL", TRACE_BDEV_CQ_POLL,
+			OWNER_BDEV, OBJECT_BDEV_IO, 0,
+			{
+			}
+		},
+		{
+			"TARGET_CQ_POLL_START", TRACE_BDEV_CQ_POLL_START,
+			OWNER_BDEV, OBJECT_BDEV_IO, 1,
+			{
+			}
+		},
+		{
+			"TARGET_CQ_POLL_END", TRACE_BDEV_CQ_POLL_END,
 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
 			{
 			}
