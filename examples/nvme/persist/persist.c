@@ -189,18 +189,14 @@ int main(int argc, char **argv)
 	struct ibv_recv_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge, send_sge;
 
-	local_handshake->base_addr = circular_buffer;
-	local_handshake->rkey = data_mr->rkey;
-	printf("sending local addr %p rkey %d\n", local_handshake->base_addr, local_handshake->rkey);
-
 	wr.wr_id = 1;
 	wr.next = NULL;
 	wr.sg_list = &sge;
 	wr.num_sge = 1;
 
-	sge.addr = (uint64_t)local_handshake;
+	sge.addr = (uint64_t)remote_handshake;
 	sge.length = sizeof(struct rdma_handshake);
-	sge.lkey = lhs_mr->lkey;
+	sge.lkey = rhs_mr->lkey;
 	rc = ibv_post_recv(cm_id_2->qp, &wr, &bad_wr);
 	assert(rc == 0);
 
@@ -234,9 +230,13 @@ int main(int argc, char **argv)
 	send_wr.num_sge = 1;
 	send_wr.send_flags = IBV_SEND_SIGNALED;
 
-	send_sge.addr = (uint64_t)remote_handshake;
+	local_handshake->base_addr = circular_buffer;
+	local_handshake->rkey = data_mr->rkey;
+	printf("sending local addr %p rkey %d\n", local_handshake->base_addr, local_handshake->rkey);
+
+	send_sge.addr = (uint64_t)local_handshake;
 	send_sge.length = sizeof(struct rdma_handshake);
-	send_sge.lkey = rhs_mr->lkey;
+	send_sge.lkey = lhs_mr->lkey;
 	
 	rc = ibv_post_send(cm_id_2->qp, &send_wr, &bad_send_wr);
 	assert(rc == 0);

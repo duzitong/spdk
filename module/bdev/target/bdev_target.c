@@ -616,12 +616,6 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	struct ibv_recv_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge, send_sge;
 
-	// TODO: use separate buffer
-	mdisk->local_handshake->base_addr = mdisk->malloc_buf;
-	mdisk->local_handshake->rkey = data_mr->rkey;
-
-	SPDK_DEBUGLOG(bdev_target, "sending local addr %p rkey %d\n", mdisk->local_handshake->base_addr, mdisk->local_handshake->rkey);
-
 	wr.wr_id = 1;
 	wr.next = NULL;
 	wr.sg_list = &sge;
@@ -664,6 +658,10 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	send_sge.length = sizeof(struct rdma_handshake);
 	send_sge.lkey = local_handshake_mr->lkey;
 
+	// TODO: use separate buffer
+	mdisk->local_handshake->base_addr = mdisk->malloc_buf;
+	mdisk->local_handshake->rkey = data_mr->rkey;
+	
 	SPDK_NOTICELOG("sending local addr %p rkey %d\n", mdisk->local_handshake->base_addr, mdisk->local_handshake->rkey);
 	ibv_post_send(cm_id->qp, &send_wr, &bad_send_wr);
 	struct ibv_wc wc;
