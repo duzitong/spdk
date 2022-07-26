@@ -96,11 +96,11 @@ int main(int argc, char **argv)
 	}
 
 	circular_buffer = spdk_zmalloc(BUFFER_SIZE, 2 * 1024 * 1024, NULL,
-					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+					 SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
 	local_handshake = spdk_zmalloc(sizeof(*local_handshake), 0, NULL,
-					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+					 SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
 	remote_handshake = spdk_zmalloc(sizeof(*remote_handshake), 0, NULL,
-					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+					 SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
 	
 	// int n = 0;
 	// struct ibv_device** ibv_list = ibv_get_device_list(&n);
@@ -206,8 +206,8 @@ int main(int argc, char **argv)
 
 	struct rdma_conn_param conn_param = {};
 
-	conn_param.responder_resources = device_attr.max_qp_rd_atom;
-	conn_param.initiator_depth = device_attr.max_qp_init_rd_atom;
+	conn_param.responder_resources = 16;
+	conn_param.initiator_depth = 16;
 	conn_param.retry_count = 7;
 	conn_param.rnr_retry_count = 7;
 	rc = rdma_accept(cm_id_2, &conn_param);
@@ -219,7 +219,7 @@ int main(int argc, char **argv)
 
 	rdma_get_cm_event(rdma_channel, &established_event);
 	if (established_event->event != RDMA_CM_EVENT_ESTABLISHED) {
-		SPDK_ERRLOG("incorrect established event\n");
+		SPDK_ERRLOG("incorrect established event %d\n", established_event->event);
 		return 1;
 	}
 
