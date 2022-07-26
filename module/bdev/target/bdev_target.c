@@ -249,7 +249,7 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_RDMA_POST_SEND_WRITE_START, 0, 0, (uintptr_t)bdev_io);
 	rc = ibv_post_send(mdisk->cm_id->qp, &wr, &bad_wr);
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_RDMA_POST_SEND_WRITE_END, 0, 0, (uintptr_t)bdev_io);
-	
+
 	if (rc != 0) {
 		SPDK_ERRLOG("RDMA write failed with errno = %d\n", rc);
 		SPDK_NOTICELOG("Local: %p %d; Remote: %p %d; Len = %d\n",
@@ -479,11 +479,11 @@ target_create_channel_cb(void *io_device, void *ctx)
 	struct target_channel *ch = ctx;
 	ch->tdisk = tdisk;
 
-	//tdisk->rdma_poller = SPDK_POLLER_REGISTER(target_rdma_poller, tdisk, 0);
-	if (!tdisk->rdma_poller) {
-		SPDK_ERRLOG("Failed to register target rdma poller\n");
-		return -ENOMEM;
-	}
+	// tdisk->rdma_poller = SPDK_POLLER_REGISTER(target_rdma_poller, tdisk, 0);
+	// if (!tdisk->rdma_poller) {
+	// 	SPDK_ERRLOG("Failed to register target rdma poller\n");
+	// 	return -ENOMEM;
+	// }
 
 	return 0;
 }
