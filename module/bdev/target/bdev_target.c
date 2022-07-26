@@ -65,6 +65,7 @@ struct target_disk {
 	struct rdma_cm_id* cm_id;
 	struct ibv_mr* mr;
 	struct ibv_cq* cq;
+	struct rdma_handshake* local_handshake;
 	struct rdma_handshake* remote_handshake;
 	struct spdk_poller* rdma_poller;
 	struct ibv_wc wc_buf[TARGET_WC_BATCH_SIZE];
@@ -130,6 +131,12 @@ target_disk_free(struct target_disk *target_disk)
 
 	free(target_disk->disk.name);
 	spdk_free(target_disk->malloc_buf);
+	if (target_disk->local_handshake) {
+		spdk_free(target_disk->local_handshake);
+	}
+	if (target_disk->remote_handshake) {
+		spdk_free(target_disk->remote_handshake);
+	}
 	free(target_disk);
 }
 
@@ -527,13 +534,16 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	 * TODO: need to pass a hint so we know which socket to allocate
 	 *  from on multi-socket systems.
 	 */
-	mdisk->malloc_buf = spdk_zmalloc(num_blocks * block_size + 2 * sizeof(struct rdma_handshake), 2 * 1024 * 1024, NULL,
+	mdisk->malloc_buf = spdk_zmalloc(num_blocks * block_size, 2 * 1024 * 1024, NULL,
 					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-	if (!mdisk->malloc_buf) {
+	mdisk->local_handshake = spdk_zmalloc(sizeof(*mdisk->local_handshake), 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	mdisk->remote_handshake = spdk_zmalloc(sizeof(*mdisk->remote_handshake), 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	if (!mdisk->malloc_buf || !mdisk->local_handshake || !mdisk->remote_handshake) {
 		SPDK_ERRLOG("malloc_buf spdk_zmalloc() failed\n");
 		target_disk_free(mdisk);
 		return -ENOMEM;
 	}
+
 	struct rdma_event_channel* rdma_channel = rdma_create_event_channel();
 
 	struct rdma_cm_id* cm_id = NULL;
@@ -573,15 +583,23 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	SPDK_DEBUGLOG(bdev_target, "max wr sge = %d, max wr num = %d, max cqe = %d\n",
 		device_attr.max_sge, device_attr.max_qp_wr, device_attr.max_cqe);
 	struct ibv_pd* ibv_pd = ibv_alloc_pd(ibv_context);
-	struct ibv_mr* ibv_mr = ibv_reg_mr(ibv_pd,
+	struct ibv_mr* data_mr = ibv_reg_mr(ibv_pd,
 		mdisk->malloc_buf,
-		num_blocks * block_size + 2 * sizeof(struct rdma_handshake),
+		num_blocks * block_size,
+		IBV_ACCESS_LOCAL_WRITE);
+	struct ibv_mr* local_handshake_mr = ibv_reg_mr(ibv_pd,
+		mdisk->local_handshake,
+		sizeof(struct rdma_handshake),
+		IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+	struct ibv_mr* remote_handshake_mr = ibv_reg_mr(ibv_pd,
+		mdisk->remote_handshake,
+		sizeof(struct rdma_handshake),
 		IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
 
 	struct ibv_cq* ibv_cq = ibv_create_cq(ibv_context, 256, NULL, NULL, 0);
 
 	mdisk->cq = ibv_cq;
-	mdisk->mr = ibv_mr;
+	mdisk->mr = data_mr;
 
 	// no SRQ here - only one qp
 	// TODO: fine-tune these params; 
@@ -604,22 +622,19 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	struct ibv_sge sge, send_sge;
 
 	// TODO: use separate buffer
-	struct rdma_handshake* handshake = mdisk->malloc_buf + num_blocks * block_size;
-	struct rdma_handshake* remote_handshake = handshake + 1;
-	handshake->base_addr = mdisk->malloc_buf;
-	handshake->rkey = ibv_mr->rkey;
+	mdisk->local_handshake->base_addr = mdisk->malloc_buf;
+	mdisk->local_handshake->rkey = data_mr->rkey;
 
-	SPDK_DEBUGLOG(bdev_target, "sending local addr %p rkey %d\n", handshake->base_addr, handshake->rkey);
+	SPDK_DEBUGLOG(bdev_target, "sending local addr %p rkey %d\n", mdisk->local_handshake->base_addr, mdisk->local_handshake->rkey);
 
-	wr.wr_id = (uintptr_t)1;
+	wr.wr_id = 1;
 	wr.next = NULL;
 	wr.sg_list = &sge;
 	wr.num_sge = 1;
 
-	sge.addr = (uint64_t)remote_handshake;
+	sge.addr = (uint64_t)mdisk->remote_handshake;
 	sge.length = sizeof(struct rdma_handshake);
-	sge.lkey = ibv_mr->lkey;
-	mdisk->remote_handshake = remote_handshake;
+	sge.lkey = remote_handshake_mr->lkey;
 
 	ibv_post_recv(cm_id->qp, &wr, &bad_wr);
 
@@ -650,9 +665,9 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	send_wr.num_sge = 1;
 	send_wr.send_flags = IBV_SEND_SIGNALED;
 
-	send_sge.addr = (uint64_t)handshake;
+	send_sge.addr = (uint64_t)mdisk->local_handshake;
 	send_sge.length = sizeof(struct rdma_handshake);
-	send_sge.lkey = ibv_mr->lkey;
+	send_sge.lkey = local_handshake_mr->lkey;
 
 	ibv_post_send(cm_id->qp, &send_wr, &bad_send_wr);
 	struct ibv_wc wc;
@@ -672,11 +687,11 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 
 		if (wc.wr_id == 1) {
 			// recv complete
-			SPDK_DEBUGLOG(bdev_target, "received remote addr %p rkey %d\n", remote_handshake->base_addr, remote_handshake->rkey);
+			SPDK_NOTICELOG("received remote addr %p rkey %d\n", mdisk->remote_handshake->base_addr, mdisk->remote_handshake->rkey);
 			handshake_recv_cpl = true;
 		}
 		else if (wc.wr_id == 2) {
-			SPDK_DEBUGLOG(bdev_target, "send req complete\n");
+			SPDK_NOTICELOG("send req complete\n");
 			handshake_send_cpl = true;
 		}
 	}

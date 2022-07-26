@@ -58,6 +58,8 @@ char addr_buf[16];
 char port_buf[8];
 char cpu_buf[8] = "0x40";
 
+struct rdma_handshake *local_handshake, *remote_handshake;
+
 int main(int argc, char **argv)
 {
 	int rc;
@@ -93,7 +95,11 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	circular_buffer = spdk_zmalloc(BUFFER_SIZE + 2 * sizeof(struct rdma_handshake), 2 * 1024 * 1024, NULL,
+	circular_buffer = spdk_zmalloc(BUFFER_SIZE, 2 * 1024 * 1024, NULL,
+					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	local_handshake = spdk_zmalloc(sizeof(*local_handshake), 0, NULL,
+					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	remote_handshake = spdk_zmalloc(sizeof(*remote_handshake), 0, NULL,
 					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 	
 	// int n = 0;
@@ -138,14 +144,22 @@ int main(int argc, char **argv)
 	struct ibv_device_attr device_attr = {};
 	ibv_query_device(ibv_context, &device_attr);
 	struct ibv_pd* ibv_pd = ibv_alloc_pd(ibv_context);
-	struct ibv_mr* ibv_mr = ibv_reg_mr(ibv_pd,
+	struct ibv_mr* data_mr = ibv_reg_mr(ibv_pd,
 		circular_buffer,
-		BUFFER_SIZE + 2 * sizeof(struct rdma_handshake),
+		BUFFER_SIZE,
+		IBV_ACCESS_REMOTE_WRITE);
+	struct ibv_mr* lhs_mr = ibv_reg_mr(ibv_pd,
+		local_handshake,
+		sizeof(struct rdma_handshake),
+		IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+	struct ibv_mr* rhs_mr = ibv_reg_mr(ibv_pd,
+		remote_handshake,
+		sizeof(struct rdma_handshake),
 		IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
 
-	struct ibv_cq* ibv_cq = ibv_create_cq(ibv_context, 4096, NULL, NULL, 0);
+	struct ibv_cq* ibv_cq = ibv_create_cq(ibv_context, 256, NULL, NULL, 0);
 	assert(ibv_cq != NULL);
-	assert(ibv_mr != NULL);
+	assert(data_mr != NULL);
 	assert(ibv_context != NULL);
 	assert(ibv_pd != NULL);
 
@@ -175,19 +189,18 @@ int main(int argc, char **argv)
 	struct ibv_recv_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge, send_sge;
 
-	struct rdma_handshake* handshake = circular_buffer + BUFFER_SIZE;
-	handshake->base_addr = circular_buffer;
-	handshake->rkey = ibv_mr->rkey;
-	printf("sending local addr %p rkey %d\n", handshake->base_addr, handshake->rkey);
+	local_handshake->base_addr = circular_buffer;
+	local_handshake->rkey = data_mr->rkey;
+	printf("sending local addr %p rkey %d\n", local_handshake->base_addr, local_handshake->rkey);
 
 	wr.wr_id = 1;
 	wr.next = NULL;
 	wr.sg_list = &sge;
 	wr.num_sge = 1;
 
-	sge.addr = (uint64_t)(handshake + 1);
+	sge.addr = (uint64_t)local_handshake;
 	sge.length = sizeof(struct rdma_handshake);
-	sge.lkey = ibv_mr->lkey;
+	sge.lkey = lhs_mr->lkey;
 	rc = ibv_post_recv(cm_id_2->qp, &wr, &bad_wr);
 	assert(rc == 0);
 
@@ -221,9 +234,9 @@ int main(int argc, char **argv)
 	send_wr.num_sge = 1;
 	send_wr.send_flags = IBV_SEND_SIGNALED;
 
-	send_sge.addr = (uint64_t)handshake;
+	send_sge.addr = (uint64_t)remote_handshake;
 	send_sge.length = sizeof(struct rdma_handshake);
-	send_sge.lkey = ibv_mr->lkey;
+	send_sge.lkey = rhs_mr->lkey;
 	
 	rc = ibv_post_send(cm_id_2->qp, &send_wr, &bad_send_wr);
 	assert(rc == 0);
@@ -244,7 +257,6 @@ int main(int argc, char **argv)
 
 		if (wc.wr_id == 1) {
 			// recv complete
-			struct rdma_handshake* remote_handshake = handshake + 1;
 			printf("received remote addr %p rkey %d\n", remote_handshake->base_addr, remote_handshake->rkey);
 			handshake_recv_cpl = true;
 		}
