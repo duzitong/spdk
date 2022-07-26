@@ -298,11 +298,6 @@ static int _bdev_target_submit_request(struct target_channel *mch, struct spdk_b
 	uint32_t block_size = bdev_io->bdev->blocklen;
 	// _log_md(bdev_io);
 
-	if (bdev_io->u.bdev.iovs[0].iov_base == NULL) {
-		SPDK_DEBUGLOG(bdev_target, "Received read req where iov_base is null\n");
-		return 0;
-	}
-
 	switch (bdev_io->type) {
 	case SPDK_BDEV_IO_TYPE_READ:
 		// spdk_bdev_io_complete(bdev_io,
