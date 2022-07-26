@@ -178,7 +178,7 @@ int main(int argc, char **argv)
 	};
 
 	int x = rdma_create_qp(cm_id, ibv_pd, &init_attr);
-	SPDK_NOTICELOG("rdma_create_qp returns %d\n", x);
+	printf("rdma_create_qp returns %d\n", x);
 
 	struct ibv_recv_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge, send_sge;
@@ -210,7 +210,7 @@ int main(int argc, char **argv)
 
 	assert(connect_event->id == cm_id);
 
-	SPDK_NOTICELOG("connected. posting send...\n");
+	printf("connected. posting send...\n");
 
 	struct ibv_send_wr send_wr, *bad_send_wr = NULL;
 	memset(&send_wr, 0, sizeof(send_wr));
@@ -229,7 +229,7 @@ int main(int argc, char **argv)
 	local_handshake->base_addr = circular_buffer;
 	local_handshake->rkey = data_mr->rkey;
 
-	SPDK_NOTICELOG("sending local addr %p rkey %d\n", local_handshake->base_addr, local_handshake->rkey);
+	printf("sending local addr %p rkey %d\n", local_handshake->base_addr, local_handshake->rkey);
 	ibv_post_send(cm_id->qp, &send_wr, &bad_send_wr);
 	struct ibv_wc wc;
 	bool handshake_send_cpl = false;
@@ -248,16 +248,16 @@ int main(int argc, char **argv)
 
 		if (wc.wr_id == 1) {
 			// recv complete
-			SPDK_NOTICELOG("received remote addr %p rkey %d\n", remote_handshake->base_addr, remote_handshake->rkey);
+			printf("received remote addr %p rkey %d\n", remote_handshake->base_addr, remote_handshake->rkey);
 			handshake_recv_cpl = true;
 		}
 		else if (wc.wr_id == 2) {
-			SPDK_NOTICELOG("send req complete\n");
+			printf("send req complete\n");
 			handshake_send_cpl = true;
 		}
 	}
 
-	SPDK_NOTICELOG("rdma handshake complete\n");
+	printf("rdma handshake complete\n");
 
 	printf("press anything to quit...\n");
 	char buf[128];
