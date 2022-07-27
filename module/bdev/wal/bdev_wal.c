@@ -76,6 +76,10 @@ static int	wal_bdev_init(void);
 static void	wal_bdev_event_base_bdev(enum spdk_bdev_event_type type, struct spdk_bdev *bdev,
 		void *event_ctx);
 static bool wal_bdev_is_valid_entry(struct wal_bdev *bdev, struct bstat *bstat);
+int wal_log_bdev_writev_blocks_with_md(struct spdk_bdev_desc *desc, struct spdk_io_channel *ch,
+										struct iovec *iovs, int iovcnt, void *md_buf,
+										uint64_t offset_blocks, uint64_t num_blocks,
+										struct wal_bdev_io *wal_io);
 static int wal_bdev_submit_pending_writes(void *ctx);
 static int wal_bdev_mover(void *ctx);
 static void wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
