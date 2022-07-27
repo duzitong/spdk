@@ -435,7 +435,7 @@ target_rdma_poller(void *ctx)
 	struct ibv_wc wc_buf[TARGET_WC_BATCH_SIZE];
 
 	// TODO: batch polling may be faster?
-	int cnt = ibv_poll_cq(tdisk->cq, 1, wc_buf);
+	int cnt = ibv_poll_cq(tdisk->cq, TARGET_WC_BATCH_SIZE, wc_buf);
 	if (spdk_unlikely(cnt < 0)) {
 		// TODO: what to do when poll cq fails?
 		SPDK_ERRLOG("ibv_poll_cq failed\n");
@@ -463,11 +463,11 @@ target_create_channel_cb(void *io_device, void *ctx)
 	struct target_channel *ch = ctx;
 	ch->tdisk = tdisk;
 
-	// tdisk->rdma_poller = SPDK_POLLER_REGISTER(target_rdma_poller, tdisk, 0);
-	// if (!tdisk->rdma_poller) {
-	// 	SPDK_ERRLOG("Failed to register target rdma poller\n");
-	// 	return -ENOMEM;
-	// }
+	tdisk->rdma_poller = SPDK_POLLER_REGISTER(target_rdma_poller, tdisk, 0);
+	if (!tdisk->rdma_poller) {
+		SPDK_ERRLOG("Failed to register target rdma poller\n");
+		return -ENOMEM;
+	}
 
 	return 0;
 }
@@ -477,7 +477,7 @@ target_destroy_channel_cb(void *io_device, void *ctx)
 {
 	struct target_disk *tdisk = io_device;
 
-	//spdk_poller_unregister(&tdisk->rdma_poller);
+	spdk_poller_unregister(&tdisk->rdma_poller);
 }
 
 
