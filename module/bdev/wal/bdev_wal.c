@@ -423,7 +423,7 @@ wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *c
 	struct wal_bdev_io *wal_io = cb_arg;
 	uint64_t begin, end;
 	begin = wal_io->metadata->core_offset;
-	end = wal_io->metadata->core_offset + wal_io->metadata->core_offset;
+	end = wal_io->metadata->core_offset + wal_io->metadata->core_length - 1;
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSTAT_CREATE_START, 0, 0, (uintptr_t)wal_io);
 	struct bstat *bstat = bstatBdevCreate(begin, end, wal_io->metadata->round,
@@ -432,7 +432,7 @@ wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *c
 	
 	
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSL_INSERT_START, 0, 0, (uintptr_t)wal_io);
-	bslInsert(wal_io->wal_bdev->bsl, wal_io->metadata->core_offset, wal_io->metadata->core_offset + wal_io->metadata->core_length,
+	bslInsert(wal_io->wal_bdev->bsl, begin, end,
 				bstat, wal_io->wal_bdev->bslfn);
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSL_INSERT_END, 0, 0, (uintptr_t)wal_io);
 
