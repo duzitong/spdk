@@ -420,10 +420,33 @@ wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *c
 	spdk_bdev_free_io(bdev_io);
 
 	spdk_free(wal_io->metadata);
+	free(wal_io->log_iovs);
 
 	wal_bdev_io_complete(wal_io, success ?
 				   SPDK_BDEV_IO_STATUS_SUCCESS :
 				   SPDK_BDEV_IO_STATUS_FAILED);
+}
+
+int
+wal_log_bdev_writev_blocks_with_md(struct spdk_bdev_desc *desc, struct spdk_io_channel *ch,
+				struct iovec *iovs, int iovcnt, void *md_buf,
+				uint64_t offset_blocks, uint64_t num_blocks,
+				struct wal_bdev_io *wal_io)
+{
+	int i;
+
+	wal_io->log_iovcnt = iovcnt + 1;
+	wal_io->log_iovs = calloc(wal_io->log_iovcnt, sizeof(struct iovec));
+	wal_io->log_iovs[0].iov_base = md_buf;
+	wal_io->log_iovs[0].iov_len = wal_io->wal_bdev->log_bdev_info.bdev->blocklen;
+	for (i = 0; i < iovcnt; i++) {
+		wal->log_iovs[i+1].iov_base = iovs[i].iov_base;
+		wal->log_iovs[i+1].iov_len = iovs[i].iov_len;
+	}
+
+	return spdk_bdev_writev_blocks_with_md(desc, ch,
+					wal_io->log_iovs, wal_io->log_iovs, md_buf,
+					offset_blocks, num_blocks, wal_base_bdev_write_complete, wal_io);
 }
 
 static void
@@ -638,10 +661,9 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	metadata->length = log_blocks - 1;
 	metadata->round = wal_bdev->tail_round;
 
-	ret = spdk_bdev_writev_blocks_with_md(base_info->desc, base_ch,
+	ret = wal_log_bdev_writev_blocks_with_md(base_info->desc, base_ch,
 					bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt, metadata,
-					log_offset, metadata->length, wal_base_bdev_write_complete,
-					wal_io);
+					log_offset, metadata->length, wal_io);
 
 	if (spdk_likely(ret == 0)) {
 		
@@ -1561,10 +1583,9 @@ wal_bdev_submit_pending_writes(void *ctx)
 		wal_io->metadata->length = log_blocks - 1;
 		wal_io->metadata->round = wal_bdev->tail_round;
 
-		ret = spdk_bdev_writev_blocks_with_md(base_info->desc, base_ch,
+		ret = wal_log_bdev_writev_blocks_with_md(base_info->desc, base_ch,
 						wal_io->orig_io->u.bdev.iovs, wal_io->orig_io->u.bdev.iovcnt, wal_io->metadata,
-						log_offset, wal_io->metadata->length, wal_base_bdev_write_complete,
-						wal_io);
+						log_offset, wal_io->metadata->length, wal_io);
 
 		if (spdk_likely(ret == 0)) {
 			TAILQ_REMOVE(&wal_bdev->pending_writes, wal_io, tailq);
