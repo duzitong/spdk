@@ -440,8 +440,8 @@ wal_log_bdev_writev_blocks_with_md(struct spdk_bdev_desc *desc, struct spdk_io_c
 	wal_io->log_iovs[0].iov_base = md_buf;
 	wal_io->log_iovs[0].iov_len = wal_io->wal_bdev->log_bdev_info.bdev->blocklen;
 	for (i = 0; i < iovcnt; i++) {
-		wal->log_iovs[i+1].iov_base = iovs[i].iov_base;
-		wal->log_iovs[i+1].iov_len = iovs[i].iov_len;
+		wal_io->log_iovs[i+1].iov_base = iovs[i].iov_base;
+		wal_io->log_iovs[i+1].iov_len = iovs[i].iov_len;
 	}
 
 	return spdk_bdev_writev_blocks_with_md(desc, ch,
