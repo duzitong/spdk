@@ -76,6 +76,10 @@ static int	wal_bdev_init(void);
 static void	wal_bdev_event_base_bdev(enum spdk_bdev_event_type type, struct spdk_bdev *bdev,
 		void *event_ctx);
 static bool wal_bdev_is_valid_entry(struct wal_bdev *bdev, struct bstat *bstat);
+int wal_log_bdev_writev_blocks_with_md(struct spdk_bdev_desc *desc, struct spdk_io_channel *ch,
+										struct iovec *iovs, int iovcnt, void *md_buf,
+										uint64_t offset_blocks, uint64_t num_blocks,
+										struct wal_bdev_io *wal_io);
 static int wal_bdev_submit_pending_writes(void *ctx);
 static int wal_bdev_mover(void *ctx);
 static void wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
@@ -455,12 +459,12 @@ wal_log_bdev_writev_blocks_with_md(struct spdk_bdev_desc *desc, struct spdk_io_c
 	wal_io->log_iovs[0].iov_base = md_buf;
 	wal_io->log_iovs[0].iov_len = wal_io->wal_bdev->log_bdev_info.bdev->blocklen;
 	for (i = 0; i < iovcnt; i++) {
-		wal->log_iovs[i+1].iov_base = iovs[i].iov_base;
-		wal->log_iovs[i+1].iov_len = iovs[i].iov_len;
+		wal_io->log_iovs[i+1].iov_base = iovs[i].iov_base;
+		wal_io->log_iovs[i+1].iov_len = iovs[i].iov_len;
 	}
 
-	return spdk_bdev_writev_blocks_with_md(desc, ch,
-					wal_io->log_iovs, wal_io->log_iovs, md_buf,
+	return spdk_bdev_writev_blocks(desc, ch,
+					wal_io->log_iovs, wal_io->log_iovcnt,
 					offset_blocks, num_blocks, wal_base_bdev_write_complete, wal_io);
 }
 
