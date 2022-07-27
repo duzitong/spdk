@@ -1,0 +1,65 @@
+{
+    "subsystems": [
+      {
+        "subsystem": "bdev",
+        "config": [
+          {
+            "method": "bdev_malloc_create",
+            "params": {
+              "name": "Malloc0",
+              "num_blocks": 8388608,
+              "block_size": 512
+            }
+          },
+          {
+            "method": "bdev_nvme_attach_controller",
+            "params": {
+              "name": "Nvmf0",
+              "trtype": "rdma",
+              "adrfam": "IPv4",
+              "traddr": "10.0.2.5",
+              "trsvcid": "4421",
+              "subnqn": "nqn.2016-06.io.spdk:cnode1"
+            }
+          },
+          {
+            "method": "bdev_nvme_attach_controller",
+            "params": {
+              "name": "Nvmf1",
+              "trtype": "rdma",
+              "adrfam": "IPv4",
+              "traddr": "10.0.2.6",
+              "trsvcid": "4421",
+              "subnqn": "nqn.2016-06.io.spdk:cnode1"
+            }
+          },
+          {
+            "method": "bdev_replica_create",
+            "params": {
+              "name": "ReplicaMem",
+              "base_bdevs": [
+                "Malloc0", "Nvmf0n1", "Nvmf1n1"
+              ]
+            }
+          },
+          {
+            "method": "bdev_nvme_attach_controller",
+            "params": {
+              "name": "Nvme0",
+              "trtype": "PCIe",
+              "traddr": "45a6:00:00.0"
+            }
+          },
+          {
+            "method": "bdev_wal_create",
+            "params": {
+              "name": "Wal1",
+              "log_bdev": "ReplicaMem",
+              "core_bdev": "Nvme0n1"
+            }
+          }
+        ]
+      }
+    ]
+  }
+  
