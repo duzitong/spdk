@@ -310,7 +310,7 @@ int main(int argc, char **argv)
 
 	printf("rdma handshake complete\n");
 
-	struct spdk_histogram_data *histogram = spdk_histogram_data_alloc_sized(spdk_u64log2(num_runs));
+	struct spdk_histogram_data *histogram = spdk_histogram_data_alloc();
 	int i;
 	for (i = 3; i < runs+3; i++) {
 		uint64_t start_tsc = spdk_get_ticks();
