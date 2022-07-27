@@ -60,6 +60,7 @@ char addr_buf[16];
 char port_buf[8];
 char cpu_buf[8] = "0x40";
 char num_runs[16];
+char id[8];
 
 struct rdma_handshake *local_handshake, *remote_handshake;
 
@@ -109,7 +110,7 @@ int main(int argc, char **argv)
 
 	int op;
 
-	while ((op = getopt(argc, argv, "a:p:m:n:")) != -1) {
+	while ((op = getopt(argc, argv, "a:p:m:n:i:")) != -1) {
 		switch (op) {
 			case 'a':
 				memcpy(addr_buf, optarg, strlen(optarg));
@@ -122,6 +123,9 @@ int main(int argc, char **argv)
 				break;
 			case 'n':
 				memcpy(num_runs, optarg, strlen(optarg));
+				break;
+			case 'i':
+				memcpy(id, optarg, strlen(optarg));
 				break;
 		}
 	}
@@ -226,7 +230,10 @@ int main(int argc, char **argv)
 	struct ibv_recv_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge, send_sge;
 
-	wr.wr_id = 1;
+	uint64_t runs = atoi(num_runs);
+	uint64_t wr_shift = atoi(id) * runs;
+
+	wr.wr_id = 1 + wr_shift;
 	wr.next = NULL;
 	wr.sg_list = &sge;
 	wr.num_sge = 1;
@@ -258,7 +265,7 @@ int main(int argc, char **argv)
 	struct ibv_send_wr send_wr, *bad_send_wr = NULL;
 	memset(&send_wr, 0, sizeof(send_wr));
 
-	send_wr.wr_id = 2;
+	send_wr.wr_id = 2 + wr_shift;
 	send_wr.opcode = IBV_WR_SEND;
 	send_wr.sg_list = &send_sge;
 	send_wr.num_sge = 1;
@@ -289,12 +296,12 @@ int main(int argc, char **argv)
 			continue;
 		}
 
-		if (wc.wr_id == 1) {
+		if (wc.wr_id == 1 + wr_shift) {
 			// recv complete
 			printf("received remote addr %p rkey %d\n", remote_handshake->base_addr, remote_handshake->rkey);
 			handshake_recv_cpl = true;
 		}
-		else if (wc.wr_id == 2) {
+		else if (wc.wr_id == 2 + wr_shift) {
 			printf("send req complete\n");
 			handshake_send_cpl = true;
 		}
@@ -303,7 +310,6 @@ int main(int argc, char **argv)
 	printf("rdma handshake complete\n");
 
 	struct spdk_histogram_data *histogram = spdk_histogram_data_alloc();
-	uint64_t runs = atoi(num_runs);
 	int i;
 	for (i = 3; i < runs+3; i++) {
 		uint64_t start_tsc = spdk_get_ticks();
@@ -312,7 +318,7 @@ int main(int argc, char **argv)
 		struct ibv_wc wc_buf[1];
 
 		memset(&wr, 0, sizeof(wr));
-		wr.wr_id = i;
+		wr.wr_id = i + wr_shift;
 		wr.next = NULL;
 		// TODO: inline?
 		wr.send_flags = IBV_SEND_SIGNALED;
