@@ -150,7 +150,6 @@ mem_map_notify_walk(struct spdk_mem_map *map, enum spdk_mem_map_notify_action ac
 		if (!map_1gb) {
 			if (contig_start != UINT64_MAX) {
 				/* End of of a virtually contiguous range */
-				DEBUG_PRINT("walk 1\n");
 				rc = map->ops.notify_cb(map->cb_ctx, map, action,
 							(void *)contig_start,
 							contig_end - contig_start + VALUE_2MB);
@@ -178,7 +177,6 @@ mem_map_notify_walk(struct spdk_mem_map *map, enum spdk_mem_map_notify_action ac
 			} else {
 				if (contig_start != UINT64_MAX) {
 					/* End of of a virtually contiguous range */
-					DEBUG_PRINT("walk 2\n");
 					rc = map->ops.notify_cb(map->cb_ctx, map, action,
 								(void *)contig_start,
 								contig_end - contig_start + VALUE_2MB);
