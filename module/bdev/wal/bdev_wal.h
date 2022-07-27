@@ -120,6 +120,10 @@ struct wal_bdev_io {
 
 	struct wal_metadata	*metadata;
 
+	struct iovec *log_iovs;
+	
+	int log_iovcnt;
+
 	uint16_t	remaining_base_bdev_io;
 
 	void	*read_buf;
@@ -193,6 +197,8 @@ struct wal_bdev {
 
 	/* bstat mempool */
 	struct spdk_mempool		*bstat_pool;
+
+	struct spdk_mempool		*iovs_pool;
 
 	/* sequence id */
 	uint64_t	seq;

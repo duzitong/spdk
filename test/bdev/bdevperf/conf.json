@@ -13,11 +13,11 @@
           }
         },
         {
-          "method": "bdev_malloc_create",
+          "method": "bdev_nvme_attach_controller",
           "params": {
-            "name": "Malloc1",
-            "num_blocks": 102400,
-            "block_size": 512
+            "name": "Nvme0n1",
+            "trtype": "PCIe",
+            "traddr": 
           }
         },
         {
