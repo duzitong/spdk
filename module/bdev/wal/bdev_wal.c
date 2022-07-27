@@ -465,7 +465,7 @@ wal_log_bdev_writev_blocks_with_md(struct spdk_bdev_desc *desc, struct spdk_io_c
 
 	return spdk_bdev_writev_blocks(desc, ch,
 					wal_io->log_iovs, wal_io->log_iovcnt,
-					offset_blocks, num_blocks, wal_base_bdev_write_complete, wal_io);
+					offset_blocks, num_blocks + 1, wal_base_bdev_write_complete, wal_io);
 }
 
 static void
