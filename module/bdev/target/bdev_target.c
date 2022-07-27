@@ -457,6 +457,32 @@ static const struct spdk_bdev_fn_table target_fn_table = {
 // }
 
 static int
+target_rdma_poller(void *ctx)
+{
+	struct target_disk *tdisk = ctx;
+
+	// TODO: batch polling may be faster?
+	int cnt = ibv_poll_cq(tdisk->cq, 1, tdisk->wc_buf);
+	if (spdk_unlikely(cnt < 0)) {
+		// TODO: what to do when poll cq fails?
+		SPDK_ERRLOG("ibv_poll_cq failed\n");
+	}
+	else if (cnt == 0) {
+		SPDK_DEBUGLOG(bdev_target, "no item in cq\n");
+	}
+	else {
+		for (int i = 0; i < cnt; i++) {
+			struct spdk_bdev_io* io = (struct spdk_bdev_io*)tdisk->wc_buf[i].wr_id;
+			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_CQ_POLL_END, 0, 0, (uintptr_t)io);
+			// SPDK_NOTICELOG("received io %p\n", io);
+			spdk_bdev_io_complete(io, SPDK_BDEV_IO_STATUS_SUCCESS);
+		}
+	}
+
+	return SPDK_POLLER_BUSY;
+}
+
+static int
 target_create_channel_cb(void *io_device, void *ctx)
 {
 	SPDK_DEBUGLOG(bdev_target, "enter\n");
