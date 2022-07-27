@@ -209,8 +209,6 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 	void* rdma_dst = mdisk->remote_handshake->base_addr + offset;
 	int rc;
 	struct spdk_bdev_io* bdev_io = spdk_bdev_io_from_ctx(task);
-	int cnt = 0;
-	struct ibv_wc wc_buf[TARGET_WC_BATCH_SIZE];
 	
 	if (bdev_target_check_iov_len(iov, iovcnt, len)) {
 		spdk_bdev_io_complete(spdk_bdev_io_from_ctx(task),
@@ -460,9 +458,10 @@ static int
 target_rdma_poller(void *ctx)
 {
 	struct target_disk *tdisk = ctx;
+	struct ibv_wc wc_buf[TARGET_WC_BATCH_SIZE];
 
 	// TODO: batch polling may be faster?
-	int cnt = ibv_poll_cq(tdisk->cq, 1, tdisk->wc_buf);
+	int cnt = ibv_poll_cq(tdisk->cq, 1, wc_buf);
 	if (spdk_unlikely(cnt < 0)) {
 		// TODO: what to do when poll cq fails?
 		SPDK_ERRLOG("ibv_poll_cq failed\n");
@@ -472,7 +471,7 @@ target_rdma_poller(void *ctx)
 	}
 	else {
 		for (int i = 0; i < cnt; i++) {
-			struct spdk_bdev_io* io = (struct spdk_bdev_io*)tdisk->wc_buf[i].wr_id;
+			struct spdk_bdev_io* io = (struct spdk_bdev_io*)wc_buf[i].wr_id;
 			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_CQ_POLL_END, 0, 0, (uintptr_t)io);
 			// SPDK_NOTICELOG("received io %p\n", io);
 			spdk_bdev_io_complete(io, SPDK_BDEV_IO_STATUS_SUCCESS);
