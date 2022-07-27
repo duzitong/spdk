@@ -111,7 +111,7 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 	wal_ch->wal_bdev = wal_bdev;
 
 	pthread_mutex_lock(&wal_bdev->mutex);
-	if (wal_bdev->open_thread == NULL) {
+	if (wal_bdev->ch_count == 0) {
 		wal_bdev->log_channel = spdk_bdev_get_io_channel(wal_bdev->log_bdev_info.desc);
 		if (!wal_bdev->log_channel) {
 			SPDK_ERRLOG("Unable to create io channel for log bdev\n");
@@ -128,14 +128,33 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 		
 		wal_bdev->pending_writes_poller = SPDK_POLLER_REGISTER(wal_bdev_submit_pending_writes, wal_bdev, 0);
 		wal_bdev->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_bdev, 10);
-		wal_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_bdev, 50);
+		wal_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_bdev, 10);
 		wal_bdev->stat_poller = SPDK_POLLER_REGISTER(wal_bdev_stat_report, wal_bdev, 30*1000*1000);
 
 		wal_bdev->open_thread = spdk_get_thread();
 	}
+	wal_bdev->ch_count++;
 	pthread_mutex_unlock(&wal_bdev->mutex);
 
 	return 0;
+}
+
+static void
+_wal_bdev_destroy_cb(void *arg)
+{
+	struct wal_bdev	*wal_bdev = arg;
+
+	spdk_put_io_channel(wal_bdev->log_channel);
+	spdk_put_io_channel(wal_bdev->core_channel);
+	wal_bdev->log_channel = NULL;
+	wal_bdev->core_channel = NULL;
+
+	spdk_poller_unregister(&wal_bdev->pending_writes_poller);
+	spdk_poller_unregister(&wal_bdev->mover_poller);
+	spdk_poller_unregister(&wal_bdev->cleaner_poller);
+	spdk_poller_unregister(&wal_bdev->stat_poller);
+	
+	wal_bdev->open_thread = NULL;
 }
 
 /*
@@ -159,18 +178,14 @@ wal_bdev_destroy_cb(void *io_device, void *ctx_buf)
 	assert(wal_ch != NULL);
 
 	pthread_mutex_lock(&wal_bdev->mutex);
-	if (wal_bdev->open_thread == spdk_get_thread()) {
-		spdk_put_io_channel(wal_bdev->log_channel);
-		spdk_put_io_channel(wal_bdev->core_channel);
-		wal_bdev->log_channel = NULL;
-		wal_bdev->core_channel = NULL;
-
-		spdk_poller_unregister(&wal_bdev->pending_writes_poller);
-		spdk_poller_unregister(&wal_bdev->mover_poller);
-		spdk_poller_unregister(&wal_bdev->cleaner_poller);
-		spdk_poller_unregister(&wal_bdev->stat_poller);
-		
-		wal_bdev->open_thread = NULL;
+	wal_bdev->ch_count--;
+	if (wal_bdev->ch_count == 0) {
+		if (wal_bdev->open_thread != spdk_get_thread()) {
+			spdk_thread_send_msg(wal_bdev->open_thread,
+					     _wal_bdev_destroy_cb, wal_bdev);
+		} else {
+			_wal_bdev_destroy_cb(wal_bdev);
+		}
 	}
 	pthread_mutex_unlock(&wal_bdev->mutex);
 }
@@ -644,7 +659,7 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	log_blocks = (bdev_io->u.bdev.num_blocks << wal_bdev->blocklen_shift) + 1;
 	next_tail = wal_bdev->log_tail + log_blocks;
 	if (next_tail >= wal_bdev->log_max) {
-		if (spdk_unlikely(log_blocks > wal_bdev->log_head)) {
+		if (spdk_unlikely(wal_bdev->tail_round > wal_bdev->head_round || log_blocks > wal_bdev->log_head)) {
 			goto write_no_space;
 		} else {
 			log_offset = 0;
@@ -676,7 +691,7 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	}
 	return;
 write_no_space:
-	SPDK_DEBUGLOG(wal_bdev, "queue bdev io submit due to no enough space left on log device.\n");
+	SPDK_DEBUGLOG(bdev_wal, "queue bdev io submit due to no enough space left on log device.\n");
 	TAILQ_INSERT_TAIL(&wal_bdev->pending_writes, wal_io, tailq);
 	return;
 }
@@ -756,8 +771,8 @@ wal_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_io
 {
 	struct wal_bdev_io *wal_io = (struct wal_bdev_io *)bdev_io->driver_ctx;
 
-	wal_io->wal_bdev = bdev_io->bdev->ctxt;
 	wal_io->wal_ch = spdk_io_channel_get_ctx(ch);
+	wal_io->wal_bdev = wal_io->wal_ch->wal_bdev;
 	wal_io->orig_io = bdev_io;
 	wal_io->orig_thread = spdk_get_thread();
 
@@ -1494,7 +1509,6 @@ wal_bdev_start(struct wal_bdev *wal_bdev)
 				? wal_bdev->log_bdev_info.bdev->blockcnt
 				: wal_bdev->core_bdev_info.bdev->blockcnt;
 	mempool_size = spdk_align64pow2(mempool_size);
-	mempool_size = (1 << 24) < mempool_size ? (1 << 24) : mempool_size;
 
 	wal_bdev->bstat_pool = spdk_mempool_create("WAL_BSTAT_POOL", mempool_size, sizeof(bstat), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
 	wal_bdev->bsl_node_pool = spdk_mempool_create("WAL_BSL_NODE_POOL", mempool_size, sizeof(bskiplistNode), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
@@ -1566,7 +1580,7 @@ wal_bdev_submit_pending_writes(void *ctx)
 		log_blocks = (wal_io->metadata->core_length << wal_bdev->blocklen_shift) + 1;
 		next_tail = wal_bdev->log_tail + log_blocks;
 		if (next_tail >= wal_bdev->log_max) {
-			if (spdk_unlikely(log_blocks > wal_bdev->log_head)) {
+			if (spdk_unlikely(wal_bdev->tail_round > wal_bdev->head_round || log_blocks > wal_bdev->log_head)) {
 				return SPDK_POLLER_BUSY;
 			} else {
 				log_offset = 0;
@@ -1644,7 +1658,7 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 
 	spdk_bdev_free_io(bdev_io);
 
-	if (spdk_unlikely(bdev->destruct_called)) {
+	if (spdk_unlikely(bdev->destruct_called || bdev->destroy_started)) {
 		return;
 	}
 
@@ -1684,7 +1698,7 @@ wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 
 	spdk_bdev_free_io(bdev_io);
 
-	if (spdk_unlikely(bdev->destruct_called)) {
+	if (spdk_unlikely(bdev->destruct_called || bdev->destroy_started)) {
 		return;
 	}
 
@@ -1714,7 +1728,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 
 	spdk_bdev_free_io(bdev_io);
 
-	if (spdk_unlikely(bdev->destruct_called)) {
+	if (spdk_unlikely(bdev->destruct_called || bdev->destroy_started)) {
 		return;
 	}
 
@@ -1746,7 +1760,7 @@ wal_bdev_mover_clean(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 
 	spdk_bdev_free_io(bdev_io);
 	
-	if (spdk_unlikely(bdev->destruct_called)) {
+	if (spdk_unlikely(bdev->destruct_called || bdev->destroy_started)) {
 		return;
 	}
 

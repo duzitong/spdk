@@ -39,9 +39,18 @@
 
 #include "spdk/nvme.h"
 #include "spdk/bdev.h"
+#include "spdk/trace.h"
+#include "spdk_internal/trace_defs.h"
 
 #define TARGET_BLOCK_SIZE 512
+#define TARGET_WC_BATCH_SIZE 32
 // #define TARGET_MD_LEN 8
+
+#define TRACE_BDEV_WRITE_MEMCPY_START	SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x20)
+#define TRACE_BDEV_WRITE_MEMCPY_END		SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x21)
+#define TRACE_BDEV_RDMA_POST_SEND_WRITE_START		SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x22)
+#define TRACE_BDEV_RDMA_POST_SEND_WRITE_END		SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x23)
+#define TRACE_BDEV_CQ_POLL		SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x24)
 
 typedef void (*spdk_delete_target_complete)(void *cb_arg, int bdeverrno);
 

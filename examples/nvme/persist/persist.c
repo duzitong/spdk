@@ -56,6 +56,7 @@ static struct rdma_handshake {
 // should be enough for IPv4
 char addr_buf[16];
 char port_buf[8];
+char cpu_buf[8] = "0x40";
 
 int main(int argc, char **argv)
 {
@@ -64,15 +65,9 @@ int main(int argc, char **argv)
 
 	spdk_env_opts_init(&opts);
 
-	opts.name = "persist";
-	if (spdk_env_init(&opts) < 0) {
-		fprintf(stderr, "Unable to initialize SPDK env\n");
-		return 1;
-	}
-
 	int op;
 
-	while ((op = getopt(argc, argv, "a:p:")) != -1) {
+	while ((op = getopt(argc, argv, "a:p:m:")) != -1) {
 		switch (op) {
 			case 'a':
 				memcpy(addr_buf, optarg, strlen(optarg));
@@ -80,11 +75,21 @@ int main(int argc, char **argv)
 			case 'p':
 				memcpy(port_buf, optarg, strlen(optarg));
 				break;
+			case 'm':
+				memcpy(cpu_buf, optarg, strlen(optarg));
+				break;
 		}
 	}
 
 	if (!strlen(addr_buf) || !strlen(port_buf)) {
 		printf("not enough arguments.\n");
+		return 1;
+	}
+
+	opts.name = "persist";
+	opts.core_mask = cpu_buf;
+	if (spdk_env_init(&opts) < 0) {
+		fprintf(stderr, "Unable to initialize SPDK env\n");
 		return 1;
 	}
 
@@ -115,7 +120,7 @@ int main(int argc, char **argv)
 	memcpy(&addr, addr_res->ai_addr, sizeof(addr));
 	rc = rdma_bind_addr(cm_id, (struct sockaddr*)&addr);
 	assert(rc == 0);
-	rc = rdma_listen(cm_id, 1);
+	rc = rdma_listen(cm_id, 3);
 	assert(rc == 0);
 
 	printf("listening on port %d\n", ntohs(addr.sin_port));
@@ -185,8 +190,14 @@ int main(int argc, char **argv)
 	sge.lkey = ibv_mr->lkey;
 	rc = ibv_post_recv(cm_id_2->qp, &wr, &bad_wr);
 	assert(rc == 0);
-	struct rdma_conn_param cm_param;
-	rc = rdma_accept(cm_id_2, &cm_param);
+
+	struct rdma_conn_param conn_param = {};
+
+	conn_param.responder_resources = device_attr.max_qp_rd_atom;
+	conn_param.initiator_depth = device_attr.max_qp_init_rd_atom;
+	conn_param.retry_count = 7;
+	conn_param.rnr_retry_count = 7;
+	rc = rdma_accept(cm_id_2, &conn_param);
 
 	if (rc != 0) {
 		printf("accept err = %d\n", err);

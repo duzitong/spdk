@@ -168,6 +168,9 @@ struct wal_bdev {
 	/* Set to true if destroy of this wal bdev is started. */
 	bool				destroy_started;
 
+	/* count of open channels */
+	uint32_t			ch_count;
+
 	/* open thread */
 	struct spdk_thread		*open_thread;
 

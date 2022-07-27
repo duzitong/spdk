@@ -160,6 +160,8 @@ struct rpc_bdev_replica_create {
 
 	/* Base bdevs information */
 	struct rpc_bdev_replica_create_base_bdevs base_bdevs;
+
+	bool								md;
 };
 
 /*
@@ -198,6 +200,7 @@ decode_base_bdevs(const struct spdk_json_val *val, void *out)
 static const struct spdk_json_object_decoder rpc_bdev_replica_create_decoders[] = {
 	{"name", offsetof(struct rpc_bdev_replica_create, name), spdk_json_decode_string},
 	{"base_bdevs", offsetof(struct rpc_bdev_replica_create, base_bdevs), decode_base_bdevs},
+	{"md", offsetof(struct rpc_bdev_replica_create, md), spdk_json_decode_bool, true},
 };
 
 /*
@@ -227,7 +230,7 @@ rpc_bdev_replica_create(struct spdk_jsonrpc_request *request,
 		goto cleanup;
 	}
 
-	rc = replica_bdev_config_add(req.name, req.base_bdevs.num_base_bdevs,
+	rc = replica_bdev_config_add(req.name, req.base_bdevs.num_base_bdevs, req.md,
 				  &replica_cfg);
 	if (rc != 0) {
 		spdk_jsonrpc_send_error_response_fmt(request, rc,
