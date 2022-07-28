@@ -334,6 +334,7 @@ int main(int argc, char **argv)
 		sge.length = BLOCK_SIZE;
 		sge.lkey = data_mr->lkey;
 
+	
 		rc = ibv_post_send(cm_id->qp, &wr, &bad_wr);
 
 		if (rc) {
@@ -343,9 +344,9 @@ int main(int argc, char **argv)
 		int cnt = 0;
 		while (cnt == 0) {
 			cnt = ibv_poll_cq(ibv_cq, 1, wc_buf);
-			if (spdk_unlikely(wc_buf[0].wr_id != i + wr_shift)) {
-				printf("wrong wr id\n");
-			}
+		}
+		if (spdk_unlikely(wc_buf[0].wr_id != i + wr_shift)) {
+			printf("wrong wr id\n");
 		}
 		uint64_t tsc_diff = spdk_get_ticks() - start_tsc;
 		spdk_histogram_data_tally(histogram, tsc_diff);
