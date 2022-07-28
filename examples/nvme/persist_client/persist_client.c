@@ -42,6 +42,7 @@
 #include "spdk/assert.h"
 #include "spdk/histogram_data.h"
 #include "spdk/util.h"
+#include "spdk/likely.h"
 #include <errno.h>
 
 #include <infiniband/verbs.h>
@@ -311,7 +312,7 @@ int main(int argc, char **argv)
 	printf("rdma handshake complete\n");
 
 	struct spdk_histogram_data *histogram = spdk_histogram_data_alloc();
-	int i;
+	int i, j;
 	for (i = 3; i < runs+3; i++) {
 		uint64_t start_tsc = spdk_get_ticks();
 		struct ibv_send_wr wr, *bad_wr = NULL;
@@ -342,6 +343,9 @@ int main(int argc, char **argv)
 		int cnt = 0;
 		while (cnt == 0) {
 			cnt = ibv_poll_cq(ibv_cq, 1, wc_buf);
+			if (spdk_unlikely(wc_buf[0].wr_id != i + wr_shift)) {
+				printf("wrong wr id\n");
+			}
 		}
 		uint64_t tsc_diff = spdk_get_ticks() - start_tsc;
 		spdk_histogram_data_tally(histogram, tsc_diff);
