@@ -313,7 +313,7 @@ int main(int argc, char **argv)
 
 	struct spdk_histogram_data *histogram = spdk_histogram_data_alloc();
 	int i;
-	uint64_t threshold = spdk_get_ticks_hz() / 10000;
+	uint64_t threshold = spdk_get_ticks_hz() / 50; // 20ms
 	for (i = 3; i < runs+3; i++) {
 		struct ibv_send_wr wr, *bad_wr = NULL;
 		struct ibv_sge sge;
