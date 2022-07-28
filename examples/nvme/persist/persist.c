@@ -267,8 +267,11 @@ int main(int argc, char **argv)
 	}
 
 	printf("rdma handshake complete\n");
-	printf("press anything to quit...\n");
+	printf("input anything to quit...\n");
 	char buf[128];
 	scanf("%s", buf);
+	ibv_dereg_mr(data_mr);
+	ibv_dereg_mr(lhs_mr);
+	ibv_dereg_mr(rhs_mr);
 	return 0;
 }
