@@ -346,8 +346,8 @@ int main(int argc, char **argv)
 		while (cnt == 0) {
 			cnt = ibv_poll_cq(ibv_cq, 1, wc_buf);
 		}
-		if (spdk_unlikely(wc_buf[0].wr_id != i + wr_shift)) {
-			printf("wrong wr id\n");
+		if (spdk_unlikely(wc_buf[0].status != IBV_WC_SUCCESS)) {
+			printf("request failed, status: %d\n", wc_buf[0].status);
 		}
 		uint64_t tsc_diff = spdk_get_ticks() - start_tsc;
 		if (tsc_diff > threshold) {
