@@ -314,7 +314,6 @@ int main(int argc, char **argv)
 	struct spdk_histogram_data *histogram = spdk_histogram_data_alloc();
 	int i, j;
 	for (i = 3; i < runs+3; i++) {
-		uint64_t start_tsc = spdk_get_ticks();
 		struct ibv_send_wr wr, *bad_wr = NULL;
 		struct ibv_sge sge;
 		struct ibv_wc wc_buf[1];
@@ -335,6 +334,7 @@ int main(int argc, char **argv)
 		sge.lkey = data_mr->lkey;
 
 	
+		uint64_t start_tsc = spdk_get_ticks();
 		rc = ibv_post_send(cm_id->qp, &wr, &bad_wr);
 
 		if (rc) {
