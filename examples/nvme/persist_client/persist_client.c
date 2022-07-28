@@ -313,7 +313,7 @@ int main(int argc, char **argv)
 
 	struct spdk_histogram_data *histogram = spdk_histogram_data_alloc();
 	int i;
-	double mul = 1000 / spdk_get_ticks_hz();
+	uint64_t threshold = spdk_get_ticks_hz() / 10000;
 	for (i = 3; i < runs+3; i++) {
 		struct ibv_send_wr wr, *bad_wr = NULL;
 		struct ibv_sge sge;
@@ -350,8 +350,8 @@ int main(int argc, char **argv)
 			printf("wrong wr id\n");
 		}
 		uint64_t tsc_diff = spdk_get_ticks() - start_tsc;
-		if (tsc_diff * mul > 10) {
-			printf("%ld", tsc_diff);
+		if (tsc_diff > threshold) {
+			printf("%ld\n", tsc_diff);
 		}
 		spdk_histogram_data_tally(histogram, tsc_diff);
 	}
