@@ -327,7 +327,7 @@ int main(int argc, char **argv)
 		wr.opcode = IBV_WR_RDMA_WRITE;
 		wr.num_sge = 1;
 		wr.sg_list = &sge;
-		wr.wr.rdma.remote_addr = (uint64_t)remote_handshake->base_addr + i * BLOCK_SIZE;
+		wr.wr.rdma.remote_addr = (uint64_t)remote_handshake->base_addr + ((i * BLOCK_SIZE) % (BUFFER_SIZE - BLOCK_SIZE));
 		wr.wr.rdma.rkey = remote_handshake->rkey;
 
 		sge.addr = (uint64_t)circular_buffer + ((i * BLOCK_SIZE) % (BUFFER_SIZE - BLOCK_SIZE));
