@@ -247,7 +247,7 @@ int main(int argc, char **argv)
 	rc = rdma_create_qp(cm_id, ibv_pd, &init_attr);
 	printf("qp num: %d\n", cm_id->qp->qp_num);
 
-	rc = ibv_query_qp(rqpair->rdma_qp->qp, &qp_attr,
+	rc = ibv_query_qp(cm_id->qp, &qp_attr,
 			query_mask, &init_attr);
 	printf("psn: %ld\n", qp_attr.sq_psn);
 
