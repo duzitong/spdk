@@ -244,19 +244,20 @@ int main(int argc, char **argv)
 	IBV_QP_RETRY_CNT |
 	IBV_QP_RNR_RETRY |
 	IBV_QP_MAX_QP_RD_ATOMIC;
+	struct ibv_qp_attr qp_new_attr;
 
 	rc = rdma_create_qp(cm_id, ibv_pd, &init_attr);
 	printf("qp num: %d\n", cm_id->qp->qp_num);
 
 	rc = ibv_query_qp(cm_id->qp, &qp_attr,
 			query_mask, &init_attr);
-	printf("queried psn: %d\n", qp_attr.sq_psn);
-	qp_attr.sq_psn = atoi(id);
-	printf("set psn to: %d\n", qp_attr.sq_psn);
+	printf("qp state: %d\n", qp_attr.cur_qp_state);
+	qp_new_attr.sq_psn = (uint32_t)atoi(id);
+	printf("set psn to: %d\n", qp_new_attr.sq_psn);
 
-	rc = ibv_modify_qp(cm_id->qp, &qp_attr, IBV_QP_SQ_PSN);
+	rc = ibv_modify_qp(cm_id->qp, &qp_new_attr, IBV_QP_SQ_PSN);
 	if (rc) {
-		printf("modify qp failed, rc: %d", rc);
+		printf("modify qp failed, rc: %d\n", rc);
 	}
 	rc = ibv_query_qp(cm_id->qp, &qp_attr,
 		query_mask, &init_attr);
