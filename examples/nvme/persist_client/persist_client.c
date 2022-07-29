@@ -45,6 +45,7 @@
 #include "spdk/likely.h"
 #include <errno.h>
 
+#include <stdlib.h>
 #include <infiniband/verbs.h>
 #include <rdma/rdma_cma.h>
 
@@ -249,7 +250,13 @@ int main(int argc, char **argv)
 
 	rc = ibv_query_qp(cm_id->qp, &qp_attr,
 			query_mask, &init_attr);
-	printf("psn: %ld\n", qp_attr.sq_psn);
+	printf("queried psn: %ld\n", qp_attr.sq_psn);
+	qp_attr.sq_psn = lrand48() & 0xffffff;
+
+	rc = ibv_modify_qp(cm_id->qp, qp_attr, IBV_QP_SQ_PSN)
+	rc = ibv_query_qp(cm_id->qp, &qp_attr,
+		query_mask, &init_attr);
+	printf("new psn: %ld\n", qp_attr.sq_psn);
 
 	struct ibv_recv_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge, send_sge;
