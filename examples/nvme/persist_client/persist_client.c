@@ -255,6 +255,9 @@ int main(int argc, char **argv)
 	printf("set psn to: %d\n", qp_attr.sq_psn);
 
 	rc = ibv_modify_qp(cm_id->qp, &qp_attr, IBV_QP_SQ_PSN);
+	if (rc) {
+		printf("modify qp failed, rc: %d", rc);
+	}
 	rc = ibv_query_qp(cm_id->qp, &qp_attr,
 		query_mask, &init_attr);
 	printf("new psn: %d\n", qp_attr.sq_psn);
