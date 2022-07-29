@@ -223,7 +223,7 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 	}
 
 	for (int i = 0; i < iovcnt; i++) {
-		memcpy(dst, iov[i].iov_base, iov[0].iov_len);
+		memcpy(dst, iov[i].iov_base, iov[i].iov_len);
 		dst += iov[i].iov_len;
 	}
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_WRITE_MEMCPY_END, 0, 0, (uintptr_t)bdev_io);
@@ -280,7 +280,7 @@ static int _bdev_target_submit_request(struct target_channel *mch, struct spdk_b
 	// _log_md(bdev_io);
 
 	if (bdev_io->u.bdev.iovs[0].iov_base == NULL) {
-		SPDK_DEBUGLOG(bdev_target, "Received read req where iov_base is null\n");
+		SPDK_ERRLOG("Received read req where iov_base is null\n");
 		return 0;
 	}
 
@@ -493,9 +493,10 @@ target_destroy_channel_cb(void *io_device, void *ctx)
 
 int
 create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, const char* port,
-			const struct spdk_uuid *uuid, uint64_t num_blocks, uint32_t block_size, uint32_t optimal_io_boundary)
+			const struct spdk_uuid *uuid, uint64_t num_blocks, uint32_t block_size, uint32_t optimal_io_boundary, bool has_md)
 {
 	SPDK_DEBUGLOG(bdev_target, "in create disk\n");
+	SPDK_NOTICELOG("has_md = %d\n", has_md);
 	struct target_disk	*mdisk;
 	int rc;
 
@@ -712,9 +713,11 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 
 	mdisk->disk.write_cache = 1;
 	mdisk->disk.blocklen = block_size;
-	mdisk->disk.md_len = block_size;
-	mdisk->disk.md_interleave = false;
-	mdisk->disk.dif_type = SPDK_DIF_DISABLE;
+	if (has_md) {
+		mdisk->disk.md_len = block_size;
+		mdisk->disk.md_interleave = false;
+		mdisk->disk.dif_type = SPDK_DIF_DISABLE;
+	}
 	mdisk->disk.blockcnt = num_blocks;
 
 	mdisk->cm_id = cm_id;
