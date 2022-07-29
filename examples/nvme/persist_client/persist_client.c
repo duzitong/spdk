@@ -50,6 +50,7 @@
 
 #define BUFFER_SIZE 512 * 1024 * 1024
 #define BLOCK_SIZE 4096
+#define MAX_BLOCK (BUFFER_SIZE - BLOCK_SIZE) / BLOCK_SIZE
 void* circular_buffer;
 
 static struct rdma_handshake {
@@ -327,10 +328,10 @@ int main(int argc, char **argv)
 		wr.opcode = IBV_WR_RDMA_WRITE;
 		wr.num_sge = 1;
 		wr.sg_list = &sge;
-		wr.wr.rdma.remote_addr = (uint64_t)remote_handshake->base_addr + ((i * BLOCK_SIZE) % (BUFFER_SIZE - BLOCK_SIZE));
+		wr.wr.rdma.remote_addr = (uint64_t)remote_handshake->base_addr + i % MAX_BLOCK;
 		wr.wr.rdma.rkey = remote_handshake->rkey;
 
-		sge.addr = (uint64_t)circular_buffer + ((i * BLOCK_SIZE) % (BUFFER_SIZE - BLOCK_SIZE));
+		sge.addr = (uint64_t)circular_buffer + i % MAX_BLOCK;
 		sge.length = BLOCK_SIZE;
 		sge.lkey = data_mr->lkey;
 
@@ -339,7 +340,7 @@ int main(int argc, char **argv)
 		rc = ibv_post_send(cm_id->qp, &wr, &bad_wr);
 
 		if (rc) {
-			printf("wr failed, rc: %d\n", rc);
+			printf("(%d) wr failed, rc: %d\n", i, rc);
 			break;
 		}
 
@@ -348,7 +349,7 @@ int main(int argc, char **argv)
 			cnt = ibv_poll_cq(ibv_cq, 1, wc_buf);
 		}
 		if (spdk_unlikely(wc_buf[0].status != IBV_WC_SUCCESS)) {
-			printf("wc failed, status: %d\n", wc_buf[0].status);
+			printf("(%d) wc failed, status: %d\n", i, wc_buf[0].status);
 			break;
 		}
 		uint64_t tsc_diff = spdk_get_ticks() - start_tsc;
