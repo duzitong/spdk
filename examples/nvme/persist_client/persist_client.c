@@ -253,7 +253,7 @@ int main(int argc, char **argv)
 	printf("queried psn: %ld\n", qp_attr.sq_psn);
 	qp_attr.sq_psn = lrand48() & 0xffffff;
 
-	rc = ibv_modify_qp(cm_id->qp, qp_attr, IBV_QP_SQ_PSN)
+	rc = ibv_modify_qp(cm_id->qp, &qp_attr, IBV_QP_SQ_PSN);
 	rc = ibv_query_qp(cm_id->qp, &qp_attr,
 		query_mask, &init_attr);
 	printf("new psn: %ld\n", qp_attr.sq_psn);
