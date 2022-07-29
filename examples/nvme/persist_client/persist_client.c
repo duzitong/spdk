@@ -330,7 +330,7 @@ int main(int argc, char **argv)
 		wr.wr.rdma.remote_addr = (uint64_t)remote_handshake->base_addr + i * BLOCK_SIZE;
 		wr.wr.rdma.rkey = remote_handshake->rkey;
 
-		sge.addr = (uint64_t)circular_buffer + i * BLOCK_SIZE;
+		sge.addr = (uint64_t)circular_buffer + ((i * BLOCK_SIZE) % (BUFFER_SIZE - BLOCK_SIZE));
 		sge.length = BLOCK_SIZE;
 		sge.lkey = data_mr->lkey;
 
