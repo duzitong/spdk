@@ -339,7 +339,8 @@ int main(int argc, char **argv)
 		rc = ibv_post_send(cm_id->qp, &wr, &bad_wr);
 
 		if (rc) {
-			continue;
+			printf("wr failed, rc: %d\n", rc);
+			break;
 		}
 
 		int cnt = 0;
@@ -347,7 +348,8 @@ int main(int argc, char **argv)
 			cnt = ibv_poll_cq(ibv_cq, 1, wc_buf);
 		}
 		if (spdk_unlikely(wc_buf[0].status != IBV_WC_SUCCESS)) {
-			printf("request failed, status: %d\n", wc_buf[0].status);
+			printf("wc failed, status: %d\n", wc_buf[0].status);
+			break;
 		}
 		uint64_t tsc_diff = spdk_get_ticks() - start_tsc;
 		if (tsc_diff > threshold) {
