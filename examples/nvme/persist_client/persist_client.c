@@ -228,7 +228,7 @@ int main(int argc, char **argv)
 	};
 
 	int x = rdma_create_qp(cm_id, ibv_pd, &init_attr);
-	printf("rdma_create_qp returns %d\n", x);
+	printf("qp num %d\n", cm_id->qp->qp_num);
 
 	struct ibv_recv_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge, send_sge;
