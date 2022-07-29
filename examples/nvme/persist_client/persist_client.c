@@ -226,9 +226,30 @@ int main(int argc, char **argv)
 			.max_recv_wr = 256,
 		}
 	};
+	struct ibv_qp_attr qp_attr;
+	int query_mask =
+	IBV_QP_STATE |
+	IBV_QP_PKEY_INDEX |
+	IBV_QP_PORT |
+	IBV_QP_ACCESS_FLAGS |
+	IBV_QP_AV |
+	IBV_QP_PATH_MTU |
+	IBV_QP_DEST_QPN |
+	IBV_QP_RQ_PSN |
+	IBV_QP_MAX_DEST_RD_ATOMIC |
+	IBV_QP_MIN_RNR_TIMER |
+	IBV_QP_SQ_PSN |
+	IBV_QP_TIMEOUT |
+	IBV_QP_RETRY_CNT |
+	IBV_QP_RNR_RETRY |
+	IBV_QP_MAX_QP_RD_ATOMIC;
 
-	int x = rdma_create_qp(cm_id, ibv_pd, &init_attr);
-	printf("qp num %d\n", cm_id->qp->qp_num);
+	rc = rdma_create_qp(cm_id, ibv_pd, &init_attr);
+	printf("qp num: %d\n", cm_id->qp->qp_num);
+
+	rc = ibv_query_qp(rqpair->rdma_qp->qp, &qp_attr,
+			query_mask, &init_attr);
+	printf("psn: %ld\n", qp_attr.sq_psn);
 
 	struct ibv_recv_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge, send_sge;
