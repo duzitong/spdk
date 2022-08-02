@@ -384,13 +384,15 @@ if __name__ == "__main__":
                                                uuid=args.uuid,
                                                ip=args.addr,
                                                port=args.port,
-                                               optimal_io_boundary=args.optimal_io_boundary))
+                                               optimal_io_boundary=args.optimal_io_boundary,
+                                               has_md=args.md))
     p = subparsers.add_parser('bdev_target_create', aliases=['construct_target_bdev'],
                               help='Create a bdev with target backend')
     p.add_argument('-b', '--name', help="Name of the bdev")
     p.add_argument('-u', '--uuid', help="UUID of the bdev")
     p.add_argument('-a', '--addr', help="addr of the backend service")
     p.add_argument('-p', '--port', help="port of the backend service")
+    p.add_argument('-m', '--md', help="md support", type=bool, default=False)
     p.add_argument(
         'total_size', help='Size of target bdev in MB (float > 0)', type=float)
     p.add_argument('block_size', help='Block size for this bdev', type=int)

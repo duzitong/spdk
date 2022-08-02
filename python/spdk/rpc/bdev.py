@@ -264,7 +264,7 @@ def bdev_malloc_delete(client, name):
     return client.call('bdev_malloc_delete', params)
 
 
-def bdev_target_create(client, num_blocks, block_size, ip=None, port=None, name=None, uuid=None, optimal_io_boundary=None):
+def bdev_target_create(client, num_blocks, block_size, ip=None, port=None, name=None, uuid=None, optimal_io_boundary=None, has_md=False):
     """Construct a target block device.
 
     Args:
@@ -275,11 +275,12 @@ def bdev_target_create(client, num_blocks, block_size, ip=None, port=None, name=
         ip: IP of the persist server (optional)
         port: port of the persist server (optional)
         optimal_io_boundary: Split on optimal IO boundary, in number of blocks, default 0 (disabled, optional)
+        has_md: whether it supports bdev or not (optional; default False)
 
     Returns:
         Name of created block device.
     """
-    params = {'num_blocks': num_blocks, 'block_size': block_size}
+    params = {'num_blocks': num_blocks, 'block_size': block_size, "has_md": has_md}
     if name:
         params['name'] = name
     if uuid:
