@@ -252,16 +252,17 @@ int main(int argc, char **argv)
 	rc = ibv_query_qp(cm_id->qp, &qp_attr,
 			query_mask, &init_attr);
 	printf("qp state: %d\n", qp_attr.cur_qp_state);
-	// qp_new_attr.sq_psn = (uint32_t)atoi(id);
-	// printf("set psn to: %d\n", qp_new_attr.sq_psn);
+	qp_new_attr.qp_state = IBV_QPS_RTR;
+	qp_new_attr.sq_psn = (uint32_t)atoi(id);
+	printf("set psn to: %d\n", qp_new_attr.sq_psn);
 
-	// rc = ibv_modify_qp(cm_id->qp, &qp_new_attr, IBV_QP_SQ_PSN);
-	// if (rc) {
-	// 	printf("modify qp failed, rc: %d\n", rc);
-	// }
-	// rc = ibv_query_qp(cm_id->qp, &qp_attr,
-	// 	query_mask, &init_attr);
-	// printf("new psn: %d\n", qp_attr.sq_psn);
+	rc = ibv_modify_qp(cm_id->qp, &qp_new_attr, IBV_QP_STATE | IBV_QP_SQ_PSN);
+	if (rc) {
+		printf("modify qp failed, rc: %d\n", rc);
+	}
+	rc = ibv_query_qp(cm_id->qp, &qp_attr,
+		query_mask, &init_attr);
+	printf("new psn: %d\n", qp_attr.sq_psn);
 
 	struct ibv_recv_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge, send_sge;
@@ -288,6 +289,9 @@ int main(int argc, char **argv)
 	conn_param.rnr_retry_count = 7;
 
 	rdma_connect(cm_id, &conn_param);
+	rc = ibv_query_qp(cm_id->qp, &qp_attr,
+			query_mask, &init_attr);
+	printf("connected qp state: %d\n", qp_attr.cur_qp_state);
 	rdma_get_cm_event(rdma_channel, &connect_event);
 	if (connect_event->event != RDMA_CM_EVENT_ESTABLISHED) {
 		SPDK_ERRLOG("invalid event type %d\n", connect_event->event);
