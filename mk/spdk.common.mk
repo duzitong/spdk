@@ -213,6 +213,10 @@ COMMON_CFLAGS += -DNDEBUG -O2
 COMMON_CFLAGS += -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2
 endif
 
+ifeq ($(CONFIG_WINDOWS_VM), y)
+COMMON_CFLAGS += -DWINDOWS_VM
+endif
+
 ifeq ($(CONFIG_COVERAGE), y)
 COMMON_CFLAGS += -fprofile-arcs -ftest-coverage
 LDFLAGS += -fprofile-arcs -ftest-coverage
