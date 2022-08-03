@@ -351,12 +351,17 @@ int main(int argc, char **argv)
 	}
 
 	printf("rdma handshake complete\n");
-	
+
 	struct ibv_qp_attr qp_new_attr;
 	memset(&qp_new_attr, 0, sizeof(struct ibv_qp_attr));
 	qp_new_attr.qp_access_flags = 3;
 	rc = ibv_modify_qp(cm_id->qp, &qp_new_attr, IBV_QP_ACCESS_FLAGS);
 	printf("modify qp rc: %d\n", rc);
+	
+	memset(&qp_attr, 0, sizeof(struct ibv_qp_attr));
+	rc = ibv_query_qp(cm_id->qp, &qp_attr,
+			query_mask, &init_attr);
+	printf("access flags: %d\n", qp_attr.qp_access_flags);
 
 	struct spdk_histogram_data *histogram = spdk_histogram_data_alloc();
 	int i;
