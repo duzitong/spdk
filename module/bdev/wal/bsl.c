@@ -1,4 +1,5 @@
 #include "bsl.h"
+#include "bdev_wal.h"
 #include "spdk/stdinc.h"
 #include "spdk/env.h"
 
@@ -189,7 +190,9 @@ bskiplistNode *bslInsert(bskiplist *bsl, long begin, long end, bstat *ele, bskip
         updatee[i] = x;
     }
 
+    spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSL_RAND_START, 0, 0, (uintptr_t)ele);
     level = bslRandomLevel();
+    spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSL_RAND_END, 0, 0, (uintptr_t)ele);
     if (level > bsl->level) {
         for (i = bsl->level; i < level; i++) {
             updateb[i] = bsl->header;

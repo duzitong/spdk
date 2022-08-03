@@ -777,73 +777,73 @@ bdev_target_deinitialize(void)
 
 SPDK_LOG_REGISTER_COMPONENT(bdev_target)
 
-SPDK_TRACE_REGISTER_FN(target_trace, "target", TRACE_GROUP_BDEV)
-{
-	struct spdk_trace_tpoint_opts opts[] = {
-		{
-			"BDEV_IO_START", TRACE_BDEV_IO_START,
-			OWNER_BDEV, OBJECT_BDEV_IO, 1,
-			{
-				{ "type", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "ctx", SPDK_TRACE_ARG_TYPE_PTR, 8 },
-				{ "offset", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "len", SPDK_TRACE_ARG_TYPE_INT, 8 }
-			}
-		},
-		{
-			"BDEV_IO_DONE", TRACE_BDEV_IO_DONE,
-			OWNER_BDEV, OBJECT_BDEV_IO, 0,
-			{{ "ctx", SPDK_TRACE_ARG_TYPE_PTR, 8 }}
-		},
-		{
-			"BDEV_IOCH_CREATE", TRACE_BDEV_IOCH_CREATE,
-			OWNER_BDEV, OBJECT_NONE, 1,
-			{
-				{ "name", SPDK_TRACE_ARG_TYPE_STR, 40 },
-				{ "thread_id", SPDK_TRACE_ARG_TYPE_INT, 8}
-			}
-		},
-		{
-			"BDEV_IOCH_DESTROY", TRACE_BDEV_IOCH_DESTROY,
-			OWNER_BDEV, OBJECT_NONE, 0,
-			{
-				{ "name", SPDK_TRACE_ARG_TYPE_STR, 40 },
-				{ "thread_id", SPDK_TRACE_ARG_TYPE_INT, 8}
-			}
-		},
-		{
-			"TARGET_W_MEMCPY_START", TRACE_BDEV_WRITE_MEMCPY_START,
-			OWNER_BDEV, OBJECT_BDEV_IO, 1,
-			{
-			}
-		},
-		{
-			"TARGET_W_MEMCPY_END", TRACE_BDEV_WRITE_MEMCPY_END,
-			OWNER_BDEV, OBJECT_BDEV_IO, 0,
-			{
-			}
-		},
-		{
-			"TARGET_IB_WRITE_START", TRACE_BDEV_RDMA_POST_SEND_WRITE_START,
-			OWNER_BDEV, OBJECT_BDEV_IO, 1,
-			{
-			}
-		},
-		{
-			"TARGET_IB_WRITE_END", TRACE_BDEV_RDMA_POST_SEND_WRITE_END,
-			OWNER_BDEV, OBJECT_BDEV_IO, 0,
-			{
-			}
-		},
-		{
-			"TARGET_CQ_POLL", TRACE_BDEV_CQ_POLL,
-			OWNER_BDEV, OBJECT_BDEV_IO, 0,
-			{
-			}
-		},
-	};
+// SPDK_TRACE_REGISTER_FN(target_trace, "target", TRACE_GROUP_BDEV)
+// {
+// 	struct spdk_trace_tpoint_opts opts[] = {
+// 		{
+// 			"BDEV_IO_START", TRACE_BDEV_IO_START,
+// 			OWNER_BDEV, OBJECT_BDEV_IO, 1,
+// 			{
+// 				{ "type", SPDK_TRACE_ARG_TYPE_INT, 8 },
+// 				{ "ctx", SPDK_TRACE_ARG_TYPE_PTR, 8 },
+// 				{ "offset", SPDK_TRACE_ARG_TYPE_INT, 8 },
+// 				{ "len", SPDK_TRACE_ARG_TYPE_INT, 8 }
+// 			}
+// 		},
+// 		{
+// 			"BDEV_IO_DONE", TRACE_BDEV_IO_DONE,
+// 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
+// 			{{ "ctx", SPDK_TRACE_ARG_TYPE_PTR, 8 }}
+// 		},
+// 		{
+// 			"BDEV_IOCH_CREATE", TRACE_BDEV_IOCH_CREATE,
+// 			OWNER_BDEV, OBJECT_NONE, 1,
+// 			{
+// 				{ "name", SPDK_TRACE_ARG_TYPE_STR, 40 },
+// 				{ "thread_id", SPDK_TRACE_ARG_TYPE_INT, 8}
+// 			}
+// 		},
+// 		{
+// 			"BDEV_IOCH_DESTROY", TRACE_BDEV_IOCH_DESTROY,
+// 			OWNER_BDEV, OBJECT_NONE, 0,
+// 			{
+// 				{ "name", SPDK_TRACE_ARG_TYPE_STR, 40 },
+// 				{ "thread_id", SPDK_TRACE_ARG_TYPE_INT, 8}
+// 			}
+// 		},
+// 		{
+// 			"TARGET_W_MEMCPY_START", TRACE_BDEV_WRITE_MEMCPY_START,
+// 			OWNER_BDEV, OBJECT_BDEV_IO, 1,
+// 			{
+// 			}
+// 		},
+// 		{
+// 			"TARGET_W_MEMCPY_END", TRACE_BDEV_WRITE_MEMCPY_END,
+// 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
+// 			{
+// 			}
+// 		},
+// 		{
+// 			"TARGET_IB_WRITE_START", TRACE_BDEV_RDMA_POST_SEND_WRITE_START,
+// 			OWNER_BDEV, OBJECT_BDEV_IO, 1,
+// 			{
+// 			}
+// 		},
+// 		{
+// 			"TARGET_IB_WRITE_END", TRACE_BDEV_RDMA_POST_SEND_WRITE_END,
+// 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
+// 			{
+// 			}
+// 		},
+// 		{
+// 			"TARGET_CQ_POLL", TRACE_BDEV_CQ_POLL,
+// 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
+// 			{
+// 			}
+// 		},
+// 	};
 
-	spdk_trace_register_owner(OWNER_BDEV, 'b');
-	spdk_trace_register_object(OBJECT_BDEV_IO, 'i');
-	spdk_trace_register_description_ext(opts, SPDK_COUNTOF(opts));
-}
+// 	spdk_trace_register_owner(OWNER_BDEV, 'b');
+// 	spdk_trace_register_object(OBJECT_BDEV_IO, 'i');
+// 	spdk_trace_register_description_ext(opts, SPDK_COUNTOF(opts));
+// }

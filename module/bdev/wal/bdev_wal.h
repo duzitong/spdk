@@ -47,6 +47,8 @@
 #define TRACE_BDEV_BSTAT_CREATE_END		SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x11)
 #define TRACE_BDEV_BSL_INSERT_START		SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x12)
 #define TRACE_BDEV_BSL_INSERT_END		SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x13)
+#define TRACE_BDEV_BSL_RAND_START		SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x14)
+#define TRACE_BDEV_BSL_RAND_END			SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x15)
 
 /*
  * WAL state describes the state of the wal bdev. This wal bdev can be either in
@@ -119,11 +121,7 @@ struct wal_bdev_io {
 	enum spdk_bdev_io_status status;
 
 	struct wal_metadata	*metadata;
-
-	struct iovec *log_iovs;
 	
-	int log_iovcnt;
-
 	uint16_t	remaining_base_bdev_io;
 
 	void	*read_buf;
