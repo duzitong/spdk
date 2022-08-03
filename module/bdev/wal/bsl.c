@@ -170,7 +170,8 @@ bskiplistNode *bslInsert(bskiplist *bsl, long begin, long end, bstat *ele, bskip
     bskiplistNode *updateb[BSKIPLIST_MAXLEVEL], *updatee[BSKIPLIST_MAXLEVEL], *x, *y;
     int i, level;
 
-    x = bsl->header;
+    spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSL_RAND_START, 0, 0, (uintptr_t)ele);
+    x = y = bsl->header;
     for (i = bsl->level-1; i >= 0; i--) {
         while (x->level[i].forward &&
                 (x->level[i].forward->begin < begin))
@@ -178,21 +179,21 @@ bskiplistNode *bslInsert(bskiplist *bsl, long begin, long end, bstat *ele, bskip
             x = x->level[i].forward;
         }
         updateb[i] = x;
-    }
 
-    x = bsl->header;
-    for (i = bsl->level-1; i >= 0; i--) {
-        while (x->level[i].forward &&
-                (x->level[i].forward->end <= end))
-        {
-            x = x->level[i].forward;
+        if (y->level[i]->end <= x->level[i]->end) {
+            y = x;
         }
-        updatee[i] = x;
+        
+        while (y->level[i].forward &&
+                (y->level[i].forward->end <= end))
+        {
+            y = y->level[i].forward;
+        }
+        updatee[i] = y;
     }
-
-    spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSL_RAND_START, 0, 0, (uintptr_t)ele);
-    level = bslRandomLevel();
     spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSL_RAND_END, 0, 0, (uintptr_t)ele);
+
+    level = bslRandomLevel();
     if (level > bsl->level) {
         for (i = bsl->level; i < level; i++) {
             updateb[i] = bsl->header;
