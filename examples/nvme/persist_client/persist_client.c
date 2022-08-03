@@ -247,12 +247,6 @@ int main(int argc, char **argv)
 
 	rc = rdma_create_qp(cm_id, ibv_pd, &init_attr);
 	printf("qp num: %d\n", cm_id->qp->qp_num);
-	
-	struct ibv_qp_attr qp_new_attr;
-	memset(&qp_new_attr, 0, sizeof(struct ibv_qp_attr));
-	qp_new_attr.qp_access_flags = 3;
-	rc = ibv_modify_qp(cm_id->qp, &qp_new_attr, IBV_QP_ACCESS_FLAGS);
-	printf("modify qp rc: %d\n", rc);
 
 	struct ibv_recv_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge, send_sge;
@@ -357,6 +351,12 @@ int main(int argc, char **argv)
 	}
 
 	printf("rdma handshake complete\n");
+	
+	struct ibv_qp_attr qp_new_attr;
+	memset(&qp_new_attr, 0, sizeof(struct ibv_qp_attr));
+	qp_new_attr.qp_access_flags = 3;
+	rc = ibv_modify_qp(cm_id->qp, &qp_new_attr, IBV_QP_ACCESS_FLAGS);
+	printf("modify qp rc: %d\n", rc);
 
 	struct spdk_histogram_data *histogram = spdk_histogram_data_alloc();
 	int i;
