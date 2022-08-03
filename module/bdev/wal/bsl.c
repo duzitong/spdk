@@ -180,10 +180,10 @@ bskiplistNode *bslInsert(bskiplist *bsl, long begin, long end, bstat *ele, bskip
         }
         updateb[i] = x;
 
-        if (y->level[i]->end <= x->level[i]->end) {
+        if (y->end <= x->end) {
             y = x;
         }
-        
+
         while (y->level[i].forward &&
                 (y->level[i].forward->end <= end))
         {
