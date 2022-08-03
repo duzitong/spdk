@@ -249,21 +249,6 @@ int main(int argc, char **argv)
 	rc = rdma_create_qp(cm_id, ibv_pd, &init_attr);
 	printf("qp num: %d\n", cm_id->qp->qp_num);
 
-	rc = ibv_query_qp(cm_id->qp, &qp_attr,
-			query_mask, &init_attr);
-	printf("qp state: %d\n", qp_attr.cur_qp_state);
-	qp_new_attr.qp_state = IBV_QPS_RTR;
-	qp_new_attr.sq_psn = (uint32_t)atoi(id);
-	printf("set psn to: %d\n", qp_new_attr.sq_psn);
-
-	rc = ibv_modify_qp(cm_id->qp, &qp_new_attr, IBV_QP_STATE | IBV_QP_SQ_PSN);
-	if (rc) {
-		printf("modify qp failed, rc: %d\n", rc);
-	}
-	rc = ibv_query_qp(cm_id->qp, &qp_attr,
-		query_mask, &init_attr);
-	printf("new psn: %d\n", qp_attr.sq_psn);
-
 	struct ibv_recv_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge, send_sge;
 
@@ -302,7 +287,24 @@ int main(int argc, char **argv)
 
 	assert(connect_event->id == cm_id);
 
-	printf("connected. posting send...\n");
+	printf("connected. qp info...\n");
+	rc = ibv_query_qp(cm_id->qp, &qp_attr,
+			query_mask, &init_attr);
+	printf("state: %d\n", qp_attr.cur_qp_state);
+	printf("pkey index: %d\n", qp_attr.pkey_index);
+	printf("port: %d\n", qp_attr.port_num);
+	printf("access flags: %d\n", qp_attr.qp_access_flags);
+	printf("AV: %d\n", qp_attr.ah_attr);
+	printf("MTU: %d\n", qp_attr.path_mtu);
+	printf("dest QPN: %d\n", qp_attr.dest_qp_num);
+	printf("RQ PSN: %d\n", qp_attr.rq_psn);
+	printf("dest RD Atom: %d\n", qp_attr.max_dest_rd_atomic);
+	printf("min RNR timer: %d\n", qp_attr.min_rnr_timer);
+	printf("SQ PSN: %d\n", qp_attr.sq_psn);
+	printf("timout: %d\n", qp_attr.timeout);
+	printf("retry cnt: %d\n", qp_attr.retry_cnt);
+	printf("rnr retry: %d\n", qp_attr.rnr_retry);
+	printf("RD Atom: %d\n", qp_attr.max_rd_atomic);
 
 	struct ibv_send_wr send_wr, *bad_send_wr = NULL;
 	memset(&send_wr, 0, sizeof(send_wr));
