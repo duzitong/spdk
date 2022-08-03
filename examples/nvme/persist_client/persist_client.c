@@ -251,10 +251,6 @@ int main(int argc, char **argv)
 	printf("qp num: %d\n", cm_id->qp->qp_num);
 
 	qp_new_attr.qp_access_flags = 3;
-	rc = ibv_modify_qp(cm_id->qp, &qp_new_attr, IBV_QP_ACCESS_FLAGS);
-	if (rc) {
-		printf("modify qp failed: %d\n", rc);
-	}
 
 	struct ibv_recv_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge, send_sge;
@@ -294,6 +290,10 @@ int main(int argc, char **argv)
 
 	assert(connect_event->id == cm_id);
 
+	rc = ibv_modify_qp(cm_id->qp, &qp_new_attr, IBV_QP_ACCESS_FLAGS);
+	if (rc) {
+		printf("modify qp failed: %d\n", rc);
+	}
 	printf("connected. qp info...\n");
 	rc = ibv_query_qp(cm_id->qp, &qp_attr,
 			query_mask, &init_attr);
