@@ -47,16 +47,12 @@
 #include "spdk/queue.h"
 #include "spdk/string.h"
 #include "spdk/trace.h"
+#include "spdk/rdma.h"
 
 #include "spdk/bdev_module.h"
 #include "spdk/log.h"
 #include <infiniband/verbs.h>
 #include <rdma/rdma_cma.h>
-
-static struct rdma_handshake {
-	void* base_addr;
-	uint32_t rkey;
-};
 
 struct target_disk {
 	struct spdk_bdev		disk;
@@ -550,7 +546,10 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 		SPDK_ERRLOG("invalid event type\n");
 		return -EINVAL;
 	}
-	assert(cm_id == resolve_addr_event->id);
+	if (cm_id != resolve_addr_event->id) {
+		SPDK_ERRLOG("Resolve addr CM id mismatch\n");
+		return -EINVAL;
+	}
 	rdma_ack_cm_event(resolve_addr_event);
 
 	rdma_resolve_route(cm_id, 1000);
@@ -559,13 +558,17 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 		SPDK_ERRLOG("invalid event type\n");
 		return -EINVAL;
 	}
-	assert(cm_id == resolve_route_event->id);
+	if (cm_id != resolve_route_event->id) {
+		SPDK_ERRLOG("Resolve route CM id mismatch\n");
+		return -EINVAL;
+	}
+
 	rdma_ack_cm_event(resolve_route_event);
 
 	struct ibv_context* ibv_context = cm_id->verbs;
 	struct ibv_device_attr device_attr = {};
 	ibv_query_device(ibv_context, &device_attr);
-	SPDK_DEBUGLOG(bdev_target, "max wr sge = %d, max wr num = %d, max cqe = %d\n",
+	SPDK_NOTICELOG("max wr sge = %d, max wr num = %d, max cqe = %d\n",
 		device_attr.max_sge, device_attr.max_qp_wr, device_attr.max_cqe);
 	struct ibv_pd* ibv_pd = ibv_alloc_pd(ibv_context);
 	struct ibv_mr* ibv_mr = ibv_reg_mr(ibv_pd,
@@ -592,8 +595,11 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 		}
 	};
 
-	int x = rdma_create_qp(cm_id, ibv_pd, &init_attr);
-	SPDK_DEBUGLOG(bdev_target, "rdma_create_qp returns %d\n", x);
+	rc = rdma_create_qp(cm_id, ibv_pd, &init_attr);
+	if (rc != 0) {
+		SPDK_ERRLOG("rdma_create_qp fails %d\n", rc);
+		return -EINVAL;
+	}
 
 	struct ibv_recv_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge, send_sge;
@@ -603,8 +609,12 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	struct rdma_handshake* remote_handshake = handshake + 1;
 	handshake->base_addr = mdisk->malloc_buf;
 	handshake->rkey = ibv_mr->rkey;
+	handshake->length = num_blocks * block_size;
 
-	SPDK_DEBUGLOG(bdev_target, "sending local addr %p rkey %d\n", handshake->base_addr, handshake->rkey);
+	SPDK_NOTICELOG("sending local addr %p rkey %d length %ld\n",
+		handshake->base_addr,
+		handshake->rkey,
+		handshake->length);
 
 	wr.wr_id = (uintptr_t)1;
 	wr.next = NULL;
@@ -616,7 +626,11 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	sge.lkey = ibv_mr->lkey;
 	mdisk->remote_handshake = remote_handshake;
 
-	ibv_post_recv(cm_id->qp, &wr, &bad_wr);
+	rc = ibv_post_recv(cm_id->qp, &wr, &bad_wr);
+	if (rc != 0) {
+		SPDK_ERRLOG("post recv failed\n");
+		return -EINVAL;
+	}
 
 	struct rdma_conn_param conn_param = {};
 
@@ -634,7 +648,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 
 	assert(connect_event->id == cm_id);
 
-	SPDK_DEBUGLOG(bdev_target, "connected. posting send...\n");
+	SPDK_NOTICELOG("connected. posting send...\n");
 
 	struct ibv_send_wr send_wr, *bad_send_wr = NULL;
 	memset(&send_wr, 0, sizeof(send_wr));
@@ -649,7 +663,12 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	send_sge.length = sizeof(struct rdma_handshake);
 	send_sge.lkey = ibv_mr->lkey;
 
-	ibv_post_send(cm_id->qp, &send_wr, &bad_send_wr);
+	rc = ibv_post_send(cm_id->qp, &send_wr, &bad_send_wr);
+	if (rc != 0) {
+		SPDK_ERRLOG("post send failed\n");
+		return -EINVAL;
+	}
+
 	struct ibv_wc wc;
 	bool handshake_send_cpl = false;
 	bool handshake_recv_cpl = false;
@@ -667,16 +686,25 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 
 		if (wc.wr_id == 1) {
 			// recv complete
-			SPDK_DEBUGLOG(bdev_target, "received remote addr %p rkey %d\n", remote_handshake->base_addr, remote_handshake->rkey);
+			SPDK_NOTICELOG("received remote addr %p rkey %d length %ld\n",
+				remote_handshake->base_addr,
+				remote_handshake->rkey,
+				remote_handshake->length);
+			
+			if (remote_handshake->length != handshake->length) {
+				SPDK_ERRLOG("buffer length mismatch\n");
+				return -EINVAL;
+			}
+
 			handshake_recv_cpl = true;
 		}
 		else if (wc.wr_id == 2) {
-			SPDK_DEBUGLOG(bdev_target, "send req complete\n");
+			SPDK_NOTICELOG("send req complete\n");
 			handshake_send_cpl = true;
 		}
 	}
 
-	SPDK_DEBUGLOG(bdev_target, "rdma handshake complete\n");
+	SPDK_NOTICELOG("rdma handshake complete\n");
 
 	// /*
 	//  * Attach a nvme controller locally
