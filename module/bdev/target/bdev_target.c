@@ -155,6 +155,12 @@ bdev_target_check_iov_len(struct iovec *iovs, int iovcnt, size_t nbytes)
 	return nbytes != 0;
 }
 
+static int bdev_target_check_boundary(uint64_t offset, size_t len, struct target_disk* tdisk, bool is_read) {
+	uint64_t offset_end = is_read ? (offset + len) : (offset + len + tdisk->disk.md_len);
+	return !(
+		offset >= 0 && offset_end <= tdisk->disk.blockcnt * tdisk->disk.blocklen);
+}
+
 static void
 bdev_target_readv(struct target_disk *mdisk, 
 		  struct target_task *task,
@@ -163,6 +169,13 @@ bdev_target_readv(struct target_disk *mdisk,
 	void *src = mdisk->malloc_buf + offset;
 
 	if (bdev_target_check_iov_len(iov, iovcnt, len)) {
+		spdk_bdev_io_complete(spdk_bdev_io_from_ctx(task),
+				      SPDK_BDEV_IO_STATUS_FAILED);
+		return;
+	}
+
+	if (bdev_target_check_boundary(offset, len, mdisk, true)) {
+		SPDK_ERRLOG("read OOB\n");
 		spdk_bdev_io_complete(spdk_bdev_io_from_ctx(task),
 				      SPDK_BDEV_IO_STATUS_FAILED);
 		return;
@@ -200,6 +213,13 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 	struct spdk_bdev_io* bdev_io = spdk_bdev_io_from_ctx(task);
 	
 	if (bdev_target_check_iov_len(iov, iovcnt, len)) {
+		spdk_bdev_io_complete(spdk_bdev_io_from_ctx(task),
+				      SPDK_BDEV_IO_STATUS_FAILED);
+		return;
+	}
+
+	if (bdev_target_check_boundary(offset, len, mdisk, false)) {
+		SPDK_ERRLOG("write OOB\n");
 		spdk_bdev_io_complete(spdk_bdev_io_from_ctx(task),
 				      SPDK_BDEV_IO_STATUS_FAILED);
 		return;
