@@ -40,23 +40,38 @@
 #include "spdk/string.h"
 #include "spdk/log.h"
 #include "spdk/assert.h"
+#include "spdk/rdma.h"
 #include <errno.h>
 
 #include <infiniband/verbs.h>
 #include <rdma/rdma_cma.h>
 
-#define BUFFER_SIZE 512 * 1024 * 1024
-void* circular_buffer;
+#define ADDR_BUF_SIZE 16
+#define PORT_BUF_SIZE 8
+#define CPU_BUF_SIZE 8
 
-static struct rdma_handshake {
-	void* base_addr;
-	uint32_t rkey;
-};
+void* circular_buffer;
+void* handshake_buffer;
 
 // should be enough for IPv4
-char addr_buf[16];
-char port_buf[8];
-char cpu_buf[8] = "0x40";
+char addr_buf[ADDR_BUF_SIZE];
+char port_buf[PORT_BUF_SIZE];
+char cpu_buf[CPU_BUF_SIZE] = "0x40";
+
+void check_strcpy(char* src, size_t buf_size) {
+	size_t src_len = strlen(src);
+
+	// buffer size need to be larger because of null ending
+	if (src_len >= buf_size) {
+		SPDK_ERRLOG("buffer not long enough for %s\n", src);
+		exit(-1);
+	}
+}
+
+void strcpy_s(void* dst, char* src, size_t dst_size) {
+	check_strcpy(src, dst_size);
+	strcpy(dst, src);
+}
 
 int main(int argc, char **argv)
 {
@@ -70,13 +85,13 @@ int main(int argc, char **argv)
 	while ((op = getopt(argc, argv, "a:p:m:")) != -1) {
 		switch (op) {
 			case 'a':
-				memcpy(addr_buf, optarg, strlen(optarg));
+				strcpy_s(addr_buf, optarg, ADDR_BUF_SIZE);
 				break;
 			case 'p':
-				memcpy(port_buf, optarg, strlen(optarg));
+				strcpy_s(port_buf, optarg, PORT_BUF_SIZE);
 				break;
 			case 'm':
-				memcpy(cpu_buf, optarg, strlen(optarg));
+				strcpy_s(cpu_buf, optarg, CPU_BUF_SIZE);
 				break;
 		}
 	}
@@ -93,7 +108,10 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	circular_buffer = spdk_zmalloc(BUFFER_SIZE + 2 * sizeof(struct rdma_handshake), 2 * 1024 * 1024, NULL,
+	// circular_buffer = spdk_zmalloc(BUFFER_SIZE + 2 * sizeof(struct rdma_handshake), 2 * 1024 * 1024, NULL,
+	// 				 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+
+	handshake_buffer = spdk_zmalloc(2 * sizeof(struct rdma_handshake), 2 * 1024 * 1024, NULL,
 					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 	
 	// int n = 0;
@@ -108,7 +126,10 @@ int main(int argc, char **argv)
 
 	struct rdma_cm_id* cm_id = NULL;
 	rc = rdma_create_id(rdma_channel, &cm_id, NULL, RDMA_PS_TCP);
-	assert(rc == 0);
+	if (rc != 0) {
+		printf("rdma_create_id failed\n");
+		return 1;
+	}
 
 	struct sockaddr_in addr;
 	struct addrinfo hints = {};
@@ -116,12 +137,21 @@ int main(int argc, char **argv)
 	hints.ai_family = AF_INET;
 	hints.ai_flags = AI_PASSIVE;
 	rc = getaddrinfo(addr_buf, port_buf, &hints, &addr_res);
-	assert(rc == 0);
+	if (rc != 0) {
+		printf("getaddrinfo failed\n");
+		return 1;
+	}
 	memcpy(&addr, addr_res->ai_addr, sizeof(addr));
 	rc = rdma_bind_addr(cm_id, (struct sockaddr*)&addr);
-	assert(rc == 0);
+	if (rc != 0) {
+		printf("rdma bind addr failed\n");
+		return 1;
+	}
 	rc = rdma_listen(cm_id, 3);
-	assert(rc == 0);
+	if (rc != 0) {
+		printf("rdma listen failed\n");
+		return 1;
+	}
 
 	printf("listening on port %d\n", ntohs(addr.sin_port));
 
@@ -138,14 +168,16 @@ int main(int argc, char **argv)
 	struct ibv_device_attr device_attr = {};
 	ibv_query_device(ibv_context, &device_attr);
 	struct ibv_pd* ibv_pd = ibv_alloc_pd(ibv_context);
-	struct ibv_mr* ibv_mr = ibv_reg_mr(ibv_pd,
-		circular_buffer,
-		BUFFER_SIZE + 2 * sizeof(struct rdma_handshake),
+	struct ibv_mr* ibv_mr_handshake = ibv_reg_mr(ibv_pd,
+		handshake_buffer,
+		2 * sizeof(struct rdma_handshake),
 		IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+	
+	struct ibv_mr* ibv_mr_circular;
 
 	struct ibv_cq* ibv_cq = ibv_create_cq(ibv_context, 4096, NULL, NULL, 0);
 	assert(ibv_cq != NULL);
-	assert(ibv_mr != NULL);
+	assert(ibv_mr_handshake != NULL);
 	assert(ibv_context != NULL);
 	assert(ibv_pd != NULL);
 
@@ -167,7 +199,8 @@ int main(int argc, char **argv)
 	printf("rdma_create_qp returns %d\n", x);
 	int err = errno;
 	printf("err = %d\n", err);
-	struct rdma_cm_id* cm_id_2 = connect_event->id;
+	// the original cm id becomes useless from here.
+	struct rdma_cm_id* child_cm_id = connect_event->id;
 	rc = rdma_ack_cm_event(connect_event);
 	assert(rc == 0);
 	printf("acked conn request\n");
@@ -175,10 +208,7 @@ int main(int argc, char **argv)
 	struct ibv_recv_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge, send_sge;
 
-	struct rdma_handshake* handshake = circular_buffer + BUFFER_SIZE;
-	handshake->base_addr = circular_buffer;
-	handshake->rkey = ibv_mr->rkey;
-	printf("sending local addr %p rkey %d\n", handshake->base_addr, handshake->rkey);
+	struct rdma_handshake* handshake = handshake_buffer;
 
 	wr.wr_id = 1;
 	wr.next = NULL;
@@ -187,9 +217,13 @@ int main(int argc, char **argv)
 
 	sge.addr = (uint64_t)(handshake + 1);
 	sge.length = sizeof(struct rdma_handshake);
-	sge.lkey = ibv_mr->lkey;
-	rc = ibv_post_recv(cm_id_2->qp, &wr, &bad_wr);
-	assert(rc == 0);
+	sge.lkey = ibv_mr_handshake->lkey;
+	rc = ibv_post_recv(child_cm_id->qp, &wr, &bad_wr);
+	if (rc != 0) {
+		SPDK_ERRLOG("post recv failed\n");
+		return -1;
+	}
+
 
 	struct rdma_conn_param conn_param = {};
 
@@ -197,7 +231,7 @@ int main(int argc, char **argv)
 	conn_param.initiator_depth = device_attr.max_qp_init_rd_atom;
 	conn_param.retry_count = 7;
 	conn_param.rnr_retry_count = 7;
-	rc = rdma_accept(cm_id_2, &conn_param);
+	rc = rdma_accept(child_cm_id, &conn_param);
 
 	if (rc != 0) {
 		printf("accept err = %d\n", err);
@@ -215,18 +249,6 @@ int main(int argc, char **argv)
 	struct ibv_send_wr send_wr, *bad_send_wr = NULL;
 	memset(&send_wr, 0, sizeof(send_wr));
 
-	send_wr.wr_id = 2;
-	send_wr.opcode = IBV_WR_SEND;
-	send_wr.sg_list = &send_sge;
-	send_wr.num_sge = 1;
-	send_wr.send_flags = IBV_SEND_SIGNALED;
-
-	send_sge.addr = (uint64_t)handshake;
-	send_sge.length = sizeof(struct rdma_handshake);
-	send_sge.lkey = ibv_mr->lkey;
-	
-	rc = ibv_post_send(cm_id_2->qp, &send_wr, &bad_send_wr);
-	assert(rc == 0);
 	struct ibv_wc wc;
 	bool handshake_send_cpl = false;
 	bool handshake_recv_cpl = false;
@@ -242,11 +264,56 @@ int main(int argc, char **argv)
 			continue;
 		}
 
+		if (wc.status != IBV_WC_SUCCESS) {
+			printf("WC bad status %d\n", wc.status);
+			return 1;
+		}
+
 		if (wc.wr_id == 1) {
 			// recv complete
 			struct rdma_handshake* remote_handshake = handshake + 1;
-			printf("received remote addr %p rkey %d\n", remote_handshake->base_addr, remote_handshake->rkey);
+			printf("received remote addr %p rkey %d length %ld (%ld MB)\n",
+				remote_handshake->base_addr,
+				remote_handshake->rkey,
+				remote_handshake->length,
+				remote_handshake->length / 1048576);
 			handshake_recv_cpl = true;
+
+			circular_buffer = spdk_zmalloc(remote_handshake->length,
+				2 * 1024 * 1024,
+				NULL,
+				SPDK_ENV_LCORE_ID_ANY,
+				SPDK_MALLOC_DMA);
+
+			ibv_mr_circular = ibv_reg_mr(
+				ibv_pd,
+				circular_buffer,
+				remote_handshake->length,
+				IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE);
+			
+			handshake->base_addr = circular_buffer;
+			handshake->rkey = ibv_mr_circular->rkey;
+			handshake->length = remote_handshake->length;
+
+			send_wr.wr_id = 2;
+			send_wr.opcode = IBV_WR_SEND;
+			send_wr.sg_list = &send_sge;
+			send_wr.num_sge = 1;
+			send_wr.send_flags = IBV_SEND_SIGNALED;
+
+			send_sge.addr = (uint64_t)handshake;
+			send_sge.length = sizeof(struct rdma_handshake);
+			send_sge.lkey = ibv_mr_handshake->lkey;
+			
+			rc = ibv_post_send(child_cm_id->qp, &send_wr, &bad_send_wr);
+			if (rc != 0) {
+				printf("post send failed\n");
+				return 1;
+			}
+			printf("sent local addr %p rkey %d length %ld\n",
+				handshake->base_addr,
+				handshake->rkey,
+				handshake->length);
 		}
 		else if (wc.wr_id == 2) {
 			printf("send req complete\n");
