@@ -1631,7 +1631,7 @@ wal_bdev_mover(void *ctx)
 	}
 
 	if (i == MAX_OUTSTANDING_MOVES) {
-		SPDK_NOTICELOG("All movers are used.\n");
+		SPDK_DEBUGLOG(bdev_wal, "All movers are used.\n");
 		return SPDK_POLLER_BUSY;
 	}
 
