@@ -1781,7 +1781,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 		return;
 	}
 
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_UPDATE_HEAD, 0, 0, (uintptr_t)mover_ctx, mover_ctx->id, metadata->round);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_UPDATE_HEAD, 0, 0, (uintptr_t)mover_ctx, mover_ctx->id, metadata->next_offset, metadata->round);
 	mover_ctx->state = MOVER_UPDATING_HEAD;
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
 		if (i != mover_ctx->id
@@ -2020,8 +2020,7 @@ SPDK_TRACE_REGISTER_FN(wal_trace, "wal", TRACE_GROUP_WAL)
 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
 			{
 				{ "id", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "offset", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "length", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "head", SPDK_TRACE_ARG_TYPE_INT, 8 },
 				{ "round", SPDK_TRACE_ARG_TYPE_INT, 8 },
 			}
 		},
