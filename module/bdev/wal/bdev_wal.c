@@ -1635,6 +1635,7 @@ wal_bdev_mover(void *ctx)
 		return SPDK_POLLER_BUSY;
 	}
 
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_MOVE_READ_MD, 0, 0, (uintptr_t)&bdev->mover_context[i]);
 	bdev->mover_context[i].state = MOVER_READING_MD;
 	bdev->mover_context[i].id = i;
 	bdev->mover_context[i].bdev = bdev;
@@ -1697,6 +1698,7 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 	}
 
 	// Can be moved in parallel
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_MOVE_READ_DATA, 0, 0, (uintptr_t)mover_ctx);
 	log_position = bdev->move_head + 1;
 	bdev->move_head = metadata->next_offset;
 	mover_ctx->state = MOVER_READING_DATA;
@@ -1733,6 +1735,7 @@ wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 		return;
 	}
 
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_MOVE_WRITE_DATA, 0, 0, (uintptr_t)mover_ctx);
 	mover_ctx->state = MOVER_WRITING_DATA;
 
 	ret = spdk_bdev_write_blocks(bdev->core_bdev_info.desc, bdev->core_channel, mover_ctx->data,
@@ -1766,6 +1769,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 		return;
 	}
 
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_MOVE_UPDATE_HEAD, 0, 0, (uintptr_t)mover_ctx);
 	mover_ctx->state = MOVER_UPDATING_HEAD;
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
 		if (i != mover_ctx->id
@@ -1798,6 +1802,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 				max_head = bdev->mover_context[i].metadata->next_offset;
 			}
 
+			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_MOVE_UPDATE_HEAD_END, 0, 0, (uintptr_t)&bdev->mover_context[i]);
 			wal_bdev_mover_free(&bdev->mover_context[i]);
 		}
 	}
@@ -1832,6 +1837,7 @@ wal_bdev_mover_clean(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 		return;
 	}
 
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_MOVE_UPDATE_HEAD_END, 0, 0, (uintptr_t)mover_ctx);
 	bdev->log_head = mover_ctx->info->head;
 	bdev->head_round = mover_ctx->info->round;
 	
@@ -1988,6 +1994,31 @@ SPDK_TRACE_REGISTER_FN(wal_trace, "wal", TRACE_GROUP_BDEV)
 		},
 		{
 			"WAL_BSL_RAND_END", TRACE_BDEV_BSL_RAND_END,
+			OWNER_BDEV, OBJECT_BDEV_IO, 0,
+			{}
+		},
+		{
+			"TRACE_BDEV_MOVE_READ_MD", TRACE_BDEV_MOVE_READ_MD,
+			OWNER_BDEV, OBJECT_BDEV_IO, 1,
+			{}
+		},
+		{
+			"TRACE_BDEV_MOVE_READ_DATA", TRACE_BDEV_MOVE_READ_DATA,
+			OWNER_BDEV, OBJECT_BDEV_IO, 0,
+			{}
+		},
+		{
+			"TRACE_BDEV_MOVE_WRITE_DATA", TRACE_BDEV_MOVE_WRITE_DATA,
+			OWNER_BDEV, OBJECT_BDEV_IO, 0,
+			{}
+		},
+		{
+			"TRACE_BDEV_MOVE_UPDATE_HEAD", TRACE_BDEV_MOVE_UPDATE_HEAD,
+			OWNER_BDEV, OBJECT_BDEV_IO, 0,
+			{}
+		},
+		{
+			"TRACE_BDEV_MOVE_UPDATE_HEAD_END", TRACE_BDEV_MOVE_UPDATE_HEAD_END,
 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
 			{}
 		},
