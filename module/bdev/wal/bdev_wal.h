@@ -279,7 +279,7 @@ struct wal_bdev {
 	TAILQ_HEAD(, wal_bdev_io)	pending_writes;
 
 	/* mover task context */
-	struct wal_mover_context	*mover_context[MAX_OUTSTANDING_MOVES];
+	struct wal_mover_context	mover_context[MAX_OUTSTANDING_MOVES];
 
 	uint64_t	move_head;
 
