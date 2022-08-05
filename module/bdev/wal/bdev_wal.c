@@ -1625,14 +1625,14 @@ wal_bdev_mover(void *ctx)
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_CALLED, 0, 0, (uintptr_t)NULL);
 
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
-		if (bdev->mover_context->state == MOVER_READING_MD) {
+		if (bdev->mover_context[i].state == MOVER_READING_MD) {
 			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_MD_LOCKED, 0, 0, (uintptr_t)NULL);
 			return SPDK_POLLER_BUSY;
 		}
 	}
 
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
-		if (bdev->mover_context[i]->state == MOVER_IDLE) {
+		if (bdev->mover_context[i].state == MOVER_IDLE) {
 			break;
 		}
 	}
