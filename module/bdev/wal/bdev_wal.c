@@ -1643,7 +1643,9 @@ wal_bdev_mover(void *ctx)
 		return SPDK_POLLER_BUSY;
 	}
 
-	SPDK_NOTICELOG("Mover %d is used\n", i);
+	if (i) {
+		SPDK_NOTICELOG("Mover %d is used\n", i);
+	}
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_READ_MD, 0, 0, (uintptr_t)&bdev->mover_context[i]);
 	bdev->mover_context[i].state = MOVER_READING_MD;
@@ -1870,7 +1872,9 @@ wal_bdev_mover_free(struct wal_mover_context *ctx)
 		ctx->metadata = NULL;
 	}
 
-	SPDK_NOTICELOG("Mover %d is free.\n", ctx->id);
+	if (ctx->id) {
+		SPDK_NOTICELOG("Mover %d is free.\n", ctx->id);
+	}
 
 	ctx->state = MOVER_IDLE;
 }
