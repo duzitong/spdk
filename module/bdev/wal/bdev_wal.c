@@ -1711,7 +1711,7 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 	log_position = bdev->move_head + 1;
 	bdev->move_head = metadata->next_offset;
 	mover_ctx->state = MOVER_READING_DATA;
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_READ_DATA, 0, 0, (uintptr_t)mover_ctx, mover_ctx->id, log_position, metadata->length);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_READ_DATA, 0, 0, (uintptr_t)mover_ctx, mover_ctx->id, log_position, metadata->length, metadata->round);
 
 	mover_ctx->data = spdk_zmalloc(bdev->log_bdev_info.bdev->blocklen * metadata->length, 0, 
 								NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
@@ -1746,7 +1746,7 @@ wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 		return;
 	}
 
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_WRITE_DATA, 0, 0, (uintptr_t)mover_ctx, mover_ctx->id, metadata->core_offset, metadata->core_length);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_WRITE_DATA, 0, 0, (uintptr_t)mover_ctx, mover_ctx->id, metadata->core_offset, metadata->core_length, metadata->round);
 	mover_ctx->state = MOVER_WRITING_DATA;
 
 	ret = spdk_bdev_write_blocks(bdev->core_bdev_info.desc, bdev->core_channel, mover_ctx->data,
@@ -1781,7 +1781,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 		return;
 	}
 
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_UPDATE_HEAD, 0, 0, (uintptr_t)mover_ctx, mover_ctx->id);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_UPDATE_HEAD, 0, 0, (uintptr_t)mover_ctx, mover_ctx->id, metadata->round);
 	mover_ctx->state = MOVER_UPDATING_HEAD;
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
 		if (i != mover_ctx->id
@@ -2002,6 +2002,7 @@ SPDK_TRACE_REGISTER_FN(wal_trace, "wal", TRACE_GROUP_WAL)
 				{ "id", SPDK_TRACE_ARG_TYPE_INT, 8 },
 				{ "offset", SPDK_TRACE_ARG_TYPE_INT, 8 },
 				{ "length", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "round", SPDK_TRACE_ARG_TYPE_INT, 8 },
 			}
 		},
 		{
@@ -2011,6 +2012,7 @@ SPDK_TRACE_REGISTER_FN(wal_trace, "wal", TRACE_GROUP_WAL)
 				{ "id", SPDK_TRACE_ARG_TYPE_INT, 8 },
 				{ "offset", SPDK_TRACE_ARG_TYPE_INT, 8 },
 				{ "length", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "round", SPDK_TRACE_ARG_TYPE_INT, 8 },
 			}
 		},
 		{
@@ -2018,6 +2020,9 @@ SPDK_TRACE_REGISTER_FN(wal_trace, "wal", TRACE_GROUP_WAL)
 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
 			{
 				{ "id", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "offset", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "length", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "round", SPDK_TRACE_ARG_TYPE_INT, 8 },
 			}
 		},
 		{
