@@ -1787,8 +1787,9 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 		if (i != mover_ctx->id
 			&& bdev->mover_context[i].state != MOVER_IDLE 
 			&& bdev->mover_context[i].metadata
-			&& (bdev->mover_context[i].metadata->next_offset < mover_ctx->metadata->next_offset
-				|| bdev->mover_context[i].metadata->round < mover_ctx->metadata->round)) {
+			&& (bdev->mover_context[i].metadata->round < mover_ctx->metadata->round)
+				|| (bdev->mover_context[i].metadata->next_offset < mover_ctx->metadata->next_offset 
+					&& bdev->mover_context[i].metadata->round >= mover_ctx->metadata->round)) {
 				SPDK_DEBUGLOG(bdev_wal, "waiting previous work to update head\n");
 				return;
 			}
