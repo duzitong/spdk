@@ -425,16 +425,16 @@ wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *c
 	begin = wal_io->metadata->core_offset;
 	end = wal_io->metadata->core_offset + wal_io->metadata->core_length - 1;
 
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSTAT_CREATE_START, 0, 0, (uintptr_t)wal_io);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_BSTAT_CREATE_START, 0, 0, (uintptr_t)wal_io);
 	struct bstat *bstat = bstatBdevCreate(begin, end, wal_io->metadata->round,
 										bdev_io->u.bdev.offset_blocks+1, wal_io->wal_bdev->bstat_pool);
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSTAT_CREATE_END, 0, 0, (uintptr_t)wal_io);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_BSTAT_CREATE_END, 0, 0, (uintptr_t)wal_io);
 	
 	
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSL_INSERT_START, 0, 0, (uintptr_t)wal_io);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_BSL_INSERT_START, 0, 0, (uintptr_t)wal_io);
 	bslInsert(wal_io->wal_bdev->bsl, begin, end,
 				bstat, wal_io->wal_bdev->bslfn);
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_BSL_INSERT_END, 0, 0, (uintptr_t)wal_io);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_BSL_INSERT_END, 0, 0, (uintptr_t)wal_io);
 
 	spdk_bdev_free_io(bdev_io);
 
@@ -1618,8 +1618,11 @@ wal_bdev_mover(void *ctx)
 		return SPDK_POLLER_IDLE;
 	}
 
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_CALLED, 0, 0, (uintptr_t)NULL);
+
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
 		if (bdev->mover_context->state == MOVER_READING_MD) {
+			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_MD_LOCKED, 0, 0, (uintptr_t)NULL);
 			return SPDK_POLLER_BUSY;
 		}
 	}
@@ -1632,10 +1635,11 @@ wal_bdev_mover(void *ctx)
 
 	if (i == MAX_OUTSTANDING_MOVES) {
 		SPDK_DEBUGLOG(bdev_wal, "All movers are used.\n");
+		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_NO_WORKER, 0, 0, (uintptr_t)NULL);
 		return SPDK_POLLER_BUSY;
 	}
 
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_MOVE_READ_MD, 0, 0, (uintptr_t)&bdev->mover_context[i]);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_READ_MD, 0, 0, (uintptr_t)&bdev->mover_context[i]);
 	bdev->mover_context[i].state = MOVER_READING_MD;
 	bdev->mover_context[i].id = i;
 	bdev->mover_context[i].bdev = bdev;
@@ -1698,7 +1702,7 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 	}
 
 	// Can be moved in parallel
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_MOVE_READ_DATA, 0, 0, (uintptr_t)mover_ctx);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_READ_DATA, 0, 0, (uintptr_t)mover_ctx);
 	log_position = bdev->move_head + 1;
 	bdev->move_head = metadata->next_offset;
 	mover_ctx->state = MOVER_READING_DATA;
@@ -1735,7 +1739,7 @@ wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 		return;
 	}
 
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_MOVE_WRITE_DATA, 0, 0, (uintptr_t)mover_ctx);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_WRITE_DATA, 0, 0, (uintptr_t)mover_ctx);
 	mover_ctx->state = MOVER_WRITING_DATA;
 
 	ret = spdk_bdev_write_blocks(bdev->core_bdev_info.desc, bdev->core_channel, mover_ctx->data,
@@ -1769,7 +1773,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 		return;
 	}
 
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_MOVE_UPDATE_HEAD, 0, 0, (uintptr_t)mover_ctx);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_UPDATE_HEAD, 0, 0, (uintptr_t)mover_ctx);
 	mover_ctx->state = MOVER_UPDATING_HEAD;
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
 		if (i != mover_ctx->id
@@ -1802,7 +1806,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 				max_head = bdev->mover_context[i].metadata->next_offset;
 			}
 
-			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_MOVE_UPDATE_HEAD_END, 0, 0, (uintptr_t)&bdev->mover_context[i]);
+			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_UPDATE_HEAD_END, 0, 0, (uintptr_t)&bdev->mover_context[i]);
 			wal_bdev_mover_free(&bdev->mover_context[i]);
 		}
 	}
@@ -1837,7 +1841,7 @@ wal_bdev_mover_clean(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 		return;
 	}
 
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_MOVE_UPDATE_HEAD_END, 0, 0, (uintptr_t)mover_ctx);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_UPDATE_HEAD_END, 0, 0, (uintptr_t)mover_ctx);
 	bdev->log_head = mover_ctx->info->head;
 	bdev->head_round = mover_ctx->info->round;
 	
@@ -1933,93 +1937,77 @@ wal_bdev_stat_report(void *ctx)
 /* Log component for bdev wal bdev module */
 SPDK_LOG_REGISTER_COMPONENT(bdev_wal)
 
-SPDK_TRACE_REGISTER_FN(wal_trace, "wal", TRACE_GROUP_BDEV)
+SPDK_TRACE_REGISTER_FN(wal_trace, "wal", TRACE_GROUP_WAL)
 {
 	struct spdk_trace_tpoint_opts opts[] = {
 		{
-			"BDEV_IO_START", TRACE_BDEV_IO_START,
-			OWNER_BDEV, OBJECT_BDEV_IO, 1,
-			{
-				{ "type", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "ctx", SPDK_TRACE_ARG_TYPE_PTR, 8 },
-				{ "offset", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "len", SPDK_TRACE_ARG_TYPE_INT, 8 }
-			}
-		},
-		{
-			"BDEV_IO_DONE", TRACE_BDEV_IO_DONE,
-			OWNER_BDEV, OBJECT_BDEV_IO, 0,
-			{{ "ctx", SPDK_TRACE_ARG_TYPE_PTR, 8 }}
-		},
-		{
-			"BDEV_IOCH_CREATE", TRACE_BDEV_IOCH_CREATE,
-			OWNER_BDEV, OBJECT_NONE, 1,
-			{
-				{ "name", SPDK_TRACE_ARG_TYPE_STR, 40 },
-				{ "thread_id", SPDK_TRACE_ARG_TYPE_INT, 8}
-			}
-		},
-		{
-			"BDEV_IOCH_DESTROY", TRACE_BDEV_IOCH_DESTROY,
-			OWNER_BDEV, OBJECT_NONE, 0,
-			{
-				{ "name", SPDK_TRACE_ARG_TYPE_STR, 40 },
-				{ "thread_id", SPDK_TRACE_ARG_TYPE_INT, 8}
-			}
-		},
-		{
-			"WAL_BSTAT_CREATE_START", TRACE_BDEV_BSTAT_CREATE_START,
+			"WAL_BSTAT_CREATE_START", TRACE_WAL_BSTAT_CREATE_START,
 			OWNER_BDEV, OBJECT_BDEV_IO, 1,
 			{}
 		},
 		{
-			"WAL_BSTAT_CREATE_END", TRACE_BDEV_BSTAT_CREATE_END,
+			"WAL_BSTAT_CREATE_END", TRACE_WAL_BSTAT_CREATE_END,
 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
 			{}
 		},
 		{
-			"WAL_BSL_INSERT_START", TRACE_BDEV_BSL_INSERT_START,
+			"WAL_BSL_INSERT_START", TRACE_WAL_BSL_INSERT_START,
 			OWNER_BDEV, OBJECT_BDEV_IO, 1,
 			{}
 		},
 		{
-			"WAL_BSL_INSERT_END", TRACE_BDEV_BSL_INSERT_END,
+			"WAL_BSL_INSERT_END", TRACE_WAL_BSL_INSERT_END,
 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
 			{}
 		},
 		{
-			"WAL_BSL_RAND_START", TRACE_BDEV_BSL_RAND_START,
+			"WAL_BSL_RAND_START", TRACE_WAL_BSL_RAND_START,
 			OWNER_BDEV, OBJECT_BDEV_IO, 1,
 			{}
 		},
 		{
-			"WAL_BSL_RAND_END", TRACE_BDEV_BSL_RAND_END,
+			"WAL_BSL_RAND_END", TRACE_WAL_BSL_RAND_END,
 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
 			{}
 		},
 		{
-			"WAL_MOVE_READ_MD", TRACE_BDEV_MOVE_READ_MD,
+			"WAL_MOVE_READ_MD", TRACE_WAL_MOVE_READ_MD,
 			OWNER_BDEV, OBJECT_BDEV_IO, 1,
 			{}
 		},
 		{
-			"WAL_MOVE_READ_DATA", TRACE_BDEV_MOVE_READ_DATA,
+			"WAL_MOVE_READ_DATA", TRACE_WAL_MOVE_READ_DATA,
 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
 			{}
 		},
 		{
-			"WAL_MOVE_WRITE_DATA", TRACE_BDEV_MOVE_WRITE_DATA,
+			"WAL_MOVE_WRITE_DATA", TRACE_WAL_MOVE_WRITE_DATA,
 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
 			{}
 		},
 		{
-			"WAL_MOVE_UPDATE_HEAD", TRACE_BDEV_MOVE_UPDATE_HEAD,
+			"WAL_MOVE_UPDATE_HEAD", TRACE_WAL_MOVE_UPDATE_HEAD,
 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
 			{}
 		},
 		{
-			"WAL_MOVE_UPDATE_HEAD_END", TRACE_BDEV_MOVE_UPDATE_HEAD_END,
+			"WAL_MOVE_UPDATE_HEAD_END", TRACE_WAL_MOVE_UPDATE_HEAD_END,
 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
+			{}
+		},
+		{
+			"WAL_MOVE_CALLED", TRACE_WAL_MOVE_CALLED,
+			OWNER_BDEV, OBJECT_BDEV_IO, 1,
+			{}
+		},
+		{
+			"WAL_MOVE_MD_LOCKED", TRACE_WAL_MOVE_MD_LOCKED,
+			OWNER_BDEV, OBJECT_BDEV_IO, 1,
+			{}
+		},
+		{
+			"WAL_MOVE_NO_WORKER", TRACE_WAL_MOVE_NO_WORKER,
+			OWNER_BDEV, OBJECT_BDEV_IO, 1,
 			{}
 		},
 	};
