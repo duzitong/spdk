@@ -1494,6 +1494,7 @@ static int
 wal_bdev_start(struct wal_bdev *wal_bdev)
 {
 	uint64_t mempool_size;
+	int i;
 
 	wal_bdev->log_max = wal_bdev->log_bdev_info.bdev->blockcnt - 2;  // last block used to track log head
 
@@ -1508,7 +1509,9 @@ wal_bdev_start(struct wal_bdev *wal_bdev)
 	wal_bdev->bsl = bslCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
 	wal_bdev->bslfn = bslfnCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
 	TAILQ_INIT(&wal_bdev->pending_writes);
-	wal_bdev->mover_context = calloc(MAX_OUTSTANDING_MOVES, sizeof(struct wal_mover_context));
+	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
+		wal_bdev->mover_context[i] = calloc(1, sizeof(struct wal_mover_context));
+	}
 	// TODO: recover
 	wal_bdev->log_head = wal_bdev->move_head = 0;
 	wal_bdev->log_tail = 0;
@@ -1643,10 +1646,10 @@ wal_bdev_mover(void *ctx)
 														NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 
 	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, bdev->log_channel, bdev->mover_context[i].metadata, bdev->move_head, 1, 
-									wal_bdev_mover_read_data, bdev->mover_context[i]);
+									wal_bdev_mover_read_data, &bdev->mover_context[i]);
 	if (ret) {
 		SPDK_ERRLOG("Failed to read metadata during move: %d.\n", ret);
-		wal_bdev_mover_free(bdev->mover_context[i]);
+		wal_bdev_mover_free(&bdev->mover_context[i]);
 	}
 
 	return SPDK_POLLER_BUSY;
@@ -1799,7 +1802,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 				max_head = bdev->mover_context[i].metadata->next_offset;
 			}
 
-			wal_bdev_mover_free(bdev->mover_context[i]);
+			wal_bdev_mover_free(&bdev->mover_context[i]);
 		}
 	}
 	info->head = max_head;
