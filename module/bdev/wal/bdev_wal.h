@@ -41,7 +41,8 @@
 #include "spdk_internal/trace_defs.h"
 #include "bsl.h"
 
-#define METADATA_VERSION	10086	// XD
+#define METADATA_VERSION		10086	// XD
+#define MAX_OUTSTANDING_MOVES	32
 
 #define TRACE_BDEV_BSTAT_CREATE_START	SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x10)
 #define TRACE_BDEV_BSTAT_CREATE_END		SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x11)
@@ -225,11 +226,15 @@ struct wal_bdev {
 	/* nodes to free */
 	struct bskiplistFreeNodes *bslfn;
 
-	/* indicate whether there's ongoing moving task */
-	bool		moving;
-
 	/* pending writes due to no enough space on log device */
 	TAILQ_HEAD(, wal_bdev_io)	pending_writes;
+
+	/* mover task context */
+	struct wal_mover_context	mover_context[MAX_OUTSTANDING_MOVES];
+
+	uint64_t	move_head;
+
+	uint64_t	move_round;
 };
 
 struct wal_metadata {
@@ -251,9 +256,25 @@ struct wal_metadata {
 /* info stored in the last block of log bdev */
 struct wal_log_info {
 	uint64_t	head;
+
+	uint64_t	round;
+};
+
+enum wal_mover_state{
+	MOVER_IDLE,
+
+	MOVER_READING_MD,
+
+	MOVER_READING_DATA,
+
+	MOVER_WRITING_DATA,
+
+	MOVER_UPDATING_HEAD
 };
 
 struct wal_mover_context {
+	int							id;
+
 	struct wal_bdev				*bdev;
 
 	struct wal_metadata 		*metadata;
@@ -261,6 +282,8 @@ struct wal_mover_context {
 	void 						*data;
 
 	struct wal_log_info			*info;
+
+	enum wal_mover_state		state;
 };
 
 /*
