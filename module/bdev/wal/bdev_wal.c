@@ -87,6 +87,7 @@ static void wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success
 static void wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
 static void wal_bdev_mover_clean(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
 static void wal_bdev_mover_free(struct wal_mover_context *ctx);
+static void wal_bdev_mover_reset(struct wal_bdev *bdev);
 static int wal_bdev_cleaner(void *ctx);
 static int wal_bdev_stat_report(void *ctx);
 
@@ -1618,7 +1619,7 @@ wal_bdev_mover(void *ctx)
 	struct wal_bdev *bdev = ctx;
 	int ret, i;
 
-	if (bdev->log_head == bdev->log_tail && bdev->head_round == bdev->tail_round) {
+	if (bdev->move_head == bdev->log_tail && bdev->move_round == bdev->tail_round) {
 		return SPDK_POLLER_IDLE;
 	}
 
@@ -1678,6 +1679,7 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 
 	if (spdk_unlikely(!success)) {
 		SPDK_ERRLOG("Failed to read metadata during move.\n");
+		wal_bdev_mover_reset(bdev);
 		wal_bdev_mover_free(mover_ctx);
 		return;
 	}
@@ -1739,6 +1741,7 @@ wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 
 	if (spdk_unlikely(!success)) {
 		SPDK_ERRLOG("Failed to read data during move.\n");
+		wal_bdev_mover_reset(bdev);
 		wal_bdev_mover_free(mover_ctx);
 		return;
 	}
@@ -1773,6 +1776,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 
 	if (spdk_unlikely(!success)) {
 		SPDK_ERRLOG("Failed to write data during move.\n");
+		wal_bdev_mover_reset(bdev);
 		wal_bdev_mover_free(mover_ctx);
 		return;
 	}
@@ -1843,6 +1847,7 @@ wal_bdev_mover_clean(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 
 	if (spdk_unlikely(!success)) {
 		SPDK_ERRLOG("Failed to update head to log bdev during move.\n");
+		wal_bdev_mover_reset(bdev);
 		wal_bdev_mover_free(ctx);
 		return;
 	}
@@ -1873,6 +1878,13 @@ wal_bdev_mover_free(struct wal_mover_context *ctx)
 	}
 
 	ctx->state = MOVER_IDLE;
+}
+
+static void
+wal_bdev_mover_reset(struct wal_bdev *bdev)
+{
+	bdev->move_head = bdev->log_head;
+	bdev->move_round = bdev->head_round;
 }
 
 static int
