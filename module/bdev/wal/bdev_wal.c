@@ -1685,7 +1685,7 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 	data_begin = metadata->core_offset;
 	date_end = metadata->core_offset + metadata->core_length - 1;
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
-		if ( i != mover_ctx.id
+		if ( i != mover_ctx->id
 			&& bdev->mover_context[i].state != MOVER_IDLE 
 			&& bdev->mover_context[i].metadata) {
 			other_begin = bdev->mover_context[i].metadata->core_offset;
@@ -1769,7 +1769,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 
 	mover_ctx->state = MOVER_UPDATING_HEAD;
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
-		if (i != mover_ctx.id
+		if (i != mover_ctx->id
 			&& bdev->mover_context[i].state != MOVER_IDLE 
 			&& bdev->mover_context[i].metadata
 			&& (bdev->mover_context[i].metadata->next_offset < mover_ctx->metadata->next_offset
@@ -1784,7 +1784,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 	max_head = info->head = metadata->next_offset;
 	max_round = info->round = metadata->round;
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
-		if (i != mover_ctx.id
+		if (i != mover_ctx->id
 			&& bdev->mover_context[i].state == MOVER_UPDATING_HEAD
 			&& (bdev->mover_context[i].metadata->next_offset > info->head 
 				|| bdev->mover_context[i].metadata->round > info->round)) {

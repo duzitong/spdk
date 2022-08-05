@@ -98,6 +98,55 @@ struct wal_base_bdev_info {
 	struct spdk_thread	*thread;
 };
 
+struct wal_metadata {
+	uint64_t	version;
+	
+	uint64_t	seq;
+
+	uint64_t	next_offset;
+
+	uint64_t	length;
+
+	uint64_t	core_offset;
+
+	uint64_t	core_length;
+
+	uint64_t	round;
+};
+
+/* info stored in the last block of log bdev */
+struct wal_log_info {
+	uint64_t	head;
+
+	uint64_t	round;
+};
+
+enum wal_mover_state{
+	MOVER_IDLE,
+
+	MOVER_READING_MD,
+
+	MOVER_READING_DATA,
+
+	MOVER_WRITING_DATA,
+
+	MOVER_UPDATING_HEAD
+};
+
+struct wal_mover_context {
+	int							id;
+
+	struct wal_bdev				*bdev;
+
+	struct wal_metadata 		*metadata;
+
+	void 						*data;
+
+	struct wal_log_info			*info;
+
+	enum wal_mover_state		state;
+};
+
 /*
  * wal_bdev_io is the context part of bdev_io. It contains the information
  * related to bdev_io for a wal bdev
@@ -235,55 +284,6 @@ struct wal_bdev {
 	uint64_t	move_head;
 
 	uint64_t	move_round;
-};
-
-struct wal_metadata {
-	uint64_t	version;
-	
-	uint64_t	seq;
-
-	uint64_t	next_offset;
-
-	uint64_t	length;
-
-	uint64_t	core_offset;
-
-	uint64_t	core_length;
-
-	uint64_t	round;
-};
-
-/* info stored in the last block of log bdev */
-struct wal_log_info {
-	uint64_t	head;
-
-	uint64_t	round;
-};
-
-enum wal_mover_state{
-	MOVER_IDLE,
-
-	MOVER_READING_MD,
-
-	MOVER_READING_DATA,
-
-	MOVER_WRITING_DATA,
-
-	MOVER_UPDATING_HEAD
-};
-
-struct wal_mover_context {
-	int							id;
-
-	struct wal_bdev				*bdev;
-
-	struct wal_metadata 		*metadata;
-
-	void 						*data;
-
-	struct wal_log_info			*info;
-
-	enum wal_mover_state		state;
 };
 
 /*
