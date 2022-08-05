@@ -1823,6 +1823,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 	info->head = max_head;
 	info->round = max_round;
 	mover_ctx->info = info;
+	mover_ctx->state = MOVER_IDLE;
 
 	ret = spdk_bdev_write_blocks(bdev->log_bdev_info.desc, bdev->log_channel, info,
 									bdev->log_max, 1,
