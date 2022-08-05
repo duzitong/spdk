@@ -1494,6 +1494,7 @@ static int
 wal_bdev_start(struct wal_bdev *wal_bdev)
 {
 	uint64_t mempool_size;
+	int i;
 
 	wal_bdev->log_max = wal_bdev->log_bdev_info.bdev->blockcnt - 2;  // last block used to track log head
 
@@ -1508,6 +1509,9 @@ wal_bdev_start(struct wal_bdev *wal_bdev)
 	wal_bdev->bsl = bslCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
 	wal_bdev->bslfn = bslfnCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
 	TAILQ_INIT(&wal_bdev->pending_writes);
+	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
+		wal_bdev->mover_context[i].state = MOVER_IDLE;
+	}
 	// TODO: recover
 	wal_bdev->log_head = wal_bdev->move_head = 0;
 	wal_bdev->log_tail = 0;
@@ -1638,6 +1642,8 @@ wal_bdev_mover(void *ctx)
 		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_NO_WORKER, 0, 0, (uintptr_t)NULL);
 		return SPDK_POLLER_BUSY;
 	}
+
+	SPDK_NOTICELOG("Mover %d is used\n", i);
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_READ_MD, 0, 0, (uintptr_t)&bdev->mover_context[i]);
 	bdev->mover_context[i].state = MOVER_READING_MD;
@@ -1863,6 +1869,8 @@ wal_bdev_mover_free(struct wal_mover_context *ctx)
 		spdk_free(ctx->metadata);
 		ctx->metadata = NULL;
 	}
+
+	SPDK_NOTICELOG("Mover %d is free.\n", ctx->id);
 
 	ctx->state = MOVER_IDLE;
 }
