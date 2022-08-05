@@ -1777,6 +1777,8 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 		return;
 	}
 
+	SPDK_NOTICELOG("(%d) update head\n", mover_ctx->id);
+
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_UPDATE_HEAD, 0, 0, (uintptr_t)mover_ctx);
 	mover_ctx->state = MOVER_UPDATING_HEAD;
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
@@ -1845,7 +1847,9 @@ wal_bdev_mover_clean(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 		return;
 	}
 
+	SPDK_NOTICELOG("(%d) clean\n", mover_ctx->id);
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_UPDATE_HEAD_END, 0, 0, (uintptr_t)mover_ctx);
+	SPDK_NOTICELOG("set head to %ld\n", mover_ctx->info->head);
 	bdev->log_head = mover_ctx->info->head;
 	bdev->head_round = mover_ctx->info->round;
 	
