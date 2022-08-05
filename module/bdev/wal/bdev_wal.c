@@ -131,7 +131,7 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 
 		
 		wal_bdev->pending_writes_poller = SPDK_POLLER_REGISTER(wal_bdev_submit_pending_writes, wal_bdev, 0);
-		wal_bdev->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_bdev, 10);
+		wal_bdev->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_bdev, 4);
 		wal_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_bdev, 10);
 		wal_bdev->stat_poller = SPDK_POLLER_REGISTER(wal_bdev_stat_report, wal_bdev, 30*1000*1000);
 
