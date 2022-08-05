@@ -1632,7 +1632,7 @@ wal_bdev_mover(void *ctx)
 	}
 
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
-		if (bdev->mover_context->state == MOVER_IDLE) {
+		if (bdev->mover_context[i]->state == MOVER_IDLE) {
 			break;
 		}
 	}
@@ -1641,10 +1641,6 @@ wal_bdev_mover(void *ctx)
 		SPDK_DEBUGLOG(bdev_wal, "All movers are used.\n");
 		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_NO_WORKER, 0, 0, (uintptr_t)NULL);
 		return SPDK_POLLER_BUSY;
-	}
-
-	if (i) {
-		SPDK_NOTICELOG("Mover %d is used\n", i);
 	}
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_READ_MD, 0, 0, (uintptr_t)&bdev->mover_context[i]);
@@ -1870,10 +1866,6 @@ wal_bdev_mover_free(struct wal_mover_context *ctx)
 	if (ctx->metadata) {
 		spdk_free(ctx->metadata);
 		ctx->metadata = NULL;
-	}
-
-	if (ctx->id) {
-		SPDK_NOTICELOG("Mover %d is free.\n", ctx->id);
 	}
 
 	ctx->state = MOVER_IDLE;
