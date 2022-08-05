@@ -1494,7 +1494,6 @@ static int
 wal_bdev_start(struct wal_bdev *wal_bdev)
 {
 	uint64_t mempool_size;
-	int i;
 
 	wal_bdev->log_max = wal_bdev->log_bdev_info.bdev->blockcnt - 2;  // last block used to track log head
 
@@ -1613,7 +1612,6 @@ static int
 wal_bdev_mover(void *ctx)
 {
 	struct wal_bdev *bdev = ctx;
-	struct wal_metadata *metadata;
 	int ret, i;
 
 	if (bdev->log_head == bdev->log_tail && bdev->head_round == bdev->tail_round) {
