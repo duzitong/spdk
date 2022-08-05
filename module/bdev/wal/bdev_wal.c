@@ -1509,9 +1509,6 @@ wal_bdev_start(struct wal_bdev *wal_bdev)
 	wal_bdev->bsl = bslCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
 	wal_bdev->bslfn = bslfnCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
 	TAILQ_INIT(&wal_bdev->pending_writes);
-	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
-		wal_bdev->mover_context[i] = calloc(1, sizeof(struct wal_mover_context));
-	}
 	// TODO: recover
 	wal_bdev->log_head = wal_bdev->move_head = 0;
 	wal_bdev->log_tail = 0;
