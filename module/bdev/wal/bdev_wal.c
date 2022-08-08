@@ -1653,7 +1653,7 @@ wal_bdev_mover(void *ctx)
 	if (!bdev->mover_context[i].metadata) {
 		SPDK_DEBUGLOG(bdev_wal, "No mem for metadata.\n");
 		wal_bdev_mover_free(&bdev->mover_context[i]);
-		return;
+		return SPDK_POLLER_BUSY;
 	}
 
 	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, bdev->log_channel, bdev->mover_context[i].metadata, bdev->move_head, 1, 
@@ -1689,6 +1689,7 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 		return;
 	}
 
+	assert(metadata);
 	if (spdk_unlikely(metadata->version != METADATA_VERSION)) {
 		SPDK_DEBUGLOG(bdev_wal, "Go back to block '0' during move.\n");
 		bdev->move_head = 0;
