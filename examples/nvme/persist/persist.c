@@ -188,10 +188,10 @@ int main(int argc, char **argv)
 		.recv_cq = ibv_cq,
 		.qp_type = IBV_QPT_RC,
 		.cap = {
-			.max_recv_sge = 1,
-			.max_send_sge = 1,
-			.max_send_wr = 1,
-			.max_recv_wr = 1,
+			.max_recv_sge = device_attr.max_sge,
+			.max_send_sge = device_attr.max_sge,
+			.max_send_wr = 256,
+			.max_recv_wr = 256,
 		}
 	};
 
