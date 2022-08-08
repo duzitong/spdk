@@ -1792,7 +1792,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 					&& bdev->mover_context[i].metadata->round == mover_ctx->metadata->round))) {
 				SPDK_DEBUGLOG(bdev_wal, "waiting previous work to update head\n");
 				spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_UPDATE_HEAD, 0, 0, (uintptr_t)mover_ctx, 
-										mover_ctx->id, metadata->next_offset, metadata->round
+										mover_ctx->id, metadata->next_offset, metadata->round,
 										bdev->mover_context[i].id, bdev->mover_context[i].metadata->next_offset, bdev->mover_context[i].metadata->round);
 				return;
 			}
