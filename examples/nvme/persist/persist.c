@@ -238,7 +238,8 @@ int main(int argc, char **argv)
 
 	rdma_get_cm_event(rdma_channel, &established_event);
 	if (established_event->event != RDMA_CM_EVENT_ESTABLISHED) {
-		SPDK_ERRLOG("incorrect established event\n");
+		SPDK_ERRLOG("incorrect established event %d\n", established_event->event);
+		printf("err = %d\n", errno);
 		return 1;
 	}
 
