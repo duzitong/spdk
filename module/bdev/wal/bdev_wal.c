@@ -1785,7 +1785,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 	mover_ctx->state = MOVER_UPDATING_HEAD;
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
 		if (i != mover_ctx->id
-			&& bdev->mover_context[i].state != MOVER_IDLE 
+			&& bdev->mover_context[i].state > MOVER_READING_MD	// Reading md is run in serial. So, if the worker is still reading md, then it must be a later entry.
 			&& bdev->mover_context[i].metadata
 			&& (bdev->mover_context[i].metadata->round < mover_ctx->metadata->round
 				|| (bdev->mover_context[i].metadata->next_offset < mover_ctx->metadata->next_offset 
