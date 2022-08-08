@@ -634,6 +634,11 @@ wal_bdev_submit_write_request(struct wal_bdev_io *wal_io)
 	base_info = &wal_bdev->log_bdev_info;
 	base_ch = wal_bdev->log_channel;
 
+	if (spdk_unlikely(bdev_io->u.bdev.num_blocks >= wal_bdev->log_max)) {
+		SPDK_ERRLOG("request block %ld exceeds the max blocks %ld of log device\n", bdev_io->u.bdev.num_blocks, wal_bdev->log_max);
+		wal_bdev_io_complete(wal_io, SPDK_BDEV_IO_STATUS_FAILED);
+	}
+
 	// use 1 block in log device for metadata
 	metadata = (struct wal_metadata *) spdk_zmalloc(wal_bdev->log_bdev_info.bdev->blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 
