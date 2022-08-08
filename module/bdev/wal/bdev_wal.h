@@ -191,6 +191,10 @@ struct wal_bdev_io {
 
 	void	*read_buf;
 
+	struct iovec *log_iovs;
+	
+	int log_iovcnt;
+
 	/* link next for pending writes */
 	TAILQ_ENTRY(wal_bdev_io)	tailq;
 };

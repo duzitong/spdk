@@ -440,6 +440,7 @@ wal_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *c
 	spdk_bdev_free_io(bdev_io);
 
 	spdk_free(wal_io->metadata);
+	free(wal_io->log_iovs);
 
 	wal_bdev_io_complete(wal_io, success ?
 				   SPDK_BDEV_IO_STATUS_SUCCESS :
@@ -452,9 +453,20 @@ wal_log_bdev_writev_blocks_with_md(struct spdk_bdev_desc *desc, struct spdk_io_c
 				uint64_t offset_blocks, uint64_t num_blocks,
 				struct wal_bdev_io *wal_io)
 {
-	return spdk_bdev_writev_blocks_with_md(desc, ch,
-					iovs, iovcnt, md_buf,
-					offset_blocks, num_blocks, wal_base_bdev_write_complete, wal_io);
+	int i;
+
+	wal_io->log_iovcnt = iovcnt + 1;
+	wal_io->log_iovs = calloc(wal_io->log_iovcnt, sizeof(struct iovec));
+	wal_io->log_iovs[0].iov_base = md_buf;
+	wal_io->log_iovs[0].iov_len = wal_io->wal_bdev->log_bdev_info.bdev->blocklen;
+	for (i = 0; i < iovcnt; i++) {
+		wal_io->log_iovs[i+1].iov_base = iovs[i].iov_base;
+		wal_io->log_iovs[i+1].iov_len = iovs[i].iov_len;
+	}
+
+	return spdk_bdev_writev_blocks(desc, ch,
+					wal_io->log_iovs, wal_io->log_iovcnt,
+					offset_blocks, num_blocks + 1, wal_base_bdev_write_complete, wal_io);
 }
 
 static void
