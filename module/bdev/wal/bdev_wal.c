@@ -1650,6 +1650,11 @@ wal_bdev_mover(void *ctx)
 	bdev->mover_context[i].bdev = bdev;
 	bdev->mover_context[i].metadata = (struct wal_metadata *) spdk_zmalloc(bdev->log_bdev_info.bdev->blocklen, 0, 
 														NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	if (!bdev->mover_context[i].metadata) {
+		SPDK_DEBUGLOG(bdev_wal, "No mem for metadata.\n");
+		wal_bdev_mover_free(&bdev->mover_context[i]);
+		return;
+	}
 
 	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, bdev->log_channel, bdev->mover_context[i].metadata, bdev->move_head, 1, 
 									wal_bdev_mover_read_data, &bdev->mover_context[i]);
@@ -1715,6 +1720,12 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 
 	mover_ctx->data = spdk_zmalloc(bdev->log_bdev_info.bdev->blocklen * metadata->length, 0, 
 								NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	
+	if (!mover_ctx->data) {
+		SPDK_DEBUGLOG(bdev_wal, "No mem for data.\n");
+		wal_bdev_mover_free(mover_ctx);
+		return;
+	}
 	
 	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, bdev->log_channel, mover_ctx->data, log_position, metadata->length, 
 									wal_bdev_mover_write_data, mover_ctx);
