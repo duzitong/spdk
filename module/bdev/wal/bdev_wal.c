@@ -1689,11 +1689,7 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 		return;
 	}
 
-	if (spdk_unlikely(!metadata)) {
-		wal_bdev_mover_free(mover_ctx);
-		return;
-	}
-
+	assert(metadata);
 	if (spdk_unlikely(metadata->version != METADATA_VERSION)) {
 		SPDK_DEBUGLOG(bdev_wal, "Go back to block '0' during move.\n");
 		bdev->move_head = 0;
@@ -1718,11 +1714,6 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 	}
 
 	// Can be moved in parallel
-	log_position = bdev->move_head + 1;
-	bdev->move_head = metadata->next_offset;
-	mover_ctx->state = MOVER_READING_DATA;
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_READ_DATA, 0, 0, (uintptr_t)mover_ctx, mover_ctx->id, log_position, metadata->length, metadata->round, metadata->next_offset);
-
 	mover_ctx->data = spdk_zmalloc(bdev->log_bdev_info.bdev->blocklen * metadata->length, 0, 
 								NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 	
@@ -1731,6 +1722,11 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 		wal_bdev_mover_free(mover_ctx);
 		return;
 	}
+
+	log_position = bdev->move_head + 1;
+	bdev->move_head = metadata->next_offset;
+	mover_ctx->state = MOVER_READING_DATA;
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_READ_DATA, 0, 0, (uintptr_t)mover_ctx, mover_ctx->id, log_position, metadata->length, metadata->round, metadata->next_offset);
 	
 	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, bdev->log_channel, mover_ctx->data, log_position, metadata->length, 
 									wal_bdev_mover_write_data, mover_ctx);
@@ -1802,6 +1798,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
 		if (i != mover_ctx->id
 			&& bdev->mover_context[i].state > MOVER_READING_MD	// Reading md is run in serial. So, if the worker is still reading md, then it must be a later entry.
+			&& bdev->mover_context[i].state < MOVER_PERSIST_HEAD // Wait only for on air works
 			&& bdev->mover_context[i].metadata
 			&& (bdev->mover_context[i].metadata->round < mover_ctx->metadata->round
 				|| (bdev->mover_context[i].metadata->next_offset < mover_ctx->metadata->next_offset 
@@ -1842,7 +1839,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 	info->head = max_head;
 	info->round = max_round;
 	mover_ctx->info = info;
-	mover_ctx->state = MOVER_IDLE;
+	mover_ctx->state = MOVER_PERSIST_HEAD;
 
 	ret = spdk_bdev_write_blocks(bdev->log_bdev_info.desc, bdev->log_channel, info,
 									bdev->log_max, 1,

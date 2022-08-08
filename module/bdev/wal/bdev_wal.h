@@ -143,7 +143,9 @@ enum wal_mover_state{
 
 	MOVER_WRITING_DATA,
 
-	MOVER_UPDATING_HEAD
+	MOVER_UPDATING_HEAD,
+
+	MOVER_PERSIST_HEAD,
 };
 
 struct wal_mover_context {
