@@ -456,7 +456,7 @@ target_rdma_poller(void *ctx)
 	struct target_disk *tdisk = ctx;
 
 	// TODO: batch polling may be faster?
-	int cnt = ibv_poll_cq(tdisk->cq, 1, tdisk->wc_buf);
+	int cnt = ibv_poll_cq(tdisk->cq, TARGET_WC_BATCH_SIZE, tdisk->wc_buf);
 	if (cnt < 0) {
 		// TODO: what to do when poll cq fails?
 		SPDK_ERRLOG("ibv_poll_cq failed\n");
