@@ -1791,6 +1791,9 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 				|| (bdev->mover_context[i].metadata->next_offset < mover_ctx->metadata->next_offset 
 					&& bdev->mover_context[i].metadata->round == mover_ctx->metadata->round))) {
 				SPDK_DEBUGLOG(bdev_wal, "waiting previous work to update head\n");
+				spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_UPDATE_HEAD, 0, 0, (uintptr_t)mover_ctx, 
+										mover_ctx->id, metadata->next_offset, metadata->round
+										bdev->mover_context[i].id, bdev->mover_context[i].metadata->next_offset, bdev->mover_context[i].metadata->round);
 				return;
 			}
 	}
@@ -2023,6 +2026,18 @@ SPDK_TRACE_REGISTER_FN(wal_trace, "wal", TRACE_GROUP_WAL)
 				{ "id", SPDK_TRACE_ARG_TYPE_INT, 8 },
 				{ "head", SPDK_TRACE_ARG_TYPE_INT, 8 },
 				{ "round", SPDK_TRACE_ARG_TYPE_INT, 8 },
+			}
+		},
+		{
+			"WAL_MOVE_WAIT_OTHERS", TRACE_WAL_MOVE_WAIT_OTHERS,
+			OWNER_BDEV, OBJECT_BDEV_IO, 0,
+			{
+				{ "id", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "head", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "round", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "o_id", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "o_head", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "o_round", SPDK_TRACE_ARG_TYPE_INT, 8 },
 			}
 		},
 		{
