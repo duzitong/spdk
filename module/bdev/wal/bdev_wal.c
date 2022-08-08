@@ -1689,7 +1689,11 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 		return;
 	}
 
-	assert(metadata);
+	if (spdk_unlikely(!metadata)) {
+		wal_bdev_mover_free(mover_ctx);
+		return;
+	}
+
 	if (spdk_unlikely(metadata->version != METADATA_VERSION)) {
 		SPDK_DEBUGLOG(bdev_wal, "Go back to block '0' during move.\n");
 		bdev->move_head = 0;
