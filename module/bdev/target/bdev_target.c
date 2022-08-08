@@ -654,8 +654,6 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 
 	struct rdma_conn_param conn_param = {};
 
-	conn_param.responder_resources = 16;
-	conn_param.initiator_depth = 16;
 	conn_param.retry_count = 7;
 	conn_param.rnr_retry_count = 7;
 

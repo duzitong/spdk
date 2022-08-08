@@ -227,8 +227,6 @@ int main(int argc, char **argv)
 
 	struct rdma_conn_param conn_param = {};
 
-	conn_param.responder_resources = 16;
-	conn_param.initiator_depth = 16;
 	conn_param.retry_count = 7;
 	conn_param.rnr_retry_count = 7;
 	rc = rdma_accept(child_cm_id, &conn_param);
