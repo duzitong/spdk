@@ -41,14 +41,28 @@
 #include "spdk_internal/trace_defs.h"
 #include "bsl.h"
 
-#define METADATA_VERSION	10086	// XD
+#define METADATA_VERSION		10086	// XD
+#define MAX_OUTSTANDING_MOVES	32
 
-#define TRACE_BDEV_BSTAT_CREATE_START	SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x10)
-#define TRACE_BDEV_BSTAT_CREATE_END		SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x11)
-#define TRACE_BDEV_BSL_INSERT_START		SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x12)
-#define TRACE_BDEV_BSL_INSERT_END		SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x13)
-#define TRACE_BDEV_BSL_RAND_START		SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x14)
-#define TRACE_BDEV_BSL_RAND_END			SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x15)
+#define OWNER_WAL		0x8
+#define OBJECT_WAL_IO		0x8
+#define TRACE_GROUP_WAL		0xD
+
+#define TRACE_WAL_BSTAT_CREATE_START	SPDK_TPOINT_ID(TRACE_GROUP_WAL, 0x10)
+#define TRACE_WAL_BSTAT_CREATE_END		SPDK_TPOINT_ID(TRACE_GROUP_WAL, 0x11)
+#define TRACE_WAL_BSL_INSERT_START		SPDK_TPOINT_ID(TRACE_GROUP_WAL, 0x12)
+#define TRACE_WAL_BSL_INSERT_END		SPDK_TPOINT_ID(TRACE_GROUP_WAL, 0x13)
+#define TRACE_WAL_BSL_RAND_START		SPDK_TPOINT_ID(TRACE_GROUP_WAL, 0x14)
+#define TRACE_WAL_BSL_RAND_END			SPDK_TPOINT_ID(TRACE_GROUP_WAL, 0x15)
+#define TRACE_WAL_MOVE_READ_MD			SPDK_TPOINT_ID(TRACE_GROUP_WAL, 0x21)
+#define TRACE_WAL_MOVE_READ_DATA		SPDK_TPOINT_ID(TRACE_GROUP_WAL, 0x22)
+#define TRACE_WAL_MOVE_WRITE_DATA		SPDK_TPOINT_ID(TRACE_GROUP_WAL, 0x23)
+#define TRACE_WAL_MOVE_UPDATE_HEAD		SPDK_TPOINT_ID(TRACE_GROUP_WAL, 0x24)
+#define TRACE_WAL_MOVE_WAIT_OTHERS		SPDK_TPOINT_ID(TRACE_GROUP_WAL, 0x25)
+#define TRACE_WAL_MOVE_UPDATE_HEAD_END	SPDK_TPOINT_ID(TRACE_GROUP_WAL, 0x26)
+#define TRACE_WAL_MOVE_CALLED			SPDK_TPOINT_ID(TRACE_GROUP_WAL, 0x30)
+#define TRACE_WAL_MOVE_MD_LOCKED		SPDK_TPOINT_ID(TRACE_GROUP_WAL, 0x31)
+#define TRACE_WAL_MOVE_NO_WORKER		SPDK_TPOINT_ID(TRACE_GROUP_WAL, 0x32)
 
 /*
  * WAL state describes the state of the wal bdev. This wal bdev can be either in
@@ -95,6 +109,57 @@ struct wal_base_bdev_info {
 
 	/* thread where base device is opened */
 	struct spdk_thread	*thread;
+};
+
+struct wal_metadata {
+	uint64_t	version;
+	
+	uint64_t	seq;
+
+	uint64_t	next_offset;
+
+	uint64_t	length;
+
+	uint64_t	core_offset;
+
+	uint64_t	core_length;
+
+	uint64_t	round;
+};
+
+/* info stored in the last block of log bdev */
+struct wal_log_info {
+	uint64_t	head;
+
+	uint64_t	round;
+};
+
+enum wal_mover_state{
+	MOVER_IDLE,
+
+	MOVER_READING_MD,
+
+	MOVER_READING_DATA,
+
+	MOVER_WRITING_DATA,
+
+	MOVER_UPDATING_HEAD,
+
+	MOVER_PERSIST_HEAD,
+};
+
+struct wal_mover_context {
+	int							id;
+
+	struct wal_bdev				*bdev;
+
+	struct wal_metadata 		*metadata;
+
+	void 						*data;
+
+	struct wal_log_info			*info;
+
+	enum wal_mover_state		state;
 };
 
 /*
@@ -225,42 +290,15 @@ struct wal_bdev {
 	/* nodes to free */
 	struct bskiplistFreeNodes *bslfn;
 
-	/* indicate whether there's ongoing moving task */
-	bool		moving;
-
 	/* pending writes due to no enough space on log device */
 	TAILQ_HEAD(, wal_bdev_io)	pending_writes;
-};
 
-struct wal_metadata {
-	uint64_t	version;
-	
-	uint64_t	seq;
+	/* mover task context */
+	struct wal_mover_context	mover_context[MAX_OUTSTANDING_MOVES];
 
-	uint64_t	next_offset;
+	uint64_t	move_head;
 
-	uint64_t	length;
-
-	uint64_t	core_offset;
-
-	uint64_t	core_length;
-
-	uint64_t	round;
-};
-
-/* info stored in the last block of log bdev */
-struct wal_log_info {
-	uint64_t	head;
-};
-
-struct wal_mover_context {
-	struct wal_bdev				*bdev;
-
-	struct wal_metadata 		*metadata;
-
-	void 						*data;
-
-	struct wal_log_info			*info;
+	uint64_t	move_round;
 };
 
 /*
