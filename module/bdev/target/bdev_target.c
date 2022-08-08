@@ -53,6 +53,7 @@
 #include "spdk/log.h"
 #include <infiniband/verbs.h>
 #include <rdma/rdma_cma.h>
+#include <errno.h>
 
 struct target_disk {
 	struct spdk_bdev		disk;
@@ -660,7 +661,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	rdma_connect(cm_id, &conn_param);
 	rdma_get_cm_event(rdma_channel, &connect_event);
 	if (connect_event->event != RDMA_CM_EVENT_ESTABLISHED) {
-		SPDK_ERRLOG("invalid event type %d\n", connect_event->event);
+		SPDK_ERRLOG("invalid event type %d, errno=%d\n", connect_event->event, errno);
 		return -EINVAL;
 	}
 
