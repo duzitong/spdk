@@ -1711,7 +1711,7 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 	log_position = bdev->move_head + 1;
 	bdev->move_head = metadata->next_offset;
 	mover_ctx->state = MOVER_READING_DATA;
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_READ_DATA, 0, 0, (uintptr_t)mover_ctx, mover_ctx->id, log_position, metadata->length, metadata->round);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_READ_DATA, 0, 0, (uintptr_t)mover_ctx, mover_ctx->id, log_position, metadata->length, metadata->round, metadata->next_offset);
 
 	mover_ctx->data = spdk_zmalloc(bdev->log_bdev_info.bdev->blocklen * metadata->length, 0, 
 								NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
@@ -1793,7 +1793,7 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 				SPDK_DEBUGLOG(bdev_wal, "%ld(%ld) waiting %ld(%ld) to update head.\n",  metadata->next_offset, metadata->round, 
 								bdev->mover_context[i].metadata->next_offset, bdev->mover_context[i].metadata->round);
 				spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_WAIT_OTHERS, 0, 0, (uintptr_t)mover_ctx, 
-										mover_ctx->id, metadata->next_offset, metadata->round,
+										metadata->next_offset, metadata->round, bdev->mover_context[i].id,
 										bdev->mover_context[i].metadata->next_offset, bdev->mover_context[i].metadata->round);
 				return;
 			}
@@ -2008,6 +2008,7 @@ SPDK_TRACE_REGISTER_FN(wal_trace, "wal", TRACE_GROUP_WAL)
 				{ "offset", SPDK_TRACE_ARG_TYPE_INT, 8 },
 				{ "length", SPDK_TRACE_ARG_TYPE_INT, 8 },
 				{ "round", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "next", SPDK_TRACE_ARG_TYPE_INT, 8 },
 			}
 		},
 		{
@@ -2033,9 +2034,9 @@ SPDK_TRACE_REGISTER_FN(wal_trace, "wal", TRACE_GROUP_WAL)
 			"WAL_MOVE_WAIT_OTHERS", TRACE_WAL_MOVE_WAIT_OTHERS,
 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
 			{
-				{ "id", SPDK_TRACE_ARG_TYPE_INT, 8 },
 				{ "head", SPDK_TRACE_ARG_TYPE_INT, 8 },
 				{ "round", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "o_id", SPDK_TRACE_ARG_TYPE_INT, 8 },
 				{ "o_head", SPDK_TRACE_ARG_TYPE_INT, 8 },
 				{ "o_round", SPDK_TRACE_ARG_TYPE_INT, 8 },
 			}
