@@ -1838,13 +1838,13 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 	}
 
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
-		if (bdev->sorted_context[i]->state == MOVER_UPDATING_HEAD) {
+		if (bdev->sorted_context[i] && bdev->sorted_context[i]->state == MOVER_UPDATING_HEAD) {
 			break;
 		}
 	}
 	assert(bdev->sorted_context[i] == mover_ctx);
 	for (; i < MAX_OUTSTANDING_MOVES; i++) {
-		if (bdev->sorted_context[i]->state == MOVER_UPDATING_HEAD) {
+		if (bdev->sorted_context[i] && bdev->sorted_context[i]->state == MOVER_UPDATING_HEAD) {
 			info->head = bdev->sorted_context[i]->metadata->next_offset;
 			info->round = bdev->sorted_context[i]->metadata->round;
 		} else {
