@@ -1819,17 +1819,17 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 	info = spdk_zmalloc(bdev->log_bdev_info.bdev->blocklen, 0, 
 							NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 
-	memset(bdev->sorted_context, NULL, MAX_OUTSTANDING_MOVES * sizeof(struct wal_mover_context));
+	memset(bdev->sorted_context, NULL, MAX_OUTSTANDING_MOVES * sizeof(bdev->sorted_context[0]));
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
 		if (bdev->mover_context[i].state != MOVER_IDLE && bdev->mover_context[i].state != MOVER_PERSIST_HEAD) {
 			assert(bdev->sorted_context[MAX_OUTSTANDING_MOVES - 1] == NULL);
 			for (j = MAX_OUTSTANDING_MOVES - 2; j >= 0 ; j--) {
-				if (bdev->sorted_context[j] && bdev->sorted_context[j].metadata) {
-					if (bdev->sorted_context[j].metadata->round > bdev->mover_context[i].metadata->round
-						|| bdev->sorted_context[j].metadata->next_offset > bdev->mover_context[i].metadata->next_offset) {
+				if (bdev->sorted_context[j] && bdev->sorted_context[j]->metadata) {
+					if (bdev->sorted_context[j]->metadata->round > bdev->mover_context[i].metadata->round
+						|| bdev->sorted_context[j]->metadata->next_offset > bdev->mover_context[i].metadata->next_offset) {
 						bdev->sorted_context[j+1] = bdev->sorted_context[j];
 					} else {
-						bdev->sorted_context[j] = bdev->mover_context[i];
+						bdev->sorted_context[j] = &bdev->mover_context[i];
 						break;
 					}
 				}
@@ -1839,9 +1839,9 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 
 	assert(bdev->sorted_context[0] == mover_ctx);
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
-		if (bdev->sorted_context[i].state == MOVER_UPDATING_HEAD) {
-			info->head = bdev->sorted_context[i].metadata->next_offset;
-			info->round = bdev->sorted_context[i].metadata->round;
+		if (bdev->sorted_context[i]->state == MOVER_UPDATING_HEAD) {
+			info->head = bdev->sorted_context[i]->metadata->next_offset;
+			info->round = bdev->sorted_context[i]->metadata->round;
 		} else {
 			break;
 		}
