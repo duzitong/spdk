@@ -1920,7 +1920,7 @@ wal_bdev_mover_free(struct wal_mover_context *ctx)
 static void
 wal_bdev_mover_reset(struct wal_bdev *bdev)
 {
-	SPDK_NOTICELOG("mover head is reset to log head");
+	SPDK_NOTICELOG("mover head is reset to log head\n");
 	bdev->move_head = bdev->log_head;
 	bdev->move_round = bdev->head_round;
 }
