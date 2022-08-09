@@ -1836,11 +1836,21 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 			bdev->sorted_context[j+1] = &bdev->mover_context[i];
 		}
 	}
-	assert(bdev->sorted_context[0] == mover_ctx);
-	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
+
+	if (spdk_unlikely(bdev->sorted_context[0] != mover_ctx)) {
+		SPDK_ERRLOG("The 1st element of sorted mover context is not current context, this should not happen.\n");
+		wal_bdev_mover_free(mover_ctx);
+		wal_bdev_mover_reset(bdev);
+		return;
+	}
+
+	info->head = mover_ctx->metadata->next_offset;
+	info->round = mover_ctx->metadata->round;
+	for (i = 1; i < MAX_OUTSTANDING_MOVES; i++) {
 		if (bdev->sorted_context[i] && bdev->sorted_context[i]->state == MOVER_UPDATING_HEAD) {
 			info->head = bdev->sorted_context[i]->metadata->next_offset;
 			info->round = bdev->sorted_context[i]->metadata->round;
+			wal_bdev_mover_free(bdev->sorted_context[i]);
 		} else {
 			break;
 		}
