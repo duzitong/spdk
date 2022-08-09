@@ -1781,9 +1781,8 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 	struct wal_mover_context *mover_ctx = ctx;
 	struct wal_bdev *bdev = mover_ctx->bdev;
 	struct wal_metadata *metadata = mover_ctx->metadata;
-	int ret, i;
+	int ret, i, j;
 	struct wal_log_info *info;
-	uint64_t max_head, max_round;
 
 	spdk_bdev_free_io(bdev_io);
 
@@ -1819,30 +1818,35 @@ wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx
 
 	info = spdk_zmalloc(bdev->log_bdev_info.bdev->blocklen, 0, 
 							NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-	max_head = info->head = metadata->next_offset;
-	max_round = info->round = metadata->round;
-	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
-		if (i != mover_ctx->id
-			&& bdev->mover_context[i].state == MOVER_UPDATING_HEAD
-			&& (bdev->mover_context[i].metadata->next_offset > info->head 
-				|| bdev->mover_context[i].metadata->round > info->round)) {
-			
-			if (bdev->mover_context[i].metadata->round > max_round) {
-				max_round = bdev->mover_context[i].metadata->round;
-				max_head = bdev->mover_context[i].metadata->next_offset;
-			}
-			
-			if (bdev->mover_context[i].metadata->round == max_round 
-				&& bdev->mover_context[i].metadata->next_offset > max_head) {
-				max_head = bdev->mover_context[i].metadata->next_offset;
-			}
 
-			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_UPDATE_HEAD_END, 0, 0, (uintptr_t)&bdev->mover_context[i], mover_ctx->id, 0, 0);
-			wal_bdev_mover_free(&bdev->mover_context[i]);
+	memset(bdev->sorted_context, NULL, MAX_OUTSTANDING_MOVES * sizeof(struct wal_mover_context));
+	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
+		if (bdev->mover_context[i].state != MOVER_IDLE && bdev->mover_context[i].state != MOVER_PERSIST_HEAD) {
+			assert(bdev->sorted_context[MAX_OUTSTANDING_MOVES - 1] == NULL);
+			for (j = MAX_OUTSTANDING_MOVES - 2; j >= 0 ; j--) {
+				if (bdev->sorted_context[j] && bdev->sorted_context[j].metadata) {
+					if (bdev->sorted_context[j].metadata->round > bdev->mover_context[i].metadata->round
+						|| bdev->sorted_context[j].metadata->next_offset > bdev->mover_context[i].metadata->next_offset) {
+						bdev->sorted_context[j+1] = bdev->sorted_context[j];
+					} else {
+						bdev->sorted_context[j] = bdev->mover_context[i];
+						break;
+					}
+				}
+			}
 		}
 	}
-	info->head = max_head;
-	info->round = max_round;
+
+	assert(bdev->sorted_context[0] == mover_ctx);
+	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
+		if (bdev->sorted_context[i].state == MOVER_UPDATING_HEAD) {
+			info->head = bdev->sorted_context[i].metadata->next_offset;
+			info->round = bdev->sorted_context[i].metadata->round;
+		} else {
+			break;
+		}
+	}
+
 	mover_ctx->info = info;
 	mover_ctx->state = MOVER_PERSIST_HEAD;
 

@@ -296,6 +296,9 @@ struct wal_bdev {
 	/* mover task context */
 	struct wal_mover_context	mover_context[MAX_OUTSTANDING_MOVES];
 
+	/* sorted mover task context */
+	struct wal_mover_context	sorted_context[MAX_OUTSTANDING_MOVES];
+
 	uint64_t	move_head;
 
 	uint64_t	move_round;
