@@ -10,7 +10,8 @@ extern "C" {
 struct rdma_handshake {
 	void* base_addr;
 	uint32_t rkey;
-	uint64_t length;
+	uint64_t block_size;
+	uint64_t block_cnt;
 };
 
 #ifdef __cplusplus
