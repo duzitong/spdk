@@ -304,6 +304,40 @@ def bdev_target_delete(client, name):
     return client.call('bdev_target_delete', params)
 
 
+def bdev_persist_create(client, ip=None, port=None, name=None, uuid=None):
+    """Construct a persist block device.
+
+    Args:
+        name: name of block device (optional)
+        uuid: UUID of block device (optional)
+        ip: IP of the persist server (optional)
+        port: port of the persist server (optional)
+
+    Returns:
+        Name of created block device.
+    """
+    params = {}
+    if name:
+        params['name'] = name
+    if uuid:
+        params['uuid'] = uuid
+    if ip:
+        params['ip'] = ip
+    if port:
+        params['port'] = port
+    return client.call('bdev_persist_create', params)
+
+
+def bdev_persist_delete(client, name):
+    """Delete persist block device.
+
+    Args:
+        bdev_name: name of persist bdev to delete
+    """
+    params = {'name': name}
+    return client.call('bdev_persist_delete', params)
+
+
 def bdev_null_create(client, num_blocks, block_size, name, uuid=None, md_size=None,
                      dif_type=None, dif_is_head_of_md=None):
     """Construct a null block device.

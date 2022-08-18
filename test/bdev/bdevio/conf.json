@@ -11,7 +11,7 @@
                "block_size": 512,
                "ip": "10.156.96.128",
                "port": "4420",
-               "has_md": false
+               "has_md": true
              }
            },
            {
