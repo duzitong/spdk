@@ -60,15 +60,26 @@ struct persist_destage_context {
 	int remaining;
 };
 
+enum persist_rdma_status {
+	PERSIST_RDMA_CONNECTING,
+	PERSIST_RDMA_ACCEPTED,
+	PERSIST_RDMA_ESTABLISHED,
+	PERSIST_RDMA_CONNECTED
+};
+
 struct persist_disk {
 	struct spdk_bdev		disk;
 	// act as circular buffer
 	void *malloc_buf;
+	struct rdma_event_channel* rdma_channel;
 	struct rdma_cm_id* cm_id;
 	struct ibv_mr* mr;
+	struct ibv_mr* mr_handshake;
 	struct ibv_cq* cq;
+	struct ibv_pd* pd;
 	struct rdma_handshake* remote_handshake;
 	struct spdk_poller* destage_poller;
+	struct spdk_poller* rdma_poller;
 	struct ibv_wc wc_buf[PERSIST_WC_BATCH_SIZE];
 	struct spdk_nvme_ctrlr* ctrlr;
 	struct spdk_nvme_ns* ns;
@@ -76,6 +87,7 @@ struct persist_disk {
 	struct destage_info* destage_info;
 	struct persist_destage_context destage_context;
 	uint64_t prev_seq;
+	enum persist_rdma_status rdma_status;
 
 	TAILQ_ENTRY(persist_disk)	link;
 };
@@ -150,6 +162,10 @@ persist_disk_free(struct persist_disk *persist_disk)
 	if (!persist_disk) {
 		return;
 	}
+	spdk_poller_unregister(&persist_disk->rdma_poller);
+	spdk_poller_unregister(&persist_disk->destage_poller);
+	// TODO: find a way to detach the controller. right now the call seems to hang forever
+	// spdk_nvme_detach(persist_disk->ctrlr);
 
 	free(persist_disk->disk.name);
 	spdk_free(persist_disk->malloc_buf);
@@ -163,6 +179,7 @@ bdev_persist_destruct(void *ctx)
 
 	// TAILQ_REMOVE(&g_persist_disks, persist_disk, link);
 	persist_disk_free(persist_disk);
+	spdk_io_device_unregister(persist_disk, NULL);
 	return 0;
 }
 
@@ -202,7 +219,6 @@ bdev_persist_reset_sgl(void *ref, uint32_t sgl_offset) {
 
 		pio->iov_offset -= iov->iov_len;
 	}
-
 }
 
 static int
@@ -451,6 +467,11 @@ persist_destage_poller(void *ctx)
 	};
 	int rc;
 
+	if (pdisk->rdma_status != PERSIST_RDMA_CONNECTED) {
+		// need to establish RDMA connection and alloc buffer first
+		return SPDK_POLLER_IDLE;
+	}
+
 	// reset the counter
 	pdisk->destage_context.remaining = 0;
 
@@ -491,7 +512,7 @@ persist_destage_poller(void *ctx)
 
 		if (metadata->seq != pdisk->prev_seq + 1) {
 			// TODO: what to do about it?
-			SPDK_ERRLOG("Possible data loss! Previous seq is %d while the current is %d\n",
+			SPDK_ERRLOG("Possible data loss! Previous seq is %ld while the current is %ld\n",
 				pdisk->prev_seq,
 				metadata->seq);
 		}
@@ -524,29 +545,261 @@ persist_destage_poller(void *ctx)
 		sched_yield();
 	}
 
-	// write to the final block of the malloc buffer for client to read
-	void* dst = pdisk->malloc_buf + 
-		pdisk->remote_handshake->block_size * (pdisk->remote_handshake->block_cnt - 1);
-	memcpy(dst, pdisk->destage_info, pdisk->remote_handshake->block_size);
-	
-	return (old_info.destage_head == pdisk->destage_info->destage_head
-		&& old_info.destage_round == pdisk->destage_info->destage_round) ? 
-		SPDK_POLLER_IDLE : SPDK_POLLER_BUSY;
+	if (old_info.destage_head == pdisk->destage_info->destage_head
+		&& old_info.destage_round == pdisk->destage_info->destage_round) {
+		return SPDK_POLLER_IDLE;
+	}
+	else {
+		// write to the final block of the malloc buffer for client to read
+		void* dst = pdisk->malloc_buf + 
+			pdisk->remote_handshake->block_size * (pdisk->remote_handshake->block_cnt - 1);
+		memcpy(dst, pdisk->destage_info, pdisk->remote_handshake->block_size);
+		return SPDK_POLLER_BUSY;
+	}
+}
+
+static int persist_rdma_poller(void* ctx) {
+	struct persist_disk* pdisk = ctx;
+	int rc;
+	switch (pdisk->rdma_status) {
+		case PERSIST_RDMA_CONNECTING:
+		{
+			int flags = fcntl(pdisk->rdma_channel->fd, F_GETFL);
+			rc = fcntl(pdisk->rdma_channel->fd, F_SETFL, flags | O_NONBLOCK);
+			if (rc != 0) {
+				SPDK_ERRLOG("fcntl failed\n");
+				return SPDK_POLLER_IDLE;
+			}
+			// need to make sure that the fd is set to non-blocking before 
+			// entering the poller.
+			// 
+			// when receiving the second event, set the fd to blocking mode
+			// 
+			// after receiving all the events, reset the fd back to non-blocking
+			struct rdma_cm_event* connect_event;
+			rc = rdma_get_cm_event(pdisk->rdma_channel, &connect_event);
+			if (rc != 0) {
+				if (errno == EAGAIN) {
+					// waiting for connection
+				}
+				else {
+					SPDK_ERRLOG("Unexpected CM error %d\n", errno);
+				}
+				return SPDK_POLLER_IDLE;
+			}
+
+			if (connect_event->event != RDMA_CM_EVENT_CONNECT_REQUEST) {
+				// TODO: reconnection
+				SPDK_ERRLOG("invalid event type %d\n", connect_event->event);
+				return SPDK_POLLER_IDLE;
+			}
+
+			SPDK_NOTICELOG("received conn request\n");
+
+			void* handshake_buffer = spdk_zmalloc(2 * sizeof(struct rdma_handshake), 2 * 1024 * 1024, NULL,
+							SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+			struct ibv_context* ibv_context = connect_event->id->verbs;
+			struct ibv_device_attr device_attr = {};
+			ibv_query_device(ibv_context, &device_attr);
+			struct ibv_pd* ibv_pd = ibv_alloc_pd(ibv_context);
+			struct ibv_mr* ibv_mr_handshake = ibv_reg_mr(ibv_pd,
+				handshake_buffer,
+				2 * sizeof(struct rdma_handshake),
+				IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+			
+
+			struct ibv_cq* ibv_cq = ibv_create_cq(ibv_context, 4096, NULL, NULL, 0);
+			assert(ibv_cq != NULL);
+			assert(ibv_mr_handshake != NULL);
+			assert(ibv_context != NULL);
+			assert(ibv_pd != NULL);
+
+			// no SRQ here - only one qp
+			// TODO: fine-tune these params; 
+			struct ibv_qp_init_attr init_attr = {
+				.send_cq = ibv_cq,
+				.recv_cq = ibv_cq,
+				.qp_type = IBV_QPT_RC,
+				.cap = {
+					.max_recv_sge = device_attr.max_sge,
+					.max_send_sge = device_attr.max_sge,
+					.max_send_wr = 256,
+					.max_recv_wr = 256,
+				}
+			};
+
+			rc = rdma_create_qp(connect_event->id, ibv_pd, &init_attr);
+			SPDK_NOTICELOG("rdma_create_qp returns %d\n", rc);
+
+			// the original cm id becomes useless from here.
+			struct rdma_cm_id* child_cm_id = connect_event->id;
+			rc = rdma_ack_cm_event(connect_event);
+			SPDK_NOTICELOG("acked conn request\n");
+
+			struct ibv_recv_wr wr, *bad_wr = NULL;
+			struct ibv_sge sge;
+
+			struct rdma_handshake* handshake = handshake_buffer;
+
+			wr.wr_id = 1;
+			wr.next = NULL;
+			wr.sg_list = &sge;
+			wr.num_sge = 1;
+
+			sge.addr = (uint64_t)(handshake + 1);
+			sge.length = sizeof(struct rdma_handshake);
+			sge.lkey = ibv_mr_handshake->lkey;
+			rc = ibv_post_recv(child_cm_id->qp, &wr, &bad_wr);
+			if (rc != 0) {
+				SPDK_ERRLOG("post recv failed\n");
+				return -1;
+			}
+
+			struct rdma_conn_param conn_param = {};
+
+			conn_param.responder_resources = 16;
+			conn_param.initiator_depth = 16;
+			conn_param.retry_count = 7;
+			conn_param.rnr_retry_count = 7;
+			rc = rdma_accept(child_cm_id, &conn_param);
+
+			if (rc != 0) {
+				SPDK_ERRLOG("accept err\n");
+				return -EINVAL;
+			}
+			pdisk->cm_id = child_cm_id;
+			pdisk->cq = ibv_cq;
+			pdisk->remote_handshake = handshake + 1;
+			pdisk->mr_handshake = ibv_mr_handshake;
+			pdisk->pd = ibv_pd;
+			pdisk->rdma_status = PERSIST_RDMA_ACCEPTED;
+			break;
+		}
+		case PERSIST_RDMA_ACCEPTED:
+		{
+			struct rdma_cm_event* established_event;
+			rc = rdma_get_cm_event(pdisk->rdma_channel, &established_event);
+			if (rc != 0) {
+				if (errno == EAGAIN) {
+					// waiting for establish event
+				}
+				else {
+					SPDK_ERRLOG("Unexpected CM error %d\n", errno);
+				}
+				return SPDK_POLLER_IDLE;
+			}
+
+			if (established_event->event != RDMA_CM_EVENT_ESTABLISHED) {
+				SPDK_ERRLOG("incorrect established event %d\n", established_event->event);
+				printf("err = %d\n", errno);
+				return 1;
+			}
+			SPDK_NOTICELOG("connected. waiting for handshake ...\n");
+			pdisk->rdma_status = PERSIST_RDMA_ESTABLISHED;
+			break;
+		}
+		case PERSIST_RDMA_ESTABLISHED:
+		{
+			struct ibv_send_wr send_wr, *bad_send_wr = NULL;
+			struct ibv_mr* ibv_mr_circular;
+			memset(&send_wr, 0, sizeof(send_wr));
+
+			struct ibv_wc wc;
+			int ret = ibv_poll_cq(pdisk->cq, 1, &wc);
+			if (ret < 0) {
+				SPDK_ERRLOG("ibv_poll_cq failed\n");
+				return SPDK_POLLER_IDLE;
+			}
+
+			if (ret == 0) {
+				return SPDK_POLLER_IDLE;
+			}
+
+			if (wc.status != IBV_WC_SUCCESS) {
+				SPDK_ERRLOG("WC bad status %d\n", wc.status);
+				return SPDK_POLLER_IDLE;
+			}
+
+			if (wc.wr_id == 1) {
+				// recv complete
+				uint64_t buffer_len = pdisk->remote_handshake->block_cnt * pdisk->remote_handshake->block_size;
+				SPDK_NOTICELOG("received remote addr %p rkey %d length %ld (%ld MB)\n",
+					pdisk->remote_handshake->base_addr,
+					pdisk->remote_handshake->rkey,
+					buffer_len,
+					buffer_len / 1048576);
+
+				pdisk->malloc_buf = spdk_zmalloc(buffer_len,
+					2 * 1024 * 1024,
+					NULL,
+					SPDK_ENV_LCORE_ID_ANY,
+					SPDK_MALLOC_DMA);
+				
+				pdisk->destage_info = spdk_zmalloc(pdisk->remote_handshake->block_size,
+					2 * 1024 * 1024,
+					NULL,
+					SPDK_ENV_LCORE_ID_ANY,
+					SPDK_MALLOC_DMA);
+
+				ibv_mr_circular = ibv_reg_mr(
+					pdisk->pd,
+					pdisk->malloc_buf,
+					buffer_len,
+					IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE);
+
+				pdisk->mr = ibv_mr_circular;
+				struct rdma_handshake* handshake = pdisk->remote_handshake - 1;
+				struct ibv_sge send_sge;
+				
+				handshake->base_addr = pdisk->malloc_buf;
+				handshake->rkey = ibv_mr_circular->rkey;
+				handshake->block_cnt = pdisk->remote_handshake->block_cnt;
+				handshake->block_size = pdisk->remote_handshake->block_size;
+
+				send_wr.wr_id = 2;
+				send_wr.opcode = IBV_WR_SEND;
+				send_wr.sg_list = &send_sge;
+				send_wr.num_sge = 1;
+				send_wr.send_flags = IBV_SEND_SIGNALED;
+
+				send_sge.addr = (uint64_t)handshake;
+				send_sge.length = sizeof(struct rdma_handshake);
+				send_sge.lkey = pdisk->mr_handshake->lkey;
+				
+				rc = ibv_post_send(pdisk->cm_id->qp, &send_wr, &bad_send_wr);
+				if (rc != 0) {
+					SPDK_ERRLOG("post send failed\n");
+					return 1;
+				}
+				SPDK_NOTICELOG("sent local addr %p rkey %d length %ld\n",
+					handshake->base_addr,
+					handshake->rkey,
+					buffer_len);
+			}
+			else if (wc.wr_id == 2) {
+				SPDK_NOTICELOG("send req complete\n");
+				SPDK_NOTICELOG("rdma handshake complete\n");
+				pdisk->rdma_status = PERSIST_RDMA_CONNECTED;
+			}
+			break;
+		}
+		case PERSIST_RDMA_CONNECTED:
+		{
+			return SPDK_POLLER_IDLE;
+		}
+	}
+
+	return SPDK_POLLER_BUSY;
 }
 
 static int
 persist_create_channel_cb(void *io_device, void *ctx)
 {
-	SPDK_DEBUGLOG(bdev_persist, "enter\n");
+	SPDK_NOTICELOG("enter create channel\n");
 	struct persist_disk* pdisk = io_device;
 	struct persist_channel *ch = ctx;
 	ch->pdisk = pdisk;
 
-	pdisk->destage_poller = SPDK_POLLER_REGISTER(persist_destage_poller, pdisk, 5);
-	if (!pdisk->destage_poller) {
-		SPDK_ERRLOG("Failed to register persist rdma poller\n");
-		return -ENOMEM;
-	}
 
 	return 0;
 }
@@ -554,9 +807,10 @@ persist_create_channel_cb(void *io_device, void *ctx)
 static void
 persist_destroy_channel_cb(void *io_device, void *ctx)
 {
-	struct persist_disk *pdisk = io_device;
+	SPDK_NOTICELOG("enter destroy\n");
 
-	spdk_poller_unregister(&pdisk->destage_poller);
+	// spdk_poller_unregister(&pdisk->destage_poller);
+	// spdk_poller_unregister(&pdisk->rdma_poller);
 }
 
 
@@ -619,8 +873,6 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 		spdk_uuid_generate(&pdisk->disk.uuid);
 	}
 
-	void* handshake_buffer = spdk_zmalloc(2 * sizeof(struct rdma_handshake), 2 * 1024 * 1024, NULL,
-					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 	
 	// int n = 0;
 	// struct ibv_device** ibv_list = ibv_get_device_list(&n);
@@ -631,11 +883,12 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 	// }
 
 	struct rdma_event_channel* rdma_channel = rdma_create_event_channel();
+	pdisk->rdma_channel = rdma_channel;
 
 	struct rdma_cm_id* cm_id = NULL;
 	rc = rdma_create_id(rdma_channel, &cm_id, NULL, RDMA_PS_TCP);
 	if (rc != 0) {
-		printf("rdma_create_id failed\n");
+		SPDK_ERRLOG("rdma_create_id failed\n");
 		return 1;
 	}
 
@@ -646,202 +899,23 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 	hints.ai_flags = AI_PASSIVE;
 	rc = getaddrinfo(ip, port, &hints, &addr_res);
 	if (rc != 0) {
-		printf("getaddrinfo failed\n");
+		SPDK_ERRLOG("getaddrinfo failed\n");
 		return 1;
 	}
 	memcpy(&addr, addr_res->ai_addr, sizeof(addr));
 	rc = rdma_bind_addr(cm_id, (struct sockaddr*)&addr);
 	if (rc != 0) {
-		printf("rdma bind addr failed\n");
+		SPDK_ERRLOG("rdma bind addr failed\n");
 		return 1;
 	}
 	rc = rdma_listen(cm_id, 3);
 	if (rc != 0) {
-		printf("rdma listen failed\n");
+		SPDK_ERRLOG("rdma listen failed\n");
 		return 1;
 	}
 
-	printf("listening on port %d\n", ntohs(addr.sin_port));
+	SPDK_NOTICELOG("listening on port %d\n", ntohs(addr.sin_port));
 
-	struct rdma_cm_event* connect_event, *established_event;
-	rdma_get_cm_event(rdma_channel, &connect_event);
-
-	if (connect_event->event != RDMA_CM_EVENT_CONNECT_REQUEST) {
-		SPDK_ERRLOG("invalid event type\n");
-		return 1;
-	}
-
-	printf("received conn request\n");
-	struct ibv_context* ibv_context = connect_event->id->verbs;
-	struct ibv_device_attr device_attr = {};
-	ibv_query_device(ibv_context, &device_attr);
-	struct ibv_pd* ibv_pd = ibv_alloc_pd(ibv_context);
-	struct ibv_mr* ibv_mr_handshake = ibv_reg_mr(ibv_pd,
-		handshake_buffer,
-		2 * sizeof(struct rdma_handshake),
-		IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
-	
-	struct ibv_mr* ibv_mr_circular;
-
-	struct ibv_cq* ibv_cq = ibv_create_cq(ibv_context, 4096, NULL, NULL, 0);
-	assert(ibv_cq != NULL);
-	assert(ibv_mr_handshake != NULL);
-	assert(ibv_context != NULL);
-	assert(ibv_pd != NULL);
-
-	// no SRQ here - only one qp
-	// TODO: fine-tune these params; 
-	struct ibv_qp_init_attr init_attr = {
-		.send_cq = ibv_cq,
-		.recv_cq = ibv_cq,
-		.qp_type = IBV_QPT_RC,
-		.cap = {
-			.max_recv_sge = device_attr.max_sge,
-			.max_send_sge = device_attr.max_sge,
-			.max_send_wr = 256,
-			.max_recv_wr = 256,
-		}
-	};
-
-	rc = rdma_create_qp(connect_event->id, ibv_pd, &init_attr);
-	SPDK_NOTICELOG("rdma_create_qp returns %d\n", rc);
-
-	// the original cm id becomes useless from here.
-	struct rdma_cm_id* child_cm_id = connect_event->id;
-	rc = rdma_ack_cm_event(connect_event);
-	assert(rc == 0);
-	SPDK_NOTICELOG("acked conn request\n");
-
-	struct ibv_recv_wr wr, *bad_wr = NULL;
-	struct ibv_sge sge, send_sge;
-
-	struct rdma_handshake* handshake = handshake_buffer;
-
-	wr.wr_id = 1;
-	wr.next = NULL;
-	wr.sg_list = &sge;
-	wr.num_sge = 1;
-
-	sge.addr = (uint64_t)(handshake + 1);
-	sge.length = sizeof(struct rdma_handshake);
-	sge.lkey = ibv_mr_handshake->lkey;
-	rc = ibv_post_recv(child_cm_id->qp, &wr, &bad_wr);
-	if (rc != 0) {
-		SPDK_ERRLOG("post recv failed\n");
-		return -1;
-	}
-
-	struct rdma_conn_param conn_param = {};
-
-	conn_param.responder_resources = 16;
-	conn_param.initiator_depth = 16;
-	conn_param.retry_count = 7;
-	conn_param.rnr_retry_count = 7;
-	rc = rdma_accept(child_cm_id, &conn_param);
-
-	if (rc != 0) {
-		SPDK_ERRLOG("accept err\n");
-		return -EINVAL;
-	}
-	assert(rc == 0);
-
-	rdma_get_cm_event(rdma_channel, &established_event);
-	if (established_event->event != RDMA_CM_EVENT_ESTABLISHED) {
-		SPDK_ERRLOG("incorrect established event %d\n", established_event->event);
-		printf("err = %d\n", errno);
-		return 1;
-	}
-
-	SPDK_NOTICELOG("connected. posting send...\n");
-
-	struct ibv_send_wr send_wr, *bad_send_wr = NULL;
-	memset(&send_wr, 0, sizeof(send_wr));
-
-	struct ibv_wc wc;
-	bool handshake_send_cpl = false;
-	bool handshake_recv_cpl = false;
-	while (!handshake_send_cpl || !handshake_recv_cpl)
-	{
-		int ret = ibv_poll_cq(ibv_cq, 1, &wc);
-		if (ret < 0) {
-			SPDK_ERRLOG("ibv_poll_cq failed\n");
-			return -EINVAL;
-		}
-
-		if (ret == 0) {
-			continue;
-		}
-
-		if (wc.status != IBV_WC_SUCCESS) {
-			SPDK_ERRLOG("WC bad status %d\n", wc.status);
-			return 1;
-		}
-
-		if (wc.wr_id == 1) {
-			// recv complete
-			struct rdma_handshake* remote_handshake = handshake + 1;
-			uint64_t buffer_len = remote_handshake->block_cnt * remote_handshake->block_size;
-			SPDK_NOTICELOG("received remote addr %p rkey %d length %ld (%ld MB)\n",
-				remote_handshake->base_addr,
-				remote_handshake->rkey,
-				buffer_len,
-				buffer_len / 1048576);
-			handshake_recv_cpl = true;
-
-			pdisk->malloc_buf = spdk_zmalloc(buffer_len,
-				2 * 1024 * 1024,
-				NULL,
-				SPDK_ENV_LCORE_ID_ANY,
-				SPDK_MALLOC_DMA);
-			
-			pdisk->destage_info = spdk_zmalloc(remote_handshake->block_size,
-				2 * 1024 * 1024,
-				NULL,
-				SPDK_ENV_LCORE_ID_ANY,
-				SPDK_MALLOC_DMA);
-
-			ibv_mr_circular = ibv_reg_mr(
-				ibv_pd,
-				pdisk->malloc_buf,
-				buffer_len,
-				IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE);
-			
-			handshake->base_addr = pdisk->malloc_buf;
-			handshake->rkey = ibv_mr_circular->rkey;
-			handshake->block_cnt = remote_handshake->block_cnt;
-			handshake->block_size = remote_handshake->block_size;
-
-			send_wr.wr_id = 2;
-			send_wr.opcode = IBV_WR_SEND;
-			send_wr.sg_list = &send_sge;
-			send_wr.num_sge = 1;
-			send_wr.send_flags = IBV_SEND_SIGNALED;
-
-			send_sge.addr = (uint64_t)handshake;
-			send_sge.length = sizeof(struct rdma_handshake);
-			send_sge.lkey = ibv_mr_handshake->lkey;
-			
-			rc = ibv_post_send(child_cm_id->qp, &send_wr, &bad_send_wr);
-			if (rc != 0) {
-				printf("post send failed\n");
-				return 1;
-			}
-			SPDK_NOTICELOG("sent local addr %p rkey %d length %ld\n",
-				handshake->base_addr,
-				handshake->rkey,
-				buffer_len);
-		}
-		else if (wc.wr_id == 2) {
-			printf("send req complete\n");
-			handshake_send_cpl = true;
-		}
-	}
-
-	printf("rdma handshake complete\n");
-	pdisk->cm_id = child_cm_id;
-	pdisk->cq = ibv_cq;
-	pdisk->mr = ibv_mr_circular;
-	pdisk->remote_handshake = handshake + 1;
 
 	pdisk->disk.ctxt = pdisk;
 	pdisk->disk.fn_table = &persist_fn_table;
@@ -857,6 +931,18 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 	spdk_io_device_register(pdisk, persist_create_channel_cb,
 				persist_destroy_channel_cb, sizeof(struct persist_channel),
 				"bdev_persist");
+
+	pdisk->destage_poller = SPDK_POLLER_REGISTER(persist_destage_poller, pdisk, 5);
+	if (!pdisk->destage_poller) {
+		SPDK_ERRLOG("Failed to register persist destage poller\n");
+		return -ENOMEM;
+	}
+
+	pdisk->rdma_poller = SPDK_POLLER_REGISTER(persist_rdma_poller, pdisk, 5);
+	if (!pdisk->rdma_poller) {
+		SPDK_ERRLOG("Failed to register persist rdma poller\n");
+		return -ENOMEM;
+	}
 
 	SPDK_DEBUGLOG(bdev_persist, "before reg\n");
 	rc = spdk_bdev_register(&pdisk->disk);
@@ -894,74 +980,3 @@ bdev_persist_deinitialize(void)
 }
 
 SPDK_LOG_REGISTER_COMPONENT(bdev_persist)
-
-// SPDK_TRACE_REGISTER_FN(persist_trace, "persist", TRACE_GROUP_BDEV)
-// {
-// 	struct spdk_trace_tpoint_opts opts[] = {
-// 		{
-// 			"BDEV_IO_START", TRACE_BDEV_IO_START,
-// 			OWNER_BDEV, OBJECT_BDEV_IO, 1,
-// 			{
-// 				{ "type", SPDK_TRACE_ARG_TYPE_INT, 8 },
-// 				{ "ctx", SPDK_TRACE_ARG_TYPE_PTR, 8 },
-// 				{ "offset", SPDK_TRACE_ARG_TYPE_INT, 8 },
-// 				{ "len", SPDK_TRACE_ARG_TYPE_INT, 8 }
-// 			}
-// 		},
-// 		{
-// 			"BDEV_IO_DONE", TRACE_BDEV_IO_DONE,
-// 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
-// 			{{ "ctx", SPDK_TRACE_ARG_TYPE_PTR, 8 }}
-// 		},
-// 		{
-// 			"BDEV_IOCH_CREATE", TRACE_BDEV_IOCH_CREATE,
-// 			OWNER_BDEV, OBJECT_NONE, 1,
-// 			{
-// 				{ "name", SPDK_TRACE_ARG_TYPE_STR, 40 },
-// 				{ "thread_id", SPDK_TRACE_ARG_TYPE_INT, 8}
-// 			}
-// 		},
-// 		{
-// 			"BDEV_IOCH_DESTROY", TRACE_BDEV_IOCH_DESTROY,
-// 			OWNER_BDEV, OBJECT_NONE, 0,
-// 			{
-// 				{ "name", SPDK_TRACE_ARG_TYPE_STR, 40 },
-// 				{ "thread_id", SPDK_TRACE_ARG_TYPE_INT, 8}
-// 			}
-// 		},
-// 		{
-// 			"PERSIST_W_MEMCPY_START", TRACE_BDEV_WRITE_MEMCPY_START,
-// 			OWNER_BDEV, OBJECT_BDEV_IO, 1,
-// 			{
-// 			}
-// 		},
-// 		{
-// 			"PERSIST_W_MEMCPY_END", TRACE_BDEV_WRITE_MEMCPY_END,
-// 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
-// 			{
-// 			}
-// 		},
-// 		{
-// 			"PERSIST_IB_WRITE_START", TRACE_BDEV_RDMA_POST_SEND_WRITE_START,
-// 			OWNER_BDEV, OBJECT_BDEV_IO, 1,
-// 			{
-// 			}
-// 		},
-// 		{
-// 			"PERSIST_IB_WRITE_END", TRACE_BDEV_RDMA_POST_SEND_WRITE_END,
-// 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
-// 			{
-// 			}
-// 		},
-// 		{
-// 			"PERSIST_CQ_POLL", TRACE_BDEV_CQ_POLL,
-// 			OWNER_BDEV, OBJECT_BDEV_IO, 0,
-// 			{
-// 			}
-// 		},
-// 	};
-
-// 	spdk_trace_register_owner(OWNER_BDEV, 'b');
-// 	spdk_trace_register_object(OBJECT_BDEV_IO, 'i');
-// 	spdk_trace_register_description_ext(opts, SPDK_COUNTOF(opts));
-// }

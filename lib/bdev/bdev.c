@@ -3626,6 +3626,7 @@ bdev_name_add(struct spdk_bdev_name *bdev_name, struct spdk_bdev *bdev, const ch
 	}
 
 	bdev_name->bdev = bdev;
+	SPDK_NOTICELOG("inserting %s...\n", name);
 
 	pthread_mutex_lock(&g_bdev_mgr.mutex);
 	tmp = RB_INSERT(bdev_name_tree, &g_bdev_mgr.bdev_names, bdev_name);
