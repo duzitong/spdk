@@ -292,19 +292,19 @@ bdev_persist_readv(struct persist_disk *pdisk,
 	pio->iov_offset = 0;
 	int rc;
 
-	if (iovcnt == 1) {
-		SPDK_NOTICELOG("use simple imple\n");
-		rc = spdk_nvme_ns_cmd_read(pdisk->ns,
-			pdisk->qpair,
-			iov[0].iov_base,
-			lba,
-			lba_count,
-			bdev_persist_read_done,
-			pio,
-			0);
+	// if (iovcnt == 1) {
+	// 	SPDK_NOTICELOG("use simple imple\n");
+	// 	rc = spdk_nvme_ns_cmd_read(pdisk->ns,
+	// 		pdisk->qpair,
+	// 		iov[0].iov_base,
+	// 		lba,
+	// 		lba_count,
+	// 		bdev_persist_read_done,
+	// 		pio,
+	// 		0);
 
-	}
-	else {
+	// }
+	// else {
 		rc = spdk_nvme_ns_cmd_readv(pdisk->ns,
 			pdisk->qpair,
 			lba,
@@ -316,7 +316,7 @@ bdev_persist_readv(struct persist_disk *pdisk,
 			bdev_persist_next_sge
 			);
 
-	}
+	// }
 
 
 	if (spdk_unlikely(rc != 0)) {
