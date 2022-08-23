@@ -207,6 +207,7 @@ static int bdev_persist_check_boundary(uint64_t offset, size_t len, struct persi
 
 static void
 bdev_persist_reset_sgl(void *ref, uint32_t sgl_offset) {
+	SPDK_NOTICELOG("reset sgl\n");
 	struct persist_io *pio = ref;
 	struct iovec *iov;
 
@@ -223,6 +224,7 @@ bdev_persist_reset_sgl(void *ref, uint32_t sgl_offset) {
 
 static int
 bdev_persist_next_sge(void *ref, void **address, uint32_t *length) {
+	SPDK_NOTICELOG("next sge\n");
 	struct persist_io *pio = ref;
 	struct iovec *iov;
 
