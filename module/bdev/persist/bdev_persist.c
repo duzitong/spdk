@@ -289,17 +289,34 @@ bdev_persist_readv(struct persist_disk *pdisk,
 	pio->iovcnt = iovcnt;
 	pio->iovpos = 0;
 	pio->iov_offset = 0;
+	int rc;
 
-	int rc = spdk_nvme_ns_cmd_readv(pdisk->ns,
-		pdisk->qpair,
-		lba,
-		lba_count,
-		bdev_persist_read_done,
-		pio,
-		0,
-		bdev_persist_reset_sgl,
-		bdev_persist_next_sge
-		);
+	if (iovcnt == 1) {
+		SPDK_NOTICELOG("use simple imple\n");
+		rc = spdk_nvme_ns_cmd_read(pdisk->ns,
+			pdisk->qpair,
+			iov[0].iov_base,
+			lba,
+			lba_count,
+			bdev_persist_read_done,
+			pio,
+			0);
+
+	}
+	else {
+		rc = spdk_nvme_ns_cmd_readv(pdisk->ns,
+			pdisk->qpair,
+			lba,
+			lba_count,
+			bdev_persist_read_done,
+			pio,
+			0,
+			bdev_persist_reset_sgl,
+			bdev_persist_next_sge
+			);
+
+	}
+
 
 	if (spdk_unlikely(rc != 0)) {
 		SPDK_ERRLOG("read io failed: %d\n", rc);
