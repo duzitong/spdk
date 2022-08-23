@@ -191,7 +191,8 @@ bdev_target_readv(struct target_disk *mdisk,
 	SPDK_NOTICELOG("read %zu bytes from offset %#" PRIx64 ", iovcnt=%d\n",
 		      len, offset, iovcnt);
 
-	if (offset / mdisk->disk.blocklen == mdisk->disk.blockcnt - 1) {
+	// if (offset / mdisk->disk.blocklen == mdisk->disk.blockcnt - 1) {
+	if (false) {
 		// read last block (destage metadata)
 		// first, RDMA read from remote
 		// then in the RDMA cq poll callback, do a memcpy into iovs
@@ -255,7 +256,6 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 	// for RDMA write
 	void* rdma_src = dst;
 	void* rdma_dst = mdisk->remote_handshake->base_addr + offset;
-		return;
 
 	int rc;
 	
@@ -270,7 +270,7 @@ bdev_target_writev_with_md(struct target_disk *mdisk,
 		return;
 	}
 
-	SPDK_DEBUGLOG(bdev_target, "wrote %zu bytes to offset %#" PRIx64 ", iovcnt=%d\n",
+	SPDK_NOTICELOG("wrote %zu bytes to offset %#" PRIx64 ", iovcnt=%d\n",
 		      len, offset, iovcnt);
 	
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_BDEV_WRITE_MEMCPY_START, 0, 0, (uintptr_t)bdev_io);
@@ -676,7 +676,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	struct ibv_mr* ibv_mr = ibv_reg_mr(ibv_pd,
 		mdisk->malloc_buf,
 		num_blocks * block_size + 2 * sizeof(struct rdma_handshake),
-		IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+		IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
 
 	struct ibv_cq* ibv_cq = ibv_create_cq(ibv_context, 256, NULL, NULL, 0);
 

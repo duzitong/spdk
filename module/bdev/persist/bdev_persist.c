@@ -605,7 +605,7 @@ static int persist_rdma_poller(void* ctx) {
 			struct ibv_mr* ibv_mr_handshake = ibv_reg_mr(ibv_pd,
 				handshake_buffer,
 				2 * sizeof(struct rdma_handshake),
-				IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+				IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
 			
 
 			struct ibv_cq* ibv_cq = ibv_create_cq(ibv_context, 4096, NULL, NULL, 0);
