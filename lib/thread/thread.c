@@ -944,6 +944,8 @@ thread_poll(struct spdk_thread *thread, uint32_t max_msgs, uint64_t now)
 		}
 
 		if (strcmp("rpc_subsystem_poll", poller->name) != 0 && 
+			strcmp("persist_rdma_poller", poller->name) != 0 &&
+			strcmp("persist_destage_poller", poller->name) != 0 &&
 			strcmp("bdev_nvme_poll_adminq", poller->name) != 0) {
 			SPDK_NOTICELOG("Executing timed poller %s\n", poller->name);
 		}
