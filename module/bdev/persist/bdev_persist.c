@@ -208,7 +208,7 @@ static int bdev_persist_check_boundary(uint64_t offset, size_t len, struct persi
 
 static void
 bdev_persist_reset_sgl(void *ref, uint32_t sgl_offset) {
-	SPDK_NOTICELOG("reset sgl\n");
+	// SPDK_NOTICELOG("reset sgl\n");
 	struct persist_io *pio = ref;
 	struct iovec *iov;
 
@@ -225,7 +225,7 @@ bdev_persist_reset_sgl(void *ref, uint32_t sgl_offset) {
 
 static int
 bdev_persist_next_sge(void *ref, void **address, uint32_t *length) {
-	SPDK_NOTICELOG("next sge\n");
+	// SPDK_NOTICELOG("next sge\n");
 	struct persist_io *pio = ref;
 	struct iovec *iov;
 
@@ -283,8 +283,8 @@ bdev_persist_readv(struct persist_disk *pdisk,
 		return;
 	}
 
-	SPDK_NOTICELOG("read %zu bytes from offset %#" PRIx64 ", iovcnt=%d\n",
-		      lba_count * block_size, lba * block_size, iovcnt);
+	// SPDK_NOTICELOG("read %zu bytes from offset %#" PRIx64 ", iovcnt=%d\n",
+	// 	      lba_count * block_size, lba * block_size, iovcnt);
 
 	pio->iovs = iov;
 	pio->iovcnt = iovcnt;
