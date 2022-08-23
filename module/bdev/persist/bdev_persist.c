@@ -280,7 +280,7 @@ bdev_persist_readv(struct persist_disk *pdisk,
 	}
 
 	SPDK_DEBUGLOG(bdev_persist, "read %zu bytes from offset %#" PRIx64 ", iovcnt=%d\n",
-		      len, offset, iovcnt);
+		      lba_count * block_size, lba * block_size, iovcnt);
 
 	pio->iovs = iov;
 	pio->iovcnt = iovcnt;
