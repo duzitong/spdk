@@ -256,7 +256,7 @@ static void bdev_persist_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
 	struct persist_io *pio = ref;
 	struct spdk_bdev_io *bdev_io = spdk_bdev_io_from_ctx(pio);
 	if (spdk_likely(spdk_nvme_cpl_is_success(cpl))) {
-		SPDK_NOTICELOG("read successful\n");
+		// SPDK_NOTICELOG("read successful\n");
 		spdk_bdev_io_complete(bdev_io, SPDK_BDEV_IO_STATUS_SUCCESS);
 	}
 	else {
@@ -324,7 +324,7 @@ bdev_persist_readv(struct persist_disk *pdisk,
 		// spdk_bdev_io_complete(spdk_bdev_io_from_ctx(pio), SPDK_BDEV_IO_STATUS_FAILED);
 		return;
 	}
-	SPDK_NOTICELOG("Read ret\n");
+	// SPDK_NOTICELOG("Read ret\n");
 	// spdk_bdev_io_complete(spdk_bdev_io_from_ctx(pio), SPDK_BDEV_IO_STATUS_SUCCESS);
 }
 
