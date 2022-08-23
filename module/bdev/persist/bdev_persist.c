@@ -80,6 +80,7 @@ struct persist_disk {
 	struct rdma_handshake* remote_handshake;
 	struct spdk_poller* destage_poller;
 	struct spdk_poller* rdma_poller;
+	struct spdk_poller* nvme_poller;
 	struct ibv_wc wc_buf[PERSIST_WC_BATCH_SIZE];
 	struct spdk_nvme_ctrlr* ctrlr;
 	struct spdk_nvme_ns* ns;
@@ -476,6 +477,17 @@ attach_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
 	if (num_ns != 1) {
 		SPDK_ERRLOG("Unexpected # of namespaces %d\n", num_ns);
 	}
+}
+
+static int
+persist_nvme_poller(void* ctx) {
+	struct persist_disk* pdisk = ctx;
+	int rc = spdk_nvme_qpair_process_completions(pdisk->qpair, 0);
+	if (rc < 0) {
+		SPDK_ERRLOG("Poll nvme failed\n");
+	}
+
+	return rc == 0 ? SPDK_POLLER_IDLE : SPDK_POLLER_BUSY;
 }
 
 static int
@@ -962,6 +974,12 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 	pdisk->rdma_poller = SPDK_POLLER_REGISTER(persist_rdma_poller, pdisk, 5);
 	if (!pdisk->rdma_poller) {
 		SPDK_ERRLOG("Failed to register persist rdma poller\n");
+		return -ENOMEM;
+	}
+
+	pdisk->nvme_poller = SPDK_POLLER_REGISTER(persist_nvme_poller, pdisk, 5);
+	if (!pdisk->nvme_poller) {
+		SPDK_ERRLOG("Failed to register persist nvme poller\n");
 		return -ENOMEM;
 	}
 
