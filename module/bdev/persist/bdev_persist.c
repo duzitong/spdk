@@ -299,7 +299,7 @@ bdev_persist_readv(struct persist_disk *pdisk,
 		);
 
 	if (spdk_unlikely(rc != 0)) {
-		SPDK_ERRLOG("read io failed\n");
+		SPDK_ERRLOG("read io failed: %d\n", rc);
 		spdk_bdev_io_complete(spdk_bdev_io_from_ctx(pio), SPDK_BDEV_IO_STATUS_FAILED);
 		return;
 	}
