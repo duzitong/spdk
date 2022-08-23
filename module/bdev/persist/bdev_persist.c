@@ -778,7 +778,7 @@ static int persist_rdma_poller(void* ctx) {
 					pdisk->pd,
 					pdisk->malloc_buf,
 					buffer_len,
-					IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE);
+					IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
 
 				pdisk->mr = ibv_mr_circular;
 				struct rdma_handshake* handshake = pdisk->remote_handshake - 1;
