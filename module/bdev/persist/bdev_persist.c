@@ -363,7 +363,6 @@ bdev_persist_io_type_supported(void *ctx, enum spdk_bdev_io_type io_type)
 {
 	switch (io_type) {
 	case SPDK_BDEV_IO_TYPE_READ:
-	case SPDK_BDEV_IO_TYPE_WRITE:
 		return true;
 	default:
 		return false;
@@ -934,17 +933,17 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 				persist_destroy_channel_cb, sizeof(struct persist_channel),
 				"bdev_persist");
 
-	pdisk->destage_poller = SPDK_POLLER_REGISTER(persist_destage_poller, pdisk, 5);
-	if (!pdisk->destage_poller) {
-		SPDK_ERRLOG("Failed to register persist destage poller\n");
-		return -ENOMEM;
-	}
+	// pdisk->destage_poller = SPDK_POLLER_REGISTER(persist_destage_poller, pdisk, 5);
+	// if (!pdisk->destage_poller) {
+	// 	SPDK_ERRLOG("Failed to register persist destage poller\n");
+	// 	return -ENOMEM;
+	// }
 
-	pdisk->rdma_poller = SPDK_POLLER_REGISTER(persist_rdma_poller, pdisk, 5);
-	if (!pdisk->rdma_poller) {
-		SPDK_ERRLOG("Failed to register persist rdma poller\n");
-		return -ENOMEM;
-	}
+	// pdisk->rdma_poller = SPDK_POLLER_REGISTER(persist_rdma_poller, pdisk, 5);
+	// if (!pdisk->rdma_poller) {
+	// 	SPDK_ERRLOG("Failed to register persist rdma poller\n");
+	// 	return -ENOMEM;
+	// }
 
 	SPDK_DEBUGLOG(bdev_persist, "before reg\n");
 	rc = spdk_bdev_register(&pdisk->disk);
