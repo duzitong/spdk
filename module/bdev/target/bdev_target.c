@@ -188,10 +188,10 @@ bdev_target_readv(struct target_disk *mdisk,
 		return;
 	}
 
-	SPDK_DEBUGLOG(bdev_target, "read %zu bytes from offset %#" PRIx64 ", iovcnt=%d\n",
+	SPDK_NOTICELOG("read %zu bytes from offset %#" PRIx64 ", iovcnt=%d\n",
 		      len, offset, iovcnt);
 
-	if (offset / mdisk->disk.blocklen == mdisk->disk.blockcnt - 2) {
+	if (offset / mdisk->disk.blocklen == mdisk->disk.blockcnt - 1) {
 		// read last block (destage metadata)
 		// first, RDMA read from remote
 		// then in the RDMA cq poll callback, do a memcpy into iovs
