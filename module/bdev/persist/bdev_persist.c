@@ -89,6 +89,9 @@ struct persist_disk {
 	struct persist_destage_context destage_context;
 	uint64_t prev_seq;
 	enum persist_rdma_status rdma_status;
+	// uint32_t io_queue_head;
+	// uint32_t io_queue_size;
+	// uint64_t* io_queue_offset;
 
 	TAILQ_ENTRY(persist_disk)	link;
 };
@@ -445,6 +448,9 @@ attach_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
 	struct persist_disk* disk = (struct persist_disk*)cb_ctx;
 
 	SPDK_DEBUGLOG(bdev_persist, "Attached to %s\n", trid->traddr);
+	SPDK_NOTICELOG("IO queue = %d, IO request = %d\n",
+		opts->io_queue_size,
+		opts->io_queue_requests);
 	disk->ctrlr = ctrlr;
 
 	/*
@@ -570,7 +576,7 @@ persist_destage_poller(void *ctx)
 		
 		if (rc != 0) {
 			// TODO: what to do when writing SSD fails?
-			SPDK_ERRLOG("Write SSD failed\n");
+			SPDK_ERRLOG("Write SSD failed with rc = %d\n", rc);
 			pdisk->destage_context.remaining--;
 			break;
 		}
@@ -583,7 +589,12 @@ persist_destage_poller(void *ctx)
 
 	// give up time slice to wait for every IO to complete
 	while (pdisk->destage_context.remaining != 0) {
-		sched_yield();
+		rc = spdk_nvme_qpair_process_completions(pdisk->qpair, 0);
+		if (rc < 0) {
+			SPDK_ERRLOG("qpair failed %d\n", rc);
+			break;
+		}
+		// sched_yield();
 	}
 
 	if (old_info.destage_head == pdisk->destage_info->destage_head
