@@ -516,7 +516,10 @@ persist_destage_poller(void *ctx)
 
 	while (true) {
 		struct wal_metadata* metadata = pdisk->malloc_buf + pdisk->destage_info->destage_head * pdisk->disk.blocklen;
-		if (metadata->version != PERSIST_METADATA_VERSION) {
+		// if we get unlucky (lucky?), then the next block may be the one for the last
+		// round.
+		if (metadata->version != PERSIST_METADATA_VERSION
+			|| metadata->seq < pdisk->prev_seq) {
 			struct wal_metadata* next_round_metadata = pdisk->malloc_buf;
 			if (next_round_metadata->round == pdisk->destage_info->destage_round) {
 				// head not in next round yet
@@ -564,7 +567,6 @@ persist_destage_poller(void *ctx)
 				metadata->seq);
 		}
 
-		pdisk->destage_context.remaining++;
 		rc = spdk_nvme_ns_cmd_write(pdisk->ns,
 			pdisk->qpair,
 			payload,
@@ -581,9 +583,10 @@ persist_destage_poller(void *ctx)
 				// too many requests.
 				SPDK_ERRLOG("Write SSD failed with rc = %d\n", rc);
 			}
-			pdisk->destage_context.remaining--;
 			break;
 		}
+
+		pdisk->destage_context.remaining++;
 
 		// only updating head pointer
 		// as round only changes when going back to the start of the array
@@ -988,7 +991,7 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 				persist_destroy_channel_cb, sizeof(struct persist_channel),
 				"bdev_persist");
 
-	pdisk->destage_poller = SPDK_POLLER_REGISTER(persist_destage_poller, pdisk, 5);
+	pdisk->destage_poller = SPDK_POLLER_REGISTER(persist_destage_poller, pdisk, 0);
 	if (!pdisk->destage_poller) {
 		SPDK_ERRLOG("Failed to register persist destage poller\n");
 		return -ENOMEM;

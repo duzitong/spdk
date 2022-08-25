@@ -133,7 +133,7 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 
 		
 		wal_bdev->pending_writes_poller = SPDK_POLLER_REGISTER(wal_bdev_submit_pending_writes, wal_bdev, 0);
-		wal_bdev->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_bdev, 1000 * 1000);
+		wal_bdev->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_bdev, 10);
 		wal_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_bdev, 10);
 		wal_bdev->stat_poller = SPDK_POLLER_REGISTER(wal_bdev_stat_report, wal_bdev, 30*1000*1000);
 
@@ -1692,7 +1692,8 @@ static void wal_bdev_mover_do_update(struct spdk_bdev_io* bdev_io, bool success,
 
 	struct wal_bdev* bdev = ctx;
 	spdk_bdev_free_io(bdev_io);
-	SPDK_NOTICELOG("Got head %ld round %ld\n", bdev->log_info->head, bdev->log_info->round);
+	SPDK_DEBUGLOG(bdev_wal,
+		"Got head %ld round %ld\n", bdev->log_info->head, bdev->log_info->round);
 	bdev->log_head = bdev->log_info->head;
 	bdev->head_round = bdev->log_info->round;
 }
