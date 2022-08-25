@@ -1693,15 +1693,8 @@ static void wal_bdev_mover_do_update(struct spdk_bdev_io* bdev_io, bool success,
 	struct wal_bdev* bdev = ctx;
 	spdk_bdev_free_io(bdev_io);
 	SPDK_NOTICELOG("Got head %ld round %ld\n", bdev->log_info->head, bdev->log_info->round);
-	if (bdev->log_info->head == 0 && bdev->log_info->round == 0) {
-		// TODO: hack
-		bdev->log_head = bdev->log_tail;
-		bdev->head_round = bdev->tail_round;
-	}
-	else {
-		bdev->log_head = bdev->log_info->head;
-		bdev->head_round = bdev->log_info->round;
-	}
+	bdev->log_head = bdev->log_info->head;
+	bdev->head_round = bdev->log_info->round;
 }
 
 // static void
