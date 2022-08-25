@@ -973,11 +973,11 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 				persist_destroy_channel_cb, sizeof(struct persist_channel),
 				"bdev_persist");
 
-	// pdisk->destage_poller = SPDK_POLLER_REGISTER(persist_destage_poller, pdisk, 5);
-	// if (!pdisk->destage_poller) {
-	// 	SPDK_ERRLOG("Failed to register persist destage poller\n");
-	// 	return -ENOMEM;
-	// }
+	pdisk->destage_poller = SPDK_POLLER_REGISTER(persist_destage_poller, pdisk, 5);
+	if (!pdisk->destage_poller) {
+		SPDK_ERRLOG("Failed to register persist destage poller\n");
+		return -ENOMEM;
+	}
 
 	pdisk->rdma_poller = SPDK_POLLER_REGISTER(persist_rdma_poller, pdisk, 5);
 	if (!pdisk->rdma_poller) {
