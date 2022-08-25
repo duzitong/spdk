@@ -526,6 +526,7 @@ persist_destage_poller(void *ctx)
 			}
 			else if (next_round_metadata->round == pdisk->destage_info->destage_round + 1) {
 				SPDK_DEBUGLOG(bdev_persist, "Go back to block '0' during move.\n");
+				metadata = next_round_metadata;
 				if (metadata->version != PERSIST_METADATA_VERSION) {
 					// should not happen even before any IO comes, because of the round
 					SPDK_ERRLOG("Buffer head corrupted\n");
@@ -533,7 +534,6 @@ persist_destage_poller(void *ctx)
 				}
 				pdisk->destage_info->destage_head = 0;
 				pdisk->destage_info->destage_round++;
-				metadata = next_round_metadata;
 			}
 			else {
 				// should not happen
@@ -576,7 +576,11 @@ persist_destage_poller(void *ctx)
 		
 		if (rc != 0) {
 			// TODO: what to do when writing SSD fails?
-			SPDK_ERRLOG("Write SSD failed with rc = %d\n", rc);
+			if (spdk_unlikely(rc != -ENOMEM)) {
+				// we expect ENOMEM, as it always happens when client submit 
+				// too many requests.
+				SPDK_ERRLOG("Write SSD failed with rc = %d\n", rc);
+			}
 			pdisk->destage_context.remaining--;
 			break;
 		}
