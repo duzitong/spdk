@@ -1694,6 +1694,10 @@ static void wal_bdev_mover_do_update(struct spdk_bdev_io* bdev_io, bool success,
 	spdk_bdev_free_io(bdev_io);
 	SPDK_DEBUGLOG(bdev_wal,
 		"Got head %ld round %ld\n", bdev->log_info->head, bdev->log_info->round);
+	
+	if (bdev->log_info->head == -1 && bdev->log_info->round == -1) {
+		SPDK_WARNLOG("Got info from non-attached bdev. ")
+	}
 	bdev->log_head = bdev->log_info->head;
 	bdev->head_round = bdev->log_info->round;
 }

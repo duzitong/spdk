@@ -44,6 +44,7 @@ struct rpc_construct_persist {
 	char *uuid;
 	char *ip;
 	char *port;
+	bool attach_disk;
 };
 
 static void
@@ -60,6 +61,7 @@ static const struct spdk_json_object_decoder rpc_construct_persist_decoders[] = 
 	{"uuid", offsetof(struct rpc_construct_persist, uuid), spdk_json_decode_string, true},
 	{"ip", offsetof(struct rpc_construct_persist, ip), spdk_json_decode_string, true},
 	{"port", offsetof(struct rpc_construct_persist, port), spdk_json_decode_string, true},
+	{"attach_disk", offsetof(struct rpc_construct_persist, attach_disk), spdk_json_decode_bool, true},
 };
 
 static void
@@ -91,7 +93,7 @@ rpc_bdev_persist_create(struct spdk_jsonrpc_request *request,
 		uuid = &decoded_uuid;
 	}
 
-	rc = create_persist_disk(&bdev, req.name, req.ip, req.port, uuid);
+	rc = create_persist_disk(&bdev, req.name, req.ip, req.port, uuid, req.attach_disk);
 	if (rc) {
 		spdk_jsonrpc_send_error_response(request, rc, spdk_strerror(-rc));
 		goto cleanup;

@@ -55,7 +55,7 @@
 
 typedef void (*spdk_delete_persist_complete)(void *cb_arg, int bdeverrno);
 
-int create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, const char* port, const struct spdk_uuid *uuid);
+int create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, const char* port, const struct spdk_uuid *uuid, bool attach_disk);
 
 void delete_persist_disk(const char *name, spdk_delete_persist_complete cb_fn, void *cb_arg);
 

@@ -89,6 +89,8 @@ struct persist_disk {
 	struct persist_destage_context destage_context;
 	uint64_t prev_seq;
 	enum persist_rdma_status rdma_status;
+	// if false, then all nvme-related fields are null.
+	bool attach_disk;
 	// uint32_t io_queue_head;
 	// uint32_t io_queue_size;
 	// uint64_t* io_queue_offset;
@@ -137,8 +139,6 @@ struct persist_channel {
 };
 
 
-// static TAILQ_HEAD(, persist_disk) g_persist_disks = TAILQ_HEAD_INITIALIZER(g_persist_disks);
-
 int persist_disk_count = 0;
 
 static int bdev_persist_initialize(void);
@@ -166,8 +166,16 @@ persist_disk_free(struct persist_disk *persist_disk)
 	if (!persist_disk) {
 		return;
 	}
-	spdk_poller_unregister(&persist_disk->rdma_poller);
-	spdk_poller_unregister(&persist_disk->destage_poller);
+
+	if (persist_disk->rdma_poller) {
+		spdk_poller_unregister(&persist_disk->rdma_poller);
+	}
+	if (persist_disk->destage_poller) {
+		spdk_poller_unregister(&persist_disk->destage_poller);
+	}
+	if (persist_disk->nvme_poller) {
+		spdk_poller_unregister(&persist_disk->nvme_poller);
+	}
 	// TODO: find a way to detach the controller. right now the call seems to hang forever
 	// spdk_nvme_detach(persist_disk->ctrlr);
 
@@ -203,15 +211,8 @@ bdev_persist_check_iov_len(struct iovec *iovs, int iovcnt, size_t nbytes)
 	return nbytes != 0;
 }
 
-static int bdev_persist_check_boundary(uint64_t offset, size_t len, struct persist_disk* pdisk, bool is_read) {
-	uint64_t offset_end = is_read ? (offset + len) : (offset + len + pdisk->disk.md_len);
-	return !(
-		offset >= 0 && offset_end <= pdisk->disk.blockcnt * pdisk->disk.blocklen);
-}
-
 static void
 bdev_persist_reset_sgl(void *ref, uint32_t sgl_offset) {
-	// SPDK_NOTICELOG("reset sgl\n");
 	struct persist_io *pio = ref;
 	struct iovec *iov;
 
@@ -228,7 +229,6 @@ bdev_persist_reset_sgl(void *ref, uint32_t sgl_offset) {
 
 static int
 bdev_persist_next_sge(void *ref, void **address, uint32_t *length) {
-	// SPDK_NOTICELOG("next sge\n");
 	struct persist_io *pio = ref;
 	struct iovec *iov;
 
@@ -270,7 +270,6 @@ static void bdev_persist_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
 }
 
 static void bdev_persist_destage_done(void *ref, const struct spdk_nvme_cpl *cpl) {
-	// TODO
 	struct persist_disk* pdisk = ref;
 	pdisk->destage_context.remaining--;
 }
@@ -331,7 +330,7 @@ bdev_persist_readv(struct persist_disk *pdisk,
 	// spdk_bdev_io_complete(spdk_bdev_io_from_ctx(pio), SPDK_BDEV_IO_STATUS_SUCCESS);
 }
 
-static int _bdev_persist_submit_request(struct persist_channel *mch, struct spdk_bdev_io *bdev_io)
+static int _bdev_persist_submit_request(struct spdk_bdev_io *bdev_io)
 {
 	uint32_t block_size = bdev_io->bdev->blocklen;
 	// _log_md(bdev_io);
@@ -374,9 +373,14 @@ static int _bdev_persist_submit_request(struct persist_channel *mch, struct spdk
 
 static void bdev_persist_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_io)
 {
-	struct persist_channel *mch = spdk_io_channel_get_ctx(ch);
+	struct persist_disk* bdev = bdev_io->bdev->ctxt;
+	if (spdk_unlikely(!bdev->attach_disk)) {
+		SPDK_WARNLOG("Persist bdev not attached to disk but received IO requests. Should not happen frequently\n");
+		spdk_bdev_io_complete(bdev_io,
+				     SPDK_BDEV_IO_STATUS_SUCCESS);
+	}
 
-	if (_bdev_persist_submit_request(mch, bdev_io) != 0) {
+	if (_bdev_persist_submit_request(bdev_io) != 0) {
 		spdk_bdev_io_complete(bdev_io,
 				     SPDK_BDEV_IO_STATUS_FAILED);
 	}
@@ -541,7 +545,7 @@ persist_destage_poller(void *ctx)
 			else {
 				// should not happen
 				// TODO: error handling
-				SPDK_ERRLOG("Next round %d is not expected when this round is %d\n",
+				SPDK_ERRLOG("Next round %ld is not expected when this round is %ld\n",
 					next_round_metadata->round,
 					pdisk->destage_info->destage_round);
 				break;
@@ -594,14 +598,14 @@ persist_destage_poller(void *ctx)
 		pdisk->prev_seq++;
 	}
 
-	// give up time slice to wait for every IO to complete
+	// wait for every IO to complete
 	while (pdisk->destage_context.remaining != 0) {
+		// note that it may also complete some read requests, but we don't care.
 		rc = spdk_nvme_qpair_process_completions(pdisk->qpair, 0);
 		if (rc < 0) {
 			SPDK_ERRLOG("qpair failed %d\n", rc);
 			break;
 		}
-		// sched_yield();
 	}
 
 	if (old_info.destage_head == pdisk->destage_info->destage_head
@@ -750,7 +754,6 @@ static int persist_rdma_poller(void* ctx) {
 
 			if (established_event->event != RDMA_CM_EVENT_ESTABLISHED) {
 				SPDK_ERRLOG("incorrect established event %d\n", established_event->event);
-				printf("err = %d\n", errno);
 				return 1;
 			}
 			SPDK_NOTICELOG("connected. waiting for handshake ...\n");
@@ -834,6 +837,14 @@ static int persist_rdma_poller(void* ctx) {
 					handshake->base_addr,
 					handshake->rkey,
 					buffer_len);
+
+				if (!pdisk->attach_disk) {
+					SPDK_NOTICELOG("In pure memory mode, set the destage info to (-1, -1)\n");
+					struct destage_info* dst = pdisk->malloc_buf + 
+						pdisk->remote_handshake->block_size * (pdisk->remote_handshake->block_cnt - 1);
+					dst->destage_head = -1;
+					dst->destage_round = -1;
+				}
 			}
 			else if (wc.wr_id == 2) {
 				SPDK_NOTICELOG("send req complete\n");
@@ -875,38 +886,46 @@ persist_destroy_channel_cb(void *io_device, void *ctx)
 
 int
 create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, const char* port,
-			const struct spdk_uuid *uuid)
+			const struct spdk_uuid *uuid, bool attach_disk)
 {
 	SPDK_DEBUGLOG(bdev_persist, "in create disk\n");
 	struct persist_disk	*pdisk;
 	int rc;
 
 	pdisk = calloc(1, sizeof(*pdisk));
+	pdisk->attach_disk = attach_disk;
 	if (!pdisk) {
 		SPDK_ERRLOG("pdisk calloc() failed\n");
 		return -ENOMEM;
 	}
 
-	/*
-	 * Attach a nvme controller locally
-	 */
-	struct spdk_nvme_transport_id trid = {};
-	spdk_nvme_trid_populate_transport(&trid, SPDK_NVME_TRANSPORT_PCIE);
-	snprintf(trid.subnqn, sizeof(trid.subnqn), "%s", SPDK_NVMF_DISCOVERY_NQN);
-	SPDK_DEBUGLOG(bdev_persist, "before probe\n");
+	if (attach_disk) {
+		/*
+		* Attach a nvme controller locally
+		*/
+		struct spdk_nvme_transport_id trid = {};
+		spdk_nvme_trid_populate_transport(&trid, SPDK_NVME_TRANSPORT_PCIE);
+		snprintf(trid.subnqn, sizeof(trid.subnqn), "%s", SPDK_NVMF_DISCOVERY_NQN);
+		SPDK_DEBUGLOG(bdev_persist, "before probe\n");
 
-	rc = spdk_nvme_probe(&trid, pdisk, probe_cb, attach_cb, NULL);
-	if (rc != 0) {
-		SPDK_ERRLOG("spdk_nvme_probe() failed");
-		return rc;
-	}
+		rc = spdk_nvme_probe(&trid, pdisk, probe_cb, attach_cb, NULL);
+		if (rc != 0) {
+			SPDK_ERRLOG("spdk_nvme_probe() failed");
+			return rc;
+		}
 
-	pdisk->qpair = spdk_nvme_ctrlr_alloc_io_qpair(pdisk->ctrlr, NULL, 0);
-	if (pdisk->qpair == NULL) {
-		SPDK_ERRLOG("ERROR: spdk_nvme_ctrlr_alloc_io_qpair() failed");
-		return -EINVAL;
+		pdisk->qpair = spdk_nvme_ctrlr_alloc_io_qpair(pdisk->ctrlr, NULL, 0);
+		if (pdisk->qpair == NULL) {
+			SPDK_ERRLOG("ERROR: spdk_nvme_ctrlr_alloc_io_qpair() failed");
+			return -EINVAL;
+		}
+		SPDK_NOTICELOG("alloc nvme qp successful\n");
 	}
-	SPDK_NOTICELOG("alloc nvme qp successful\n");
+	else {
+		// just some fake data, as it doesn't serve IO requests anyway.
+		pdisk->disk.blockcnt = 1;
+		pdisk->disk.blocklen = 512;
+	}
 
 	pdisk->destage_info = spdk_zmalloc(pdisk->disk.blocklen, 0, 
 							NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
@@ -991,33 +1010,33 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 				persist_destroy_channel_cb, sizeof(struct persist_channel),
 				"bdev_persist");
 
-	pdisk->destage_poller = SPDK_POLLER_REGISTER(persist_destage_poller, pdisk, 0);
-	if (!pdisk->destage_poller) {
-		SPDK_ERRLOG("Failed to register persist destage poller\n");
-		return -ENOMEM;
-	}
-
-	pdisk->rdma_poller = SPDK_POLLER_REGISTER(persist_rdma_poller, pdisk, 5);
+	pdisk->rdma_poller = SPDK_POLLER_REGISTER(persist_rdma_poller, pdisk, 100);
 	if (!pdisk->rdma_poller) {
 		SPDK_ERRLOG("Failed to register persist rdma poller\n");
 		return -ENOMEM;
 	}
 
-	pdisk->nvme_poller = SPDK_POLLER_REGISTER(persist_nvme_poller, pdisk, 5);
-	if (!pdisk->nvme_poller) {
-		SPDK_ERRLOG("Failed to register persist nvme poller\n");
-		return -ENOMEM;
+	if (attach_disk) {
+		pdisk->nvme_poller = SPDK_POLLER_REGISTER(persist_nvme_poller, pdisk, 5);
+		if (!pdisk->nvme_poller) {
+			SPDK_ERRLOG("Failed to register persist nvme poller\n");
+			return -ENOMEM;
+		}
+
+		pdisk->destage_poller = SPDK_POLLER_REGISTER(persist_destage_poller, pdisk, 0);
+		if (!pdisk->destage_poller) {
+			SPDK_ERRLOG("Failed to register persist destage poller\n");
+			return -ENOMEM;
+		}
 	}
 
-	SPDK_DEBUGLOG(bdev_persist, "before reg\n");
 	rc = spdk_bdev_register(&pdisk->disk);
 	if (rc) {
 		persist_disk_free(pdisk);
 		return rc;
 	}
-	SPDK_DEBUGLOG(bdev_persist, "after reg\n");
 
-	SPDK_DEBUGLOG(bdev_persist, "leave create disk\n");
+	SPDK_NOTICELOG("finish creating disk\n");
 
 	return rc;
 }
