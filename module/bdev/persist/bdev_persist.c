@@ -270,6 +270,10 @@ static void bdev_persist_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
 }
 
 static void bdev_persist_destage_done(void *ref, const struct spdk_nvme_cpl *cpl) {
+	if (spdk_unlikely(spdk_nvme_cpl_is_error(cpl))) {
+		// TODO: check which kind of error and recover/retry
+		SPDK_ERRLOG("Write failed: %p %p\n", ref, cpl);
+	}
 	struct persist_disk* pdisk = ref;
 	pdisk->destage_context.remaining--;
 }
