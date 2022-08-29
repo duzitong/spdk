@@ -139,7 +139,7 @@ bdev_malloc_readv(struct malloc_disk *mdisk, struct spdk_io_channel *ch,
 	while (!mdisk->flag) {
 
 	}
-	SPDK_NOTICELOG("(%d)read start\n", spdk_thread_get_id(spdk_get_thread()))
+	SPDK_NOTICELOG("(%d)read start\n", spdk_thread_get_id(spdk_get_thread()));
 
 	if (bdev_malloc_check_iov_len(iov, iovcnt, len)) {
 		spdk_bdev_io_complete(spdk_bdev_io_from_ctx(task),
