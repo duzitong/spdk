@@ -1326,6 +1326,7 @@ bdevperf_construct_job(struct spdk_bdev *bdev, struct job_config *config,
 	job->workload_type = g_workload_type;
 	job->io_size = config->bs;
 	job->rw_percentage = config->rwmixread;
+	job->seed = spdk_get_ticks();
 	job->continue_on_failure = g_continue_on_failure;
 	job->queue_depth = config->iodepth;
 	job->bdev = bdev;
