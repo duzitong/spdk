@@ -22,7 +22,7 @@
 struct malloc_disk {
 	struct spdk_bdev		disk;
 	void				*malloc_buf;
-	uint64_t			count;
+	bool				flag;
 	TAILQ_ENTRY(malloc_disk)	link;
 };
 
@@ -134,8 +134,9 @@ bdev_malloc_readv(struct malloc_disk *mdisk, struct spdk_io_channel *ch,
 	void *src = mdisk->malloc_buf + offset;
 	int i;
 
-	mdisk->count++;
-	SPDK_NOTICELOG("(%d)read count: %ld\n", spdk_thread_get_id(spdk_get_thread()), mdisk->count);
+	if (mdisk->flag) {
+		SPDK_NOTICELOG("(%d)read\n", spdk_thread_get_id(spdk_get_thread()));
+	}
 
 	if (bdev_malloc_check_iov_len(iov, iovcnt, len)) {
 		spdk_bdev_io_complete(spdk_bdev_io_from_ctx(task),
@@ -174,8 +175,8 @@ bdev_malloc_writev_with_md(struct malloc_disk *mdisk, struct spdk_io_channel *ch
 	void *dst = mdisk->malloc_buf + offset;
 	int i;
 
-	mdisk->count++;
-	SPDK_NOTICELOG("(%d)write count: %ld\n", spdk_thread_get_id(spdk_get_thread()), mdisk->count);
+	mdisk->flag = true;
+	SPDK_NOTICELOG("(%d)write\n", spdk_thread_get_id(spdk_get_thread()));
 
 	if (bdev_malloc_check_iov_len(iov, iovcnt, len)) {
 		spdk_bdev_io_complete(spdk_bdev_io_from_ctx(task),
