@@ -1522,7 +1522,7 @@ bdevperf_construct_jobs(void)
 		thread = construct_job_thread(&config->cpumask, config->name);
 		assert(thread);
 
-		SPDK_NOTICELOG("Thread %ld created on CPU 0x%s", spdk_thread_get_id(thread), spdk_cpuset_fmt(spdk_thread_get_cpumask(thread)));
+		SPDK_NOTICELOG("Thread %ld created on CPU 0x%s\n", spdk_thread_get_id(thread), spdk_cpuset_fmt(spdk_thread_get_cpumask(thread)));
 
 		while (filenames) {
 			filenames = config_filename_next(filenames, filename);
