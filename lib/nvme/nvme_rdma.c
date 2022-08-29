@@ -1267,7 +1267,6 @@ nvme_rdma_connect(struct nvme_rdma_qpair *rqpair)
 	 * created using rdma cm API. */
 	param.srq = 0;
 	param.qp_num = rqpair->rdma_qp->qp->qp_num;
-	SPDK_NOTICELOG("Connecting...\n");
 
 	ret = rdma_connect(rqpair->cm_id, &param);
 	if (ret) {
