@@ -1205,12 +1205,14 @@ _get_next_core(void)
 
 	if (current_core == SPDK_ENV_LCORE_ID_ANY) {
 		current_core = spdk_env_get_first_core();
+		current_core = spdk_env_get_next_core(current_core);
 		return current_core;
 	}
 
 	current_core = spdk_env_get_next_core(current_core);
 	if (current_core == SPDK_ENV_LCORE_ID_ANY) {
 		current_core = spdk_env_get_first_core();
+		current_core = spdk_env_get_next_core(current_core);
 	}
 
 	return current_core;
