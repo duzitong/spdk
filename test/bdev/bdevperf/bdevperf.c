@@ -1586,7 +1586,7 @@ bdevperf_construct_multithread_job_configs(void)
 		num_cores++;
 	}
 
-	if (num_cores == 0) {
+	if (num_cores < 1) {
 		g_run_rc = -EINVAL;
 		return;
 	}
