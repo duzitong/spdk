@@ -23,7 +23,7 @@ struct malloc_disk {
 	struct spdk_bdev		disk;
 	void				*malloc_buf;
 	uint64_t			read_cnt;
-	bool				flag;
+	volatile bool				flag;
 	TAILQ_ENTRY(malloc_disk)	link;
 };
 
