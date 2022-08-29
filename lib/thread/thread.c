@@ -910,14 +910,6 @@ thread_poll(struct spdk_thread *thread, uint32_t max_msgs, uint64_t now)
 				   active_pollers_head, tailq, tmp) {
 		int poller_rc;
 
-		// if (strcmp("nvmf_poll_group_poll", poller->name) != 0
-		// 	&& strcmp("target_rdma_poller", poller->name) != 0
-		// 	&& strcmp("accel_comp_poll", poller->name) != 0
-		// 	&& strcmp("wal_bdev_cleaner", poller->name) != 0
-		// 	&& strcmp("bdev_nvme_poll", poller->name) != 0) {
-		// 	SPDK_NOTICELOG("Executing poller %s\n", poller->name);
-		// }
-
 		poller_rc = thread_execute_poller(thread, poller);
 		if (poller_rc > rc) {
 			rc = poller_rc;
@@ -943,16 +935,7 @@ thread_poll(struct spdk_thread *thread, uint32_t max_msgs, uint64_t now)
 			thread->first_timed_poller = tmp;
 		}
 
-		// if (strcmp("rpc_subsystem_poll", poller->name) != 0 && 
-		// 	strcmp("persist_rdma_poller", poller->name) != 0 &&
-		// 	strcmp("persist_destage_poller", poller->name) != 0 &&
-		// 	strcmp("nvmf_rdma_accept", poller->name) != 0 &&
-		// 	strcmp("bdev_nvme_poll_adminq", poller->name) != 0) {
-		// 	SPDK_NOTICELOG("Executing timed poller %s\n", poller->name);
-		// }
-
 		timer_rc = thread_execute_timed_poller(thread, poller, now);
-
 		if (timer_rc > rc) {
 			rc = timer_rc;
 		}
