@@ -22,6 +22,7 @@
 struct malloc_disk {
 	struct spdk_bdev		disk;
 	void				*malloc_buf;
+	uint64_t			read_cnt;
 	bool				flag;
 	TAILQ_ENTRY(malloc_disk)	link;
 };
@@ -136,7 +137,8 @@ bdev_malloc_readv(struct malloc_disk *mdisk, struct spdk_io_channel *ch,
 
 	SPDK_NOTICELOG("(%d)read\n", spdk_thread_get_id(spdk_get_thread()));
 	mdisk->flag = false;
-	while (!mdisk->flag) {
+	mdisk->read_cnt++;
+	while (mdisk->read_cnt > 2 && !mdisk->flag) {
 
 	}
 	SPDK_NOTICELOG("(%d)read start\n", spdk_thread_get_id(spdk_get_thread()));
