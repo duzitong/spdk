@@ -1703,6 +1703,13 @@ wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
 		return;
 	}
 
+	if (spdk_unlikely(metadata->round < bdev->move_round)) {
+		SPDK_DEBUGLOG(bdev_wal, "Read metadata of previous rounds, reset to last moved state.\n");
+		wal_bdev_mover_reset(bdev);
+		wal_bdev_mover_free(mover_ctx);
+		return;
+	}
+
 	data_begin = metadata->core_offset;
 	date_end = metadata->core_offset + metadata->core_length - 1;
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
