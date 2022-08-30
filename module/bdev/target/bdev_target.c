@@ -54,17 +54,21 @@
 #include <infiniband/verbs.h>
 #include <rdma/rdma_cma.h>
 #include <errno.h>
+#include "spdk_internal/rdma.h"
 
 struct target_disk {
 	struct spdk_bdev		disk;
 	// act as circular buffer
 	void				*malloc_buf;
 	struct rdma_cm_id* cm_id;
+	struct ibv_pd* pd;
 	struct ibv_mr* mr;
 	struct ibv_cq* cq;
 	struct rdma_handshake* remote_handshake;
 	struct spdk_poller* rdma_poller;
 	struct ibv_wc wc_buf[TARGET_WC_BATCH_SIZE];
+
+	struct spdk_rdma_mem_map		*mr_map;
 
 	TAILQ_ENTRY(target_disk)	link;
 };
@@ -601,6 +605,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 
 	mdisk->cq = ibv_cq;
 	mdisk->mr = ibv_mr;
+	mdisk->pd = ibv_pd;
 
 	// no SRQ here - only one qp
 	// TODO: fine-tune these params; 
@@ -784,6 +789,8 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 	mdisk->disk.ctxt = mdisk;
 	mdisk->disk.fn_table = &target_fn_table;
 	mdisk->disk.module = &target_if;
+
+	mdisk->mr_map = spdk_rdma_create_mem_map(mdisk->pd, NULL, SPDK_RDMA_MEMORY_MAP_ROLE_INITIATOR);
 
 	*bdev = &(mdisk->disk);
 
