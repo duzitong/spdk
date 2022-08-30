@@ -434,6 +434,7 @@ static const struct spdk_bdev_fn_table target_fn_table = {
 };
 
 static void target_complete_io_success(void* ctx) {
+	SPDK_DEBUGLOG(bdev_target, "completing io from other thread\n");
 	spdk_bdev_io_complete(ctx, SPDK_BDEV_IO_STATUS_SUCCESS);
 }
 
