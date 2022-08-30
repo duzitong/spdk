@@ -482,10 +482,16 @@ target_rdma_poller(void *ctx)
 							}
 						}
 
-						SPDK_DEBUGLOG(bdev_target, "before completing io %p\n", io);
-						spdk_thread_send_msg(spdk_bdev_io_get_thread(io), target_complete_io_success, io);
-						// spdk_bdev_io_complete(io, SPDK_BDEV_IO_STATUS_SUCCESS);
-						SPDK_DEBUGLOG(bdev_target, "after completing io %p\n", io);
+						if (spdk_bdev_io_get_thread(io) == spdk_get_thread()) {
+							spdk_bdev_io_complete(io, SPDK_BDEV_IO_STATUS_SUCCESS);
+						}
+						else {
+							struct spdk_thread* t1 = spdk_bdev_io_get_thread(io), *t2 = spdk_get_thread();
+							SPDK_DEBUGLOG("IO thread %ld, current thread %ld\n",
+								t1->id,
+								t2->id);
+							spdk_thread_send_msg(spdk_bdev_io_get_thread(io), target_complete_io_success, io);
+						}
 					}
 				}
 			}
