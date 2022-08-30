@@ -455,7 +455,6 @@ target_rdma_poller(void *ctx)
 				SPDK_ERRLOG("ibv_poll_cq failed\n");
 			}
 			else if (cnt == 0) {
-				SPDK_DEBUGLOG(bdev_target, "no item in cq\n");
 				return SPDK_POLLER_IDLE;
 			}
 			else {
@@ -479,7 +478,9 @@ target_rdma_poller(void *ctx)
 							}
 						}
 
+						SPDK_DEBUGLOG(bdev_target, "before completing io %p\n", io);
 						spdk_bdev_io_complete(io, SPDK_BDEV_IO_STATUS_SUCCESS);
+						SPDK_DEBUGLOG(bdev_target, "after completing io %p\n", io);
 					}
 				}
 			}
