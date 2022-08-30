@@ -573,6 +573,9 @@ persist_destage_poller(void *ctx)
 			SPDK_ERRLOG("Possible data loss! Previous seq is %ld while the current is %ld\n",
 				pdisk->prev_seq,
 				metadata->seq);
+			
+			// ignore the error for now, otherwise the error prints forever
+			pdisk->prev_seq = metadata->seq - 1;
 		}
 
 		rc = spdk_nvme_ns_cmd_write(pdisk->ns,
