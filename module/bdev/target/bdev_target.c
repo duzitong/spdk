@@ -433,6 +433,10 @@ static const struct spdk_bdev_fn_table target_fn_table = {
 	.write_config_json	= bdev_target_write_json_config,
 };
 
+static void target_complete_io_success(void* ctx) {
+	spdk_bdev_io_complete(ctx, SPDK_BDEV_IO_STATUS_SUCCESS);
+}
+
 static int
 target_rdma_poller(void *ctx)
 {
@@ -479,7 +483,8 @@ target_rdma_poller(void *ctx)
 						}
 
 						SPDK_DEBUGLOG(bdev_target, "before completing io %p\n", io);
-						spdk_bdev_io_complete(io, SPDK_BDEV_IO_STATUS_SUCCESS);
+						spdk_thread_send_msg(spdk_bdev_io_get_thread(io), target_complete_io_success, io);
+						// spdk_bdev_io_complete(io, SPDK_BDEV_IO_STATUS_SUCCESS);
 						SPDK_DEBUGLOG(bdev_target, "after completing io %p\n", io);
 					}
 				}
