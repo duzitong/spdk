@@ -486,8 +486,6 @@ target_rdma_poller(void *ctx)
 							spdk_bdev_io_complete(io, SPDK_BDEV_IO_STATUS_SUCCESS);
 						}
 						else {
-							struct spdk_thread* t1 = spdk_bdev_io_get_thread(io), *t2 = spdk_get_thread();
-							SPDK_DEBUGLOG("IO thread %p, current thread %p\n", t1, t2);
 							spdk_thread_send_msg(spdk_bdev_io_get_thread(io), target_complete_io_success, io);
 						}
 					}
