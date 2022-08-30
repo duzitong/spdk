@@ -410,6 +410,31 @@ if __name__ == "__main__":
     p.set_defaults(func=bdev_target_delete)
 
 
+    def bdev_persist_create(args):
+        print_json(rpc.bdev.bdev_persist_create(args.client,
+                                               name=args.name,
+                                               uuid=args.uuid,
+                                               ip=args.addr,
+                                               port=args.port,
+                                               attach_disk=args.attach_disk))
+    p = subparsers.add_parser('bdev_persist_create', aliases=['construct_persist_bdev'],
+                              help='Create a bdev to destage from PMEM')
+    p.add_argument('-b', '--name', help="Name of the bdev")
+    p.add_argument('-u', '--uuid', help="UUID of the bdev")
+    p.add_argument('-a', '--addr', help="addr of local node")
+    p.add_argument('-p', '--port', help="port of local node")
+    p.add_argument('-d', '--attach-disk', help="to attach to local nvme disk", default=False, action='store_true')
+    p.set_defaults(func=bdev_persist_create)
+
+    def bdev_persist_delete(args):
+        rpc.bdev.bdev_persist_delete(args.client,
+                                    name=args.name)
+
+    p = subparsers.add_parser('bdev_persist_delete', aliases=['delete_persist_bdev'],
+                              help='Delete a persist disk')
+    p.add_argument('name', help='persist bdev name')
+    p.set_defaults(func=bdev_persist_delete)
+
     def bdev_null_create(args):
         num_blocks = (args.total_size * 1024 * 1024) // args.block_size
         if args.dif_type and not args.md_size:

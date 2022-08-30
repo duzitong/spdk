@@ -32,7 +32,17 @@
 #
 
 SPDK_ROOT_DIR := $(abspath $(CURDIR)/../../..)
+# NVME_DIR := $(SPDK_ROOT_DIR)/lib/nvme
+include $(SPDK_ROOT_DIR)/mk/spdk.common.mk
+# include $(SPDK_ROOT_DIR)/mk/spdk.modules.mk
 
-APP = persist
+SO_VER := 4
+SO_MINOR := 0
 
-include $(SPDK_ROOT_DIR)/mk/nvme.libtest.mk
+C_SRCS = bdev_persist.c bdev_persist_rpc.c
+LIBNAME = bdev_persist
+
+SPDK_MAP_FILE = $(SPDK_ROOT_DIR)/mk/spdk_blank.map
+# SPDK_LIB_LIST = $(ALL_MODULES_LIST) nvme
+
+include $(SPDK_ROOT_DIR)/mk/spdk.lib.mk

@@ -302,6 +302,10 @@ struct wal_bdev {
 	uint64_t	move_head;
 
 	uint64_t	move_round;
+
+	// the final block in the log bdev. When allocating, the size
+	// must be equal to the block size of the log bdev. 
+	struct wal_log_info* log_info;
 };
 
 /*

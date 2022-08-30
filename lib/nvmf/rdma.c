@@ -3319,7 +3319,7 @@ nvmf_process_ib_event(struct spdk_nvmf_rdma_device *device)
 	case IBV_EVENT_PATH_MIG:
 	case IBV_EVENT_PATH_MIG_ERR:
 		SPDK_NOTICELOG("Async event: %s\n",
-			       ibv_event_type_str(event.event_type));
+				ibv_event_type_str(event.event_type));
 		rqpair = event.element.qp->qp_context;
 		spdk_trace_record(TRACE_RDMA_IBV_ASYNC_EVENT, 0, 0,
 				  (uintptr_t)rqpair, event.event_type);

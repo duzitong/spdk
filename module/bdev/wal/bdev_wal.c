@@ -82,12 +82,7 @@ int wal_log_bdev_writev_blocks_with_md(struct spdk_bdev_desc *desc, struct spdk_
 										struct wal_bdev_io *wal_io);
 static int wal_bdev_submit_pending_writes(void *ctx);
 static int wal_bdev_mover(void *ctx);
-static void wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
-static void wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
-static void wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
-static void wal_bdev_mover_clean(struct spdk_bdev_io *bdev_io, bool success, void *ctx);
-static void wal_bdev_mover_free(struct wal_mover_context *ctx);
-static void wal_bdev_mover_reset(struct wal_bdev *bdev);
+static void wal_bdev_mover_do_update(struct spdk_bdev_io* bdev_io, bool success, void* ctx);
 static int wal_bdev_cleaner(void *ctx);
 static int wal_bdev_stat_report(void *ctx);
 
@@ -132,7 +127,7 @@ wal_bdev_create_cb(void *io_device, void *ctx_buf)
 
 		
 		wal_bdev->pending_writes_poller = SPDK_POLLER_REGISTER(wal_bdev_submit_pending_writes, wal_bdev, 0);
-		wal_bdev->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_bdev, 0);
+		wal_bdev->mover_poller = SPDK_POLLER_REGISTER(wal_bdev_mover, wal_bdev, 10);
 		wal_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wal_bdev_cleaner, wal_bdev, 10);
 		wal_bdev->stat_poller = SPDK_POLLER_REGISTER(wal_bdev_stat_report, wal_bdev, 30*1000*1000);
 
@@ -149,7 +144,7 @@ _wal_bdev_destroy_cb(void *arg)
 {
 	struct wal_bdev	*wal_bdev = arg;
 
-	spdk_put_io_channel(wal_bdev->log_channel);
+	// spdk_put_io_channel(wal_bdev->log_channel);
 	spdk_put_io_channel(wal_bdev->core_channel);
 	wal_bdev->log_channel = NULL;
 	wal_bdev->core_channel = NULL;
@@ -1524,6 +1519,9 @@ wal_bdev_start(struct wal_bdev *wal_bdev)
 	wal_bdev->head_round = wal_bdev->move_round = 0;
 	wal_bdev->tail_round = 0;
 
+	wal_bdev->log_info = spdk_zmalloc(wal_bdev->log_bdev_info.bdev->blocklen, 0,
+		NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+
 	return 0;
 }
 
@@ -1622,307 +1620,33 @@ static int
 wal_bdev_mover(void *ctx)
 {
 	struct wal_bdev *bdev = ctx;
-	int ret, i;
-
-	if (bdev->move_head == bdev->log_tail && bdev->move_round == bdev->tail_round) {
-		return SPDK_POLLER_IDLE;
-	}
-
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_CALLED, 0, 0, (uintptr_t)NULL);
-
-	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
-		if (bdev->mover_context[i].state == MOVER_READING_MD) {
-			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_MD_LOCKED, 0, 0, (uintptr_t)NULL);
-			return SPDK_POLLER_BUSY;
-		}
-	}
-
-	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
-		if (bdev->mover_context[i].state == MOVER_IDLE) {
-			break;
-		}
-	}
-
-	if (i == MAX_OUTSTANDING_MOVES) {
-		SPDK_DEBUGLOG(bdev_wal, "All movers are used.\n");
-		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_NO_WORKER, 0, 0, (uintptr_t)NULL);
-		return SPDK_POLLER_BUSY;
-	}
-
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_READ_MD, 0, 0, (uintptr_t)&bdev->mover_context[i], i, bdev->move_head);
-	bdev->mover_context[i].state = MOVER_READING_MD;
-	bdev->mover_context[i].id = i;
-	bdev->mover_context[i].bdev = bdev;
-	bdev->mover_context[i].metadata = (struct wal_metadata *) spdk_zmalloc(bdev->log_bdev_info.bdev->blocklen, 0, 
-														NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-	if (!bdev->mover_context[i].metadata) {
-		SPDK_DEBUGLOG(bdev_wal, "No mem for metadata.\n");
-		wal_bdev_mover_free(&bdev->mover_context[i]);
-		return SPDK_POLLER_BUSY;
-	}
-
-	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, bdev->log_channel, bdev->mover_context[i].metadata, bdev->move_head, 1, 
-									wal_bdev_mover_read_data, &bdev->mover_context[i]);
+	int ret;
+	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, bdev->log_channel, bdev->log_info, bdev->log_max + 1, 1, 
+									wal_bdev_mover_do_update, bdev);
+	
 	if (ret) {
-		SPDK_ERRLOG("Failed to read metadata during move: %d.\n", ret);
-		wal_bdev_mover_free(&bdev->mover_context[i]);
+		SPDK_ERRLOG("failed to read last block %d\n", ret);
 	}
 
 	return SPDK_POLLER_BUSY;
 }
 
-static void
-wal_bdev_mover_read_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
-{
-	struct wal_mover_context *mover_ctx = ctx;
-	struct wal_bdev *bdev = mover_ctx->bdev;
-	struct wal_metadata *metadata = mover_ctx->metadata;
-	int ret, i;
-	uint64_t log_position, data_begin, date_end, other_begin, other_end;
+static void wal_bdev_mover_do_update(struct spdk_bdev_io* bdev_io, bool success, void* ctx) {
+	if (!success) {
+		SPDK_ERRLOG("Failed to read last block\n");
+		return;
+	}
 
+	struct wal_bdev* bdev = ctx;
 	spdk_bdev_free_io(bdev_io);
-
-	if (spdk_unlikely(bdev->destruct_called || bdev->destroy_started)) {
-		wal_bdev_mover_free(mover_ctx);
-		return;
-	}
-
-	if (spdk_unlikely(!success)) {
-		SPDK_ERRLOG("Failed to read metadata during move.\n");
-		wal_bdev_mover_reset(bdev);
-		wal_bdev_mover_free(mover_ctx);
-		return;
-	}
-
-	assert(metadata);
-	if (spdk_unlikely(metadata->version != METADATA_VERSION)) {
-		SPDK_DEBUGLOG(bdev_wal, "Go back to block '0' during move.\n");
-		bdev->move_head = 0;
-		bdev->move_round++;
-		wal_bdev_mover_free(mover_ctx);
-		return;
-	}
-
-	data_begin = metadata->core_offset;
-	date_end = metadata->core_offset + metadata->core_length - 1;
-	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
-		if ( i != mover_ctx->id
-			&& bdev->mover_context[i].state != MOVER_IDLE 
-			&& bdev->mover_context[i].metadata) {
-			other_begin = bdev->mover_context[i].metadata->core_offset;
-			other_end = bdev->mover_context[i].metadata->core_offset + bdev->mover_context[i].metadata->core_length - 1;
-			if (other_end >= data_begin && other_begin <= date_end) {
-				wal_bdev_mover_free(mover_ctx);
-				return;
-			}
-		}
-	}
-
-	// Can be moved in parallel
-	mover_ctx->data = spdk_zmalloc(bdev->log_bdev_info.bdev->blocklen * metadata->length, 0, 
-								NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	SPDK_DEBUGLOG(bdev_wal,
+		"Got head %ld round %ld\n", bdev->log_info->head, bdev->log_info->round);
 	
-	if (!mover_ctx->data) {
-		SPDK_DEBUGLOG(bdev_wal, "No mem for data.\n");
-		wal_bdev_mover_free(mover_ctx);
-		return;
+	if (bdev->log_info->head == -1 && bdev->log_info->round == -1) {
+		SPDK_WARNLOG("Got destage info from non-attached bdev.\n");
 	}
-
-	log_position = bdev->move_head + 1;
-	bdev->move_head = metadata->next_offset;
-	mover_ctx->state = MOVER_READING_DATA;
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_READ_DATA, 0, 0, (uintptr_t)mover_ctx, mover_ctx->id, log_position, metadata->length, metadata->round, metadata->next_offset);
-	
-	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, bdev->log_channel, mover_ctx->data, log_position, metadata->length, 
-									wal_bdev_mover_write_data, mover_ctx);
-	if (ret) {
-		SPDK_ERRLOG("Failed to read data during move: %d.\n", ret);
-		wal_bdev_mover_free(ctx);
-	}
-}
-
-static void 
-wal_bdev_mover_write_data(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
-{
-	struct wal_mover_context *mover_ctx = ctx;
-	struct wal_bdev *bdev = mover_ctx->bdev;
-	struct wal_metadata *metadata = mover_ctx->metadata;
-	int ret;
-
-	spdk_bdev_free_io(bdev_io);
-
-	if (spdk_unlikely(bdev->destruct_called || bdev->destroy_started)) {
-		wal_bdev_mover_free(mover_ctx);
-		return;
-	}
-
-	if (spdk_unlikely(!success)) {
-		SPDK_ERRLOG("Failed to read data during move.\n");
-		wal_bdev_mover_reset(bdev);
-		wal_bdev_mover_free(mover_ctx);
-		return;
-	}
-
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_WRITE_DATA, 0, 0, (uintptr_t)mover_ctx, mover_ctx->id, metadata->core_offset, metadata->core_length, metadata->round);
-	mover_ctx->state = MOVER_WRITING_DATA;
-
-	ret = spdk_bdev_write_blocks(bdev->core_bdev_info.desc, bdev->core_channel, mover_ctx->data,
-									metadata->core_offset, metadata->core_length,
-									wal_bdev_mover_update_head, mover_ctx);
-	if (ret) {
-		SPDK_ERRLOG("Failed to write data during move: %d.\n", ret);
-		wal_bdev_mover_free(mover_ctx);
-	}
-}
-
-static void 
-wal_bdev_mover_update_head(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
-{
-	struct wal_mover_context *mover_ctx = ctx;
-	struct wal_bdev *bdev = mover_ctx->bdev;
-	struct wal_metadata *metadata = mover_ctx->metadata;
-	int ret, i, j;
-	struct wal_log_info *info;
-
-	spdk_bdev_free_io(bdev_io);
-
-	if (spdk_unlikely(bdev->destruct_called || bdev->destroy_started)) {
-		return;
-	}
-
-	if (spdk_unlikely(!success)) {
-		SPDK_ERRLOG("Failed to write data during move.\n");
-		wal_bdev_mover_reset(bdev);
-		wal_bdev_mover_free(mover_ctx);
-		return;
-	}
-
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_UPDATE_HEAD, 0, 0, (uintptr_t)mover_ctx, mover_ctx->id, metadata->next_offset, metadata->round);
-	mover_ctx->state = MOVER_UPDATING_HEAD;
-	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
-		if (i != mover_ctx->id
-			&& bdev->mover_context[i].state > MOVER_READING_MD	// Reading md is run in serial. So, if the worker is still reading md, then it must be a later entry.
-			&& bdev->mover_context[i].state < MOVER_PERSIST_HEAD // Wait only for on air works
-			&& bdev->mover_context[i].metadata
-			&& (bdev->mover_context[i].metadata->round < mover_ctx->metadata->round
-				|| (bdev->mover_context[i].metadata->next_offset < mover_ctx->metadata->next_offset 
-					&& bdev->mover_context[i].metadata->round == mover_ctx->metadata->round))) {
-				SPDK_DEBUGLOG(bdev_wal, "%ld(%ld) waiting %ld(%ld) to update head.\n",  metadata->next_offset, metadata->round, 
-								bdev->mover_context[i].metadata->next_offset, bdev->mover_context[i].metadata->round);
-				spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_WAIT_OTHERS, 0, 0, (uintptr_t)mover_ctx, 
-										metadata->next_offset, metadata->round, bdev->mover_context[i].id,
-										bdev->mover_context[i].metadata->next_offset, bdev->mover_context[i].metadata->round);
-				return;
-			}
-	}
-
-	info = spdk_zmalloc(bdev->log_bdev_info.bdev->blocklen, 0, 
-							NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-
-	memset(bdev->sorted_context, 0, MAX_OUTSTANDING_MOVES * sizeof(bdev->sorted_context[0]));
-	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
-		if (bdev->mover_context[i].state > MOVER_READING_MD && bdev->mover_context[i].state < MOVER_PERSIST_HEAD) {
-			assert(bdev->sorted_context[MAX_OUTSTANDING_MOVES - 1] == NULL);
-			for (j = MAX_OUTSTANDING_MOVES - 2; j >= 0 ; j--) {
-				if (bdev->sorted_context[j] && bdev->sorted_context[j]->metadata) {
-					if (bdev->sorted_context[j]->metadata->round > bdev->mover_context[i].metadata->round
-						|| (bdev->sorted_context[j]->metadata->next_offset > bdev->mover_context[i].metadata->next_offset
-							&& bdev->sorted_context[j]->metadata->round == bdev->mover_context[i].metadata->round)) {
-						bdev->sorted_context[j+1] = bdev->sorted_context[j];
-					} else {
-						break;
-					}
-				}
-			}
-			bdev->sorted_context[j+1] = &bdev->mover_context[i];
-		}
-	}
-
-	if (spdk_unlikely(bdev->sorted_context[0] != mover_ctx)) {
-		SPDK_ERRLOG("The 1st element of sorted mover context is not current context, this should not happen.\n");
-		SPDK_ERRLOG("1st(%d) head: %ld(%ld), cur(%d) head: %ld(%ld).\n", 
-					bdev->sorted_context[0]->id, bdev->sorted_context[0]->metadata->next_offset, bdev->sorted_context[0]->metadata->round, 
-					mover_ctx->id, mover_ctx->metadata->next_offset, mover_ctx->metadata->round);
-		wal_bdev_mover_free(mover_ctx);
-		wal_bdev_mover_reset(bdev);
-		return;
-	}
-
-	info->head = mover_ctx->metadata->next_offset;
-	info->round = mover_ctx->metadata->round;
-	for (i = 1; i < MAX_OUTSTANDING_MOVES; i++) {
-		if (bdev->sorted_context[i] && bdev->sorted_context[i]->state == MOVER_UPDATING_HEAD) {
-			info->head = bdev->sorted_context[i]->metadata->next_offset;
-			info->round = bdev->sorted_context[i]->metadata->round;
-			wal_bdev_mover_free(bdev->sorted_context[i]);
-		} else {
-			break;
-		}
-	}
-
-	mover_ctx->info = info;
-	mover_ctx->state = MOVER_PERSIST_HEAD;
-
-	ret = spdk_bdev_write_blocks(bdev->log_bdev_info.desc, bdev->log_channel, info,
-									bdev->log_max, 1,
-									wal_bdev_mover_clean, mover_ctx);
-	if (ret) {
-		SPDK_ERRLOG("Failed to update head to log bdev during move: %d.\n", ret);
-		wal_bdev_mover_free(mover_ctx);
-	}
-}
-
-static void
-wal_bdev_mover_clean(struct spdk_bdev_io *bdev_io, bool success, void *ctx)
-{
-	struct wal_mover_context *mover_ctx = ctx;
-	struct wal_bdev *bdev = mover_ctx->bdev;
-
-	spdk_bdev_free_io(bdev_io);
-	
-	if (spdk_unlikely(bdev->destruct_called || bdev->destroy_started)) {
-		return;
-	}
-
-	if (spdk_unlikely(!success)) {
-		SPDK_ERRLOG("Failed to update head to log bdev during move.\n");
-		wal_bdev_mover_reset(bdev);
-		wal_bdev_mover_free(ctx);
-		return;
-	}
-
-	bdev->log_head = mover_ctx->info->head;
-	bdev->head_round = mover_ctx->info->round;
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_MOVE_UPDATE_HEAD_END, 0, 0, (uintptr_t)mover_ctx, mover_ctx->id, bdev->log_head, bdev->head_round);
-	
-	wal_bdev_mover_free(mover_ctx);
-}
-
-static void
-wal_bdev_mover_free(struct wal_mover_context *ctx)
-{
-	if (ctx->info) {
-		spdk_free(ctx->info);
-		ctx->info = NULL;
-	}
-	if (ctx->data) {
-		spdk_free(ctx->data);
-		ctx->data = NULL;
-	}
-	if (ctx->metadata) {
-		spdk_free(ctx->metadata);
-		ctx->metadata = NULL;
-	}
-
-	ctx->state = MOVER_IDLE;
-}
-
-static void
-wal_bdev_mover_reset(struct wal_bdev *bdev)
-{
-	SPDK_NOTICELOG("mover head is reset to log head\n");
-	bdev->move_head = bdev->log_head;
-	bdev->move_round = bdev->head_round;
+	bdev->log_head = bdev->log_info->head;
+	bdev->head_round = bdev->log_info->round;
 }
 
 static int
