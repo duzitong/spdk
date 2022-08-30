@@ -144,7 +144,7 @@ _wal_bdev_destroy_cb(void *arg)
 {
 	struct wal_bdev	*wal_bdev = arg;
 
-	spdk_put_io_channel(wal_bdev->log_channel);
+	// spdk_put_io_channel(wal_bdev->log_channel);
 	spdk_put_io_channel(wal_bdev->core_channel);
 	wal_bdev->log_channel = NULL;
 	wal_bdev->core_channel = NULL;

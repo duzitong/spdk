@@ -596,6 +596,7 @@ target_create_channel_cb(void *io_device, void *ctx)
 static void
 target_destroy_channel_cb(void *io_device, void *ctx)
 {
+	SPDK_DEBUGLOG(bdev_target, "enter\n");
 }
 
 
