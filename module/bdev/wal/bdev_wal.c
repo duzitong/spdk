@@ -1642,7 +1642,7 @@ static void wal_bdev_mover_do_update(struct spdk_bdev_io* bdev_io, bool success,
 	SPDK_DEBUGLOG(bdev_wal,
 		"Got head %ld round %ld\n", bdev->log_info->head, bdev->log_info->round);
 	
-	if (bdev->log_info->head == -1 && bdev->log_info->round == -1) {
+	if (bdev->log_info->head == UINT64_MAX && bdev->log_info->round == UINT64_MAX) {
 		SPDK_WARNLOG("Got destage info from non-attached bdev.\n");
 	}
 	bdev->log_head = bdev->log_info->head;

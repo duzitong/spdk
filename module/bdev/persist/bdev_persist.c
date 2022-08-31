@@ -846,11 +846,11 @@ static int persist_rdma_poller(void* ctx) {
 					buffer_len);
 
 				if (!pdisk->attach_disk) {
-					SPDK_NOTICELOG("In pure memory mode, set the destage info to (-1, -1)\n");
+					SPDK_NOTICELOG("In pure memory mode, set the destage info to (UINT64_MAX, UINT64_MAX)\n");
 					struct destage_info* dst = pdisk->malloc_buf + 
 						pdisk->remote_handshake->block_size * (pdisk->remote_handshake->block_cnt - 1);
-					dst->destage_head = -1;
-					dst->destage_round = -1;
+					dst->destage_head = UINT64_MAX;
+					dst->destage_round = UINT64_MAX;
 				}
 			}
 			else if (wc.wr_id == 2) {
