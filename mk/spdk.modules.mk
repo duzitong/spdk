@@ -5,7 +5,7 @@
 #
 
 BLOCKDEV_MODULES_LIST = bdev_malloc bdev_null bdev_nvme bdev_passthru bdev_lvol bdev_target bdev_persist
-BLOCKDEV_MODULES_LIST += bdev_raid bdev_replica bdev_error bdev_gpt bdev_split bdev_delay bdev_wal
+BLOCKDEV_MODULES_LIST += bdev_raid bdev_replica bdev_error bdev_gpt bdev_split bdev_delay bdev_wal bdev_wals
 BLOCKDEV_MODULES_LIST += bdev_zone_block
 BLOCKDEV_MODULES_LIST += blobfs blobfs_bdev blob_bdev blob lvol vmd nvme
 
