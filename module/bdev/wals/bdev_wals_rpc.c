@@ -307,7 +307,7 @@ rpc_bdev_wals_create(struct spdk_jsonrpc_request *request,
 	// }
 
 	w = spdk_jsonrpc_begin_result(request);
-	spdk_json_write_string(w, spdk_bdev_get_name(req.name));
+	spdk_json_write_string(w, req.name);
 	spdk_jsonrpc_end_result(request, w);
 
 cleanup:
