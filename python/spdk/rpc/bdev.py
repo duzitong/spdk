@@ -535,7 +535,7 @@ def bdev_wals_get_bdevs(client, category):
     return client.call('bdev_wals_get_bdevs', params)
 
 
-def bdev_wals_create(client, name, log_bdev, core_bdev):
+def bdev_wals_create(client, name, module, slices):
     """Create wals bdev.
 
     Args:
@@ -546,7 +546,7 @@ def bdev_wals_create(client, name, log_bdev, core_bdev):
     Returns:
         None
     """
-    params = {'name': name, 'log_bdev': log_bdev, 'core_bdev': core_bdev}
+    params = {'name': name, 'module': module, 'slices': slices}
 
     return client.call('bdev_wals_create', params)
 

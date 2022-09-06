@@ -144,7 +144,7 @@ SPDK_RPC_REGISTER_ALIAS_DEPRECATED(bdev_wals_get_bdevs, get_wals_bdevs)
  * Slices for creation
  */
 
-struct rpc_bdev_wals_target {
+struct rpc_bdev_wals_target_info {
 	char		*nqn;
 
 	char		*address;
@@ -152,10 +152,27 @@ struct rpc_bdev_wals_target {
 	uint16_t	port;
 };
 
-static const struct spdk_json_object_decoder rpc_bdev_wals_target_decoders[] = {
+static const struct spdk_json_object_decoder rpc_bdev_wals_target_info_decoders[] = {
 	{"nqn", offsetof(struct rpc_bdev_wals_target, nqn), spdk_json_decode_string},
 	{"address", offsetof(struct rpc_bdev_wals_target, address), spdk_json_decode_string},
 	{"port", offsetof(struct rpc_bdev_wals_target, port), spdk_json_decode_uint16},
+};
+
+static int
+decode_target_info(const struct spdk_json_val *val, void *out)
+{
+	return spdk_json_decode_object(val, rpc_bdev_wals_target_info_decoders, SPDK_COUNTOF(rpc_bdev_wals_target_info_decoders), out);
+}
+
+struct rpc_bdev_wals_target {
+	struct rpc_bdev_wals_target_info	log;
+	
+	struct rpc_bdev_wals_target_info	core;
+};
+
+static const struct spdk_json_object_decoder rpc_bdev_wals_target_decoders[] = {
+	{"log", offsetof(struct rpc_bdev_wals_slice, log), decode_target_info},
+	{"core", offsetof(struct rpc_bdev_wals_slice, core), decode_target_info},
 };
 
 static int
@@ -165,20 +182,18 @@ decode_target(const struct spdk_json_val *val, void *out)
 }
 
 struct rpc_bdev_wals_slice {
-	struct rpc_bdev_wals_target	log;
-	
-	struct rpc_bdev_wals_target	core;
-};
+	size_t						 	num_targets;
 
-static const struct spdk_json_object_decoder rpc_bdev_wals_slice_decoders[] = {
-	{"log", offsetof(struct rpc_bdev_wals_slice, log), decode_target},
-	{"core", offsetof(struct rpc_bdev_wals_slice, core), decode_target},
-};
+	struct rpc_bdev_wals_target		targets[NUM_TARGETS];
+}
 
 static int
 decode_slice(const struct spdk_json_val *val, void *out)
 {
-	return spdk_json_decode_object(val, rpc_bdev_wals_slice_decoders, SPDK_COUNTOF(rpc_bdev_wals_slice_decoders), out);
+	struct rpc_bdev_wals_slice *slice = out;
+	return spdk_json_decode_array(val, decode_target, slice->targets,
+				      NUM_TARGETS, &slice->num_targets, sizeof(struct rpc_bdev_wals_target))
+			&& slice->num_targets == NUM_TARGETS;
 }
 
 struct rpc_bdev_wals_create_slices {
@@ -262,8 +277,6 @@ rpc_bdev_wals_create(struct spdk_jsonrpc_request *request,
 						 "spdk_json_decode_object failed");
 		goto cleanup;
 	}
-
-	SPDK_NOTICELOG("Decoded\n");
 
 	// rc = wals_bdev_config_add(req.name, req.log_bdev, req.core_bdev, &wals_cfg);
 	// if (rc != 0) {

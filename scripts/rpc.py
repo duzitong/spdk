@@ -2086,13 +2086,13 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     def bdev_wals_create(args):
         rpc.bdev.bdev_wals_create(args.client,
                                   name=args.name,
-                                  log_bdev=args.log_bdev,
-                                  core_bdev=args.core_bdev)
+                                  module=args.module,
+                                  slices=json.loads(args.slices))
     p = subparsers.add_parser('bdev_wals_create', aliases=['construct_wals_bdev'],
                               help='Create new wals bdev')
     p.add_argument('-n', '--name', help='wals bdev name', required=True)
-    p.add_argument('-l', '--log-bdev', help='log bdev name', required=True)
-    p.add_argument('-c', '--core-bdev', help='core bdev name', required=True)
+    p.add_argument('-m', '--module', help='target module name', required=True)
+    p.add_argument('-s', '--slices', help='json string of slices, e.g. [[{"address":"192.168.0.1", "port":4420, "nqn":"1"},{"address":"192.168.0.2", "port":4420, "nqn":"2"},{"address":"192.168.0.3", "port":4420, "nqn":"3"},{"address":"192.168.0.4", "port":4420, "nqn":"4"}]]', required=True)
     p.set_defaults(func=bdev_wals_create)
 
     def bdev_wals_delete(args):
