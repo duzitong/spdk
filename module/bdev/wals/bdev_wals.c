@@ -128,10 +128,7 @@ _wals_bdev_destroy_cb(void *arg)
 {
 	struct wals_bdev	*wals_bdev = arg;
 
-	// spdk_put_io_channel(wals_bdev->log_channel);
-	spdk_put_io_channel(wals_bdev->core_channel);
-	wals_bdev->log_channel = NULL;
-	wals_bdev->core_channel = NULL;
+	// TODO: call module to destroy
 
 	spdk_poller_unregister(&wals_bdev->pending_writes_poller);
 	spdk_poller_unregister(&wals_bdev->cleaner_poller);

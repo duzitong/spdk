@@ -153,13 +153,13 @@ struct wals_target_info {
 	char		*address;
 
 	uint16_t	port;
-}
+};
 
 struct wals_target_config {
 	struct wals_target_info 	target_log_info;
 
 	struct wals_target_info 	target_core_info;
-}
+};
 
 struct wals_target {
 	volatile uint64_t				log_head_offset;
@@ -301,7 +301,7 @@ struct wals_bdev {
 
 struct wals_slice_config {
 	struct wals_target_config	targets[NUM_TARGETS];
-}
+};
 
 /*
  * wals_bdev_config contains the wals bdev config related information after
