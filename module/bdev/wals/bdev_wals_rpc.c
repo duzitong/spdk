@@ -229,11 +229,11 @@ free_rpc_bdev_wals_create(struct rpc_bdev_wals_create *req)
 
 	free(req->name);
 	free(req->module);
-	for (i = 0; i < req->slices->num_slices; i++) {
-		free(req->slices->slices[i]->log->nqn);
-		free(req->slices->slices[i]->log->address);
-		free(req->slices->slices[i]->core->nqn);
-		free(req->slices->slices[i]->core->address);
+	for (i = 0; i < req->slices.num_slices; i++) {
+		free(req->slices.slices[i].log.nqn);
+		free(req->slices.slices[i].log.address);
+		free(req->slices.slices[i].core.nqn);
+		free(req->slices.slices[i].core.address);
 	}
 }
 
