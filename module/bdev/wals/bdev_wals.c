@@ -108,19 +108,7 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 
 	pthread_mutex_lock(&wals_bdev->mutex);
 	if (wals_bdev->ch_count == 0) {
-		wals_bdev->log_channel = spdk_bdev_get_io_channel(wals_bdev->log_bdev_info.desc);
-		if (!wals_bdev->log_channel) {
-			SPDK_ERRLOG("Unable to create io channel for log bdev\n");
-			return -ENOMEM;
-		}
-		
-		wals_bdev->core_channel = spdk_bdev_get_io_channel(wals_bdev->core_bdev_info.desc);
-		if (!wals_bdev->core_channel) {
-			spdk_put_io_channel(wals_bdev->log_channel);
-			SPDK_ERRLOG("Unable to create io channel for core bdev\n");
-			return -ENOMEM;
-		}
-
+		// TODO: call module to create
 		
 		wals_bdev->pending_writes_poller = SPDK_POLLER_REGISTER(wals_bdev_submit_pending_writes, wals_bdev, 0);
 		wals_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wals_bdev_cleaner, wals_bdev, 10);
@@ -407,26 +395,6 @@ _wals_bdev_submit_read_request(void *_wals_io)
 	wals_bdev_submit_read_request(wals_io);
 }
 
-static void
-wals_bdev_read_request_error(int ret, struct wals_bdev_io *wals_io, 
-                            struct wals_base_bdev_info    *base_info,
-                            struct spdk_io_channel        *base_ch)
-{
-    if (ret == -ENOMEM) {
-        wals_bdev_queue_io_wait(wals_io, base_info->bdev, base_ch,
-                    _wals_bdev_submit_read_request);
-        return;
-    } else {
-        SPDK_ERRLOG("bdev io submit error due to %d, it should not happen\n", ret);
-        assert(false);
-		if (wals_io->read_buf) {
-			spdk_free(wals_io->read_buf);
-		}
-        wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
-        return;
-    }
-}
-
 /*
  * brief:
  * wals_bdev_submit_read_request function submits read requests
@@ -445,95 +413,9 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	int				ret;
 	struct bskiplistNode        *bn;
     uint64_t    read_begin, read_end, read_cur, tmp;
-
-	wals_bdev = wals_io->wals_bdev;
-	read_begin = bdev_io->u.bdev.offset_blocks;
-    read_end = bdev_io->u.bdev.offset_blocks + bdev_io->u.bdev.num_blocks - 1;
-
-    bn = bslFirstNodeAfterBegin(wals_bdev->bsl, read_begin);
-
-	if (bn && bn->begin <= read_begin && bn->end >= read_end 
-        && wals_bdev_is_valid_entry(wals_bdev, bn->ele)) {
-        // one entry in log bdev
-		ret = spdk_bdev_readv_blocks(wals_bdev->log_bdev_info.desc, wals_bdev->log_channel,
-                        bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
-                        bn->ele->l.bdevOffset + read_begin - bn->ele->begin, bdev_io->u.bdev.num_blocks << wals_bdev->blocklen_shift,
-                        wals_base_bdev_read_complete, wals_io);
-        
-        if (ret != 0) {
-			SPDK_NOTICELOG("read from begin: %ld, end: %ld\n.", read_begin, read_end);
-			SPDK_NOTICELOG("bn begin: %ld, end: %ld\n.", bn->begin, bn->end);
-			SPDK_NOTICELOG("bn ele begin: %ld, end: %ld\n.", bn->ele->begin, bn->ele->end);
-			SPDK_NOTICELOG("read from log bdev offset: %ld, delta: %ld\n.", bn->ele->l.bdevOffset, read_begin - bn->ele->begin);
-			wals_bdev_read_request_error(ret, wals_io, &wals_bdev->log_bdev_info, wals_bdev->log_channel);
-            return;
-        }
-        return;
-    }
-
-    if (!bn || bn->begin > read_end) {
-        // not found in index
-        ret = spdk_bdev_readv_blocks(wals_bdev->core_bdev_info.desc, wals_bdev->core_channel,
-                        bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt,
-                        bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, wals_base_bdev_read_complete,
-                        wals_io);
-
-        if (ret != 0) {
-			wals_bdev_read_request_error(ret, wals_io, &wals_bdev->core_bdev_info, wals_bdev->core_channel);
-            return;
-        }
-        return;
-    }
-
-	// merge from log & core
-	wals_io->read_buf = spdk_zmalloc(bdev_io->u.bdev.num_blocks * wals_bdev->bdev.blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-	wals_io->remaining_base_bdev_io = 0;
-	read_cur = read_begin;
-
-	while (read_cur <= read_end) {
-		while (bn && !wals_bdev_is_valid_entry(wals_bdev, bn->ele)) {
-			bn = bn->level[0].forward;
-		}
-
-		if (!bn || read_cur < bn->begin) {
-			if (!bn) {
-				tmp = read_end;
-			} else {
-				tmp = bn->begin - 1 > read_end ? read_end : bn->begin - 1;
-			}
-
-			wals_io->remaining_base_bdev_io++;
-			ret = spdk_bdev_read_blocks(wals_bdev->core_bdev_info.desc, wals_bdev->core_channel,
-							wals_io->read_buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen,
-							read_cur, tmp - read_cur + 1, wals_base_bdev_read_complete_part,
-							wals_io);
-
-			if (ret != 0) {
-				wals_bdev_read_request_error(ret, wals_io, &wals_bdev->core_bdev_info, wals_bdev->core_channel);
-				return;
-			}
-			read_cur = tmp + 1;
-			continue;
-		}
-
-		if (bn && read_cur >= bn->begin) {
-			tmp = bn->end > read_end ? read_end : bn->end;
-			
-			wals_io->remaining_base_bdev_io++;
-			ret = spdk_bdev_read_blocks(wals_bdev->log_bdev_info.desc, wals_bdev->log_channel,
-							wals_io->read_buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen,
-							bn->ele->l.bdevOffset + read_cur - bn->ele->begin, tmp - read_cur + 1, wals_base_bdev_read_complete_part,
-							wals_io);
-
-			if (ret != 0) {
-				wals_bdev_read_request_error(ret, wals_io, &wals_bdev->log_bdev_info, wals_bdev->log_channel);
-				return;
-			}
-			read_cur = tmp + 1;
-			bn = bn->level[0].forward;
-			continue;
-		}
-	}
+	
+	wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
+	return;
 }
 
 static void
@@ -563,73 +445,11 @@ wals_bdev_submit_write_request(struct wals_bdev_io *wals_io)
 	struct spdk_bdev_io		*bdev_io = spdk_bdev_io_from_ctx(wals_io);
 	struct wals_bdev		*wals_bdev;
 	int				ret;
-	struct wals_base_bdev_info	*base_info;
 	struct spdk_io_channel		*base_ch;
 	struct wals_metadata			*metadata;
 	uint64_t	log_offset, log_blocks, next_tail;
-
-	wals_bdev = wals_io->wals_bdev;
-
-	base_info = &wals_bdev->log_bdev_info;
-	base_ch = wals_bdev->log_channel;
-
-	if (spdk_unlikely(bdev_io->u.bdev.num_blocks >= wals_bdev->log_max)) {
-		SPDK_ERRLOG("request block %ld exceeds the max blocks %ld of log device\n", bdev_io->u.bdev.num_blocks, wals_bdev->log_max);
-		wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
-	}
-
-	// use 1 block in log device for metadata
-	metadata = (struct wals_metadata *) spdk_zmalloc(wals_bdev->log_bdev_info.bdev->blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-
-	if (spdk_unlikely(!metadata)) {
-		SPDK_ERRLOG("wals bdev cannot alloc metadata.\n");
-		wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_NOMEM);
-	}
-
-	metadata->version = METADATA_VERSION;
-	metadata->seq = ++wals_bdev->seq;
-	metadata->core_offset = bdev_io->u.bdev.offset_blocks;
-	metadata->core_length =  bdev_io->u.bdev.num_blocks;
-
-	wals_io->metadata = metadata;
-
-	log_blocks = (bdev_io->u.bdev.num_blocks << wals_bdev->blocklen_shift) + 1;
-	next_tail = wals_bdev->log_tail + log_blocks;
-	if (next_tail >= wals_bdev->log_max) {
-		if (spdk_unlikely(wals_bdev->tail_round > wals_bdev->head_round || log_blocks > wals_bdev->log_head)) {
-			goto write_no_space;
-		} else {
-			log_offset = 0;
-			wals_bdev->log_tail = log_blocks;
-			wals_bdev->tail_round++;
-		}
-	} else if (wals_bdev->tail_round > wals_bdev->head_round && next_tail > wals_bdev->log_head) {
-		goto write_no_space;
-	} else {
-		log_offset = wals_bdev->log_tail;
-		wals_bdev->log_tail += log_blocks;
-	}
-	metadata->next_offset = wals_bdev->log_tail;
-	metadata->length = log_blocks - 1;
-	metadata->round = wals_bdev->tail_round;
-
-	ret = wals_log_bdev_writev_blocks_with_md(base_info->desc, base_ch,
-					bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt, metadata,
-					log_offset, metadata->length, wals_io);
-
-	if (spdk_likely(ret == 0)) {
-		
-	} else if (ret == -ENOMEM) {
-		wals_bdev_queue_io_wait(wals_io, base_info->bdev, base_ch,
-					_wals_bdev_submit_write_request);
-	} else {
-		SPDK_ERRLOG("bdev io submit error due to %d, it should not happen\n", ret);
-		wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
-	}
-	return;
-write_no_space:
-	SPDK_DEBUGLOG(bdev_wals, "queue bdev io submit due to no enough space left on log device.\n");
-	TAILQ_INSERT_TAIL(&wals_bdev->pending_writes, wals_io, tailq);
+	
+	wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
 	return;
 }
 
@@ -791,18 +611,7 @@ wals_bdev_dump_info_json(void *ctx, struct spdk_json_write_ctx *w)
 	spdk_json_write_named_uint32(w, "state", wals_bdev->state);
 	spdk_json_write_named_uint32(w, "destruct_called", wals_bdev->destruct_called);
 
-	if (wals_bdev->log_bdev_info.bdev) {
-		spdk_json_write_named_string(w, "log_bdev", wals_bdev->log_bdev_info.bdev->name);
-	} else {
-		spdk_json_write_named_null(w, "log_bdev");
-	}
-
-	if (wals_bdev->core_bdev_info.bdev) {
-		spdk_json_write_named_string(w, "core_bdev", wals_bdev->core_bdev_info.bdev->name);
-	} else {
-		spdk_json_write_named_null(w, "core_bdev");
-	}
-
+	// TODO: add dump info
 	spdk_json_write_object_end(w);
 
 	return 0;
@@ -829,17 +638,7 @@ wals_bdev_write_config_json(struct spdk_bdev *bdev, struct spdk_json_write_ctx *
 	spdk_json_write_named_object_begin(w, "params");
 	spdk_json_write_named_string(w, "name", bdev->name);
 
-	if (wals_bdev->log_bdev_info.bdev) {
-		spdk_json_write_named_string(w, "log_bdev", wals_bdev->log_bdev_info.bdev->name);
-	} else {
-		spdk_json_write_named_null(w, "log_bdev");
-	}
-
-	if (wals_bdev->core_bdev_info.bdev) {
-		spdk_json_write_named_string(w, "core_bdev", wals_bdev->core_bdev_info.bdev->name);
-	} else {
-		spdk_json_write_named_null(w, "core_bdev");
-	}
+	// TODO: add config info
 	spdk_json_write_object_end(w);
 
 	spdk_json_write_object_end(w);
@@ -1117,7 +916,7 @@ wals_bdev_configure(struct wals_bdev *wals_bdev)
 
 	assert(wals_bdev->state == WALS_BDEV_STATE_CONFIGURING);
 
-	wals_bdev->blocklen_shift = spdk_u32log2(wals_bdev->core_bdev_info.bdev->blocklen) - spdk_u32log2(wals_bdev->log_bdev_info.bdev->blocklen);
+	wals_bdev->blocklen_shift = 0;
 	wals_bdev_gen = &wals_bdev->bdev;
 
 	wals_bdev->state = WALS_BDEV_STATE_ONLINE;
@@ -1184,31 +983,7 @@ wals_bdev_remove_base_devices(struct wals_bdev_config *wals_cfg,
 
 	wals_bdev->destroy_started = true;
 
-	if (wals_bdev->log_bdev_info.bdev != NULL) {
-		assert(wals_bdev->log_bdev_info.desc);
-		wals_bdev->log_bdev_info.remove_scheduled = true;
-		if (wals_bdev->destruct_called == true ||
-		    wals_bdev->state == WALS_BDEV_STATE_CONFIGURING) {
-			/*
-			 * As wals bdev is not registered yet or already unregistered,
-			 * so cleanup should be done here itself.
-			 */
-			wals_bdev_free_base_bdev_resource(wals_bdev, &wals_bdev->log_bdev_info);
-		}
-	}
-
-	if (wals_bdev->core_bdev_info.bdev != NULL) {
-		assert(wals_bdev->core_bdev_info.desc);
-		wals_bdev->core_bdev_info.remove_scheduled = true;
-		if (wals_bdev->destruct_called == true ||
-		    wals_bdev->state == WALS_BDEV_STATE_CONFIGURING) {
-			/*
-			 * As wals bdev is not registered yet or already unregistered,
-			 * so cleanup should be done here itself.
-			 */
-			wals_bdev_free_base_bdev_resource(wals_bdev, &wals_bdev->core_bdev_info);
-		}
-	}
+	// TODO: call module to remove
 
 	wals_bdev_cleanup(wals_bdev);
 	if (cb_fn) {
@@ -1265,9 +1040,7 @@ wals_bdev_start(struct wals_bdev *wals_bdev)
 {
 	uint64_t mempool_size;
 
-	mempool_size = wals_bdev->log_bdev_info.bdev->blockcnt < wals_bdev->core_bdev_info.bdev->blockcnt 
-				? wals_bdev->log_bdev_info.bdev->blockcnt
-				: wals_bdev->core_bdev_info.bdev->blockcnt;
+	mempool_size = 1024;
 	mempool_size = spdk_align64pow2(mempool_size);
 
 	wals_bdev->bstat_pool = spdk_mempool_create("WALS_BSTAT_POOL", mempool_size, sizeof(bstat), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
