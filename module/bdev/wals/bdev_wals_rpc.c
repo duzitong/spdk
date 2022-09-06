@@ -153,9 +153,9 @@ struct rpc_bdev_wals_target_info {
 };
 
 static const struct spdk_json_object_decoder rpc_bdev_wals_target_info_decoders[] = {
-	{"nqn", offsetof(struct rpc_bdev_wals_target, nqn), spdk_json_decode_string},
-	{"address", offsetof(struct rpc_bdev_wals_target, address), spdk_json_decode_string},
-	{"port", offsetof(struct rpc_bdev_wals_target, port), spdk_json_decode_uint16},
+	{"nqn", offsetof(struct rpc_bdev_wals_target_info, nqn), spdk_json_decode_string},
+	{"address", offsetof(struct rpc_bdev_wals_target_info, address), spdk_json_decode_string},
+	{"port", offsetof(struct rpc_bdev_wals_target_info, port), spdk_json_decode_uint16},
 };
 
 static int
@@ -171,8 +171,8 @@ struct rpc_bdev_wals_target {
 };
 
 static const struct spdk_json_object_decoder rpc_bdev_wals_target_decoders[] = {
-	{"log", offsetof(struct rpc_bdev_wals_slice, log), decode_target_info},
-	{"core", offsetof(struct rpc_bdev_wals_slice, core), decode_target_info},
+	{"log", offsetof(struct rpc_bdev_wals_target, log), decode_target_info},
+	{"core", offsetof(struct rpc_bdev_wals_target, core), decode_target_info},
 };
 
 static int
@@ -185,7 +185,7 @@ struct rpc_bdev_wals_slice {
 	size_t						 	num_targets;
 
 	struct rpc_bdev_wals_target		targets[NUM_TARGETS];
-}
+};
 
 static int
 decode_slice(const struct spdk_json_val *val, void *out)
@@ -240,15 +240,17 @@ static const struct spdk_json_object_decoder rpc_bdev_wals_create_decoders[] = {
 static void
 free_rpc_bdev_wals_create(struct rpc_bdev_wals_create *req)
 {
-	int i;
+	int i, j;
 
 	free(req->name);
 	free(req->module);
 	for (i = 0; i < req->slices.num_slices; i++) {
-		free(req->slices.slices[i].log.nqn);
-		free(req->slices.slices[i].log.address);
-		free(req->slices.slices[i].core.nqn);
-		free(req->slices.slices[i].core.address);
+		for (j = 0; j < req->slices.slices->num_targets; j++) {
+			free(req->slices.slices[i].targets[j].log.nqn);
+			free(req->slices.slices[i].targets[j].log.address);
+			free(req->slices.slices[i].targets[j].core.nqn);
+			free(req->slices.slices[i].targets[j].core.address);
+		}
 	}
 }
 
