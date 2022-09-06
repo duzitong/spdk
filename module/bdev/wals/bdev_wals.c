@@ -66,23 +66,19 @@ struct wals_all_tailq		g_wals_bdev_list = TAILQ_HEAD_INITIALIZER(g_wals_bdev_lis
 struct wals_offline_tailq	g_wals_bdev_offline_list = TAILQ_HEAD_INITIALIZER(
 			g_wals_bdev_offline_list);
 
-static TAILQ_HEAD(, wals_bdev_module) g_wals_modules = TAILQ_HEAD_INITIALIZER(g_wals_modules);
+static TAILQ_HEAD(, wals_target_module) g_wals_target_modules = TAILQ_HEAD_INITIALIZER(g_wals_target_modules);
 
 /* Function declarations */
 static void	wals_bdev_examine(struct spdk_bdev *bdev);
 static int	wals_bdev_start(struct wals_bdev *bdev);
 static void	wals_bdev_stop(struct wals_bdev *bdev);
 static int	wals_bdev_init(void);
-static void	wals_bdev_event_base_bdev(enum spdk_bdev_event_type type, struct spdk_bdev *bdev,
-		void *event_ctx);
 static bool wals_bdev_is_valid_entry(struct wals_bdev *bdev, struct bstat *bstat);
 int wals_log_bdev_writev_blocks_with_md(struct spdk_bdev_desc *desc, struct spdk_io_channel *ch,
 										struct iovec *iovs, int iovcnt, void *md_buf,
 										uint64_t offset_blocks, uint64_t num_blocks,
 										struct wals_bdev_io *wals_io);
 static int wals_bdev_submit_pending_writes(void *ctx);
-static int wals_bdev_mover(void *ctx);
-static void wals_bdev_mover_do_update(struct spdk_bdev_io* bdev_io, bool success, void* ctx);
 static int wals_bdev_cleaner(void *ctx);
 static int wals_bdev_stat_report(void *ctx);
 
@@ -127,12 +123,12 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 
 		
 		wals_bdev->pending_writes_poller = SPDK_POLLER_REGISTER(wals_bdev_submit_pending_writes, wals_bdev, 0);
-		wals_bdev->mover_poller = SPDK_POLLER_REGISTER(wals_bdev_mover, wals_bdev, 10);
 		wals_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wals_bdev_cleaner, wals_bdev, 10);
 		wals_bdev->stat_poller = SPDK_POLLER_REGISTER(wals_bdev_stat_report, wals_bdev, 30*1000*1000);
 
-		wals_bdev->open_thread = spdk_get_thread();
+		wals_bdev->write_thread = wals_bdev->read_thread = spdk_get_thread();
 	}
+	SPDK_NOTICELOG("Core mask of current thread: 0x%s", spdk_cpuset_fmt(spdk_thread_get_cpumask(spdk_get_thread())));
 	wals_bdev->ch_count++;
 	pthread_mutex_unlock(&wals_bdev->mutex);
 
@@ -150,7 +146,6 @@ _wals_bdev_destroy_cb(void *arg)
 	wals_bdev->core_channel = NULL;
 
 	spdk_poller_unregister(&wals_bdev->pending_writes_poller);
-	spdk_poller_unregister(&wals_bdev->mover_poller);
 	spdk_poller_unregister(&wals_bdev->cleaner_poller);
 	spdk_poller_unregister(&wals_bdev->stat_poller);
 	
@@ -222,46 +217,6 @@ wals_bdev_cleanup(struct wals_bdev *wals_bdev)
 
 /*
  * brief:
- * wrapper for the bdev close operation
- * params:
- * base_info - wals base bdev info
- * returns:
- */
-static void
-_wals_bdev_free_base_bdev_resource(void *ctx)
-{
-	struct spdk_bdev_desc *desc = ctx;
-
-	spdk_bdev_close(desc);
-}
-
-
-/*
- * brief:
- * free resource of base bdev for wals bdev
- * params:
- * wals_bdev - pointer to wals bdev
- * base_info - wals base bdev info
- * returns:
- * 0 - success
- * non zero - failure
- */
-static void
-wals_bdev_free_base_bdev_resource(struct wals_bdev *wals_bdev,
-				  struct wals_base_bdev_info *base_info)
-{
-	spdk_bdev_module_release_bdev(base_info->bdev);
-	if (base_info->thread && base_info->thread != spdk_get_thread()) {
-		spdk_thread_send_msg(base_info->thread, _wals_bdev_free_base_bdev_resource, base_info->desc);
-	} else {
-		spdk_bdev_close(base_info->desc);
-	}
-	base_info->desc = NULL;
-	base_info->bdev = NULL;
-}
-
-/*
- * brief:
  * wals_bdev_destruct is the destruct function table pointer for wals bdev
  * params:
  * ctxt - pointer to wals_bdev
@@ -277,17 +232,6 @@ wals_bdev_destruct(void *ctxt)
 	SPDK_DEBUGLOG(bdev_wals, "wals_bdev_destruct\n");
 
 	wals_bdev->destruct_called = true;
-	if (g_shutdown_started ||
-		((wals_bdev->log_bdev_info.remove_scheduled == true) &&
-			(wals_bdev->log_bdev_info.bdev != NULL))) {
-		wals_bdev_free_base_bdev_resource(wals_bdev, &wals_bdev->log_bdev_info);
-	}
-
-	if (g_shutdown_started ||
-		((wals_bdev->core_bdev_info.remove_scheduled == true) &&
-			(wals_bdev->core_bdev_info.bdev != NULL))) {
-		wals_bdev_free_base_bdev_resource(wals_bdev, &wals_bdev->core_bdev_info);
-	}
 
 	if (g_shutdown_started) {
 		TAILQ_REMOVE(&g_wals_bdev_configured_list, wals_bdev, state_link);
@@ -1077,42 +1021,6 @@ wals_bdev_get_ctx_size(void)
 	return sizeof(struct wals_bdev_io);
 }
 
-/*
- * brief:
- * wals_bdev_can_claim_bdev is the function to check if this base_bdev can be
- * claimed by wals bdev or not.
- * params:
- * bdev_name - represents base bdev name
- * _wals_cfg - pointer to wals bdev config parsed from config file
- * is_log - if bdev can be claimed, it represents the bdev is log or core
- * slot. This field is only valid if return value of this function is true
- * returns:
- * true - if bdev can be claimed
- * false - if bdev can't be claimed
- */
-static bool
-wals_bdev_can_claim_bdev(const char *bdev_name, struct wals_bdev_config **_wals_cfg,
-			 bool *is_log)
-{
-	struct wals_bdev_config *wals_cfg;
-
-	TAILQ_FOREACH(wals_cfg, &g_wals_config.wals_bdev_config_head, link) {
-		if (!strcmp(bdev_name, wals_cfg->log_bdev.name)) {
-			*_wals_cfg = wals_cfg;
-			*is_log = true;
-			return true;
-		}
-
-		if (!strcmp(bdev_name, wals_cfg->core_bdev.name)) {
-			*_wals_cfg = wals_cfg;
-			*is_log = false;
-			return true;
-		}
-	}
-
-	return false;
-}
-
 
 static struct spdk_bdev_module g_wals_if = {
 	.name = "wals",
@@ -1239,32 +1147,6 @@ wals_bdev_configure(struct wals_bdev *wals_bdev)
 	return 0;
 }
 
-
-/*
- * brief:
- * wals_bdev_event_base_bdev function is called by below layers when base_bdev
- * triggers asynchronous event.
- * params:
- * type - event details.
- * bdev - bdev that triggered event.
- * event_ctx - context for event.
- * returns:
- * none
- */
-static void
-wals_bdev_event_base_bdev(enum spdk_bdev_event_type type, struct spdk_bdev *bdev,
-			  void *event_ctx)
-{
-	switch (type) {
-	case SPDK_BDEV_EVENT_REMOVE:
-		// TODO
-		break;
-	default:
-		SPDK_NOTICELOG("Unsupported bdev event: type %d\n", type);
-		break;
-	}
-}
-
 /*
  * brief:
  * Remove base bdevs from the wals bdev one by one.  Skip any base bdev which
@@ -1337,109 +1219,6 @@ wals_bdev_remove_base_devices(struct wals_bdev_config *wals_cfg,
 
 /*
  * brief:
- * wals_bdev_add_log_device function is the actual function which either adds
- * the nvme base device to existing wals bdev. It also claims
- * the base device and keep the open descriptor.
- * params:
- * wals_cfg - pointer to wals bdev config
- * returns:
- * 0 - success
- * non zero - failure
- */
-static int
-wals_bdev_add_log_device(struct wals_bdev_config *wals_cfg)
-{
-	struct wals_bdev	*wals_bdev;
-	struct spdk_bdev *bdev;
-	struct spdk_bdev_desc *desc;
-	int			rc;
-
-	wals_bdev = wals_cfg->wals_bdev;
-	if (!wals_bdev) {
-		SPDK_ERRLOG("WALS bdev '%s' is not created yet\n", wals_cfg->name);
-		return -ENODEV;
-	}
-
-	rc = spdk_bdev_open_ext(wals_cfg->log_bdev.name, true, wals_bdev_event_base_bdev, NULL, &desc);
-	if (rc != 0) {
-		if (rc != -ENODEV) {
-			SPDK_ERRLOG("Unable to create desc on bdev '%s'\n", wals_cfg->log_bdev.name);
-		}
-		return rc;
-	}
-
-	bdev = spdk_bdev_desc_get_bdev(desc);
-
-	rc = spdk_bdev_module_claim_bdev(bdev, NULL, &g_wals_if);
-	if (rc != 0) {
-		SPDK_ERRLOG("Unable to claim this bdev as it is already claimed\n");
-		spdk_bdev_close(desc);
-		return rc;
-	}
-
-	SPDK_DEBUGLOG(bdev_wals, "bdev %s is claimed\n", wals_cfg->log_bdev.name);
-	wals_bdev->log_bdev_info.thread = spdk_get_thread();
-	wals_bdev->log_bdev_info.bdev = bdev;
-	wals_bdev->log_bdev_info.desc = desc;
-
-	return 0;
-}
-
-/*
- * brief:
- * wals_bdev_add_log_device function is the actual function which either adds
- * the nvme base device to existing wals bdev. It also claims
- * the base device and keep the open descriptor.
- * params:
- * wals_cfg - pointer to wals bdev config
- * returns:
- * 0 - success
- * non zero - failure
- */
-static int
-wals_bdev_add_core_device(struct wals_bdev_config *wals_cfg)
-{
-	struct wals_bdev	*wals_bdev;
-	struct spdk_bdev *bdev;
-	struct spdk_bdev_desc *desc;
-	int			rc;
-
-	wals_bdev = wals_cfg->wals_bdev;
-	if (!wals_bdev) {
-		SPDK_ERRLOG("WALS bdev '%s' is not created yet\n", wals_cfg->name);
-		return -ENODEV;
-	}
-
-	rc = spdk_bdev_open_ext(wals_cfg->core_bdev.name, true, wals_bdev_event_base_bdev, NULL, &desc);
-	if (rc != 0) {
-		if (rc != -ENODEV) {
-			SPDK_ERRLOG("Unable to create desc on bdev '%s'\n", wals_cfg->core_bdev.name);
-		}
-		return rc;
-	}
-
-	bdev = spdk_bdev_desc_get_bdev(desc);
-
-	rc = spdk_bdev_module_claim_bdev(bdev, NULL, &g_wals_if);
-	if (rc != 0) {
-		SPDK_ERRLOG("Unable to claim this bdev as it is already claimed\n");
-		spdk_bdev_close(desc);
-		return rc;
-	}
-
-	SPDK_DEBUGLOG(bdev_wals, "bdev %s is claimed\n", wals_cfg->core_bdev.name);
-	wals_bdev->core_bdev_info.thread = spdk_get_thread();
-	wals_bdev->core_bdev_info.bdev = bdev;
-	wals_bdev->core_bdev_info.desc = desc;
-
-	wals_bdev->bdev.blocklen = bdev->blocklen;
-	wals_bdev->bdev.blockcnt = bdev->blockcnt;
-
-	return 0;
-}
-
-/*
- * brief:
  * Add base bdevs to the wals bdev one by one.  Skip any base bdev which doesn't
  *  exist or fails to add. If all base bdevs are successfully added, the wals bdev
  *  moves to the configured state and becomes available. Otherwise, the wals bdev
@@ -1464,17 +1243,7 @@ wals_bdev_add_base_devices(struct wals_bdev_config *wals_cfg)
 		return -ENODEV;
 	}
 
-	rc = wals_bdev_add_log_device(wals_cfg);
-	if (rc) {
-		SPDK_ERRLOG("Failed to add log device '%s' to WALS bdev '%s'.\n", wals_cfg->log_bdev.name, wals_cfg->name);
-		return rc;
-	}
-
-	rc = wals_bdev_add_core_device(wals_cfg);
-	if (rc) {
-		SPDK_ERRLOG("Failed to add core device '%s' to WALS bdev '%s'.\n", wals_cfg->core_bdev.name, wals_cfg->name);
-		return rc;
-	}
+	// TODO: call all slice targets to start
 
 	rc = wals_bdev_start(wals_bdev);
 	if (rc) {
@@ -1495,9 +1264,6 @@ static int
 wals_bdev_start(struct wals_bdev *wals_bdev)
 {
 	uint64_t mempool_size;
-	int i;
-
-	wals_bdev->log_max = wals_bdev->log_bdev_info.bdev->blockcnt - 2;  // last block used to track log head
 
 	mempool_size = wals_bdev->log_bdev_info.bdev->blockcnt < wals_bdev->core_bdev_info.bdev->blockcnt 
 				? wals_bdev->log_bdev_info.bdev->blockcnt
@@ -1510,17 +1276,11 @@ wals_bdev_start(struct wals_bdev *wals_bdev)
 	wals_bdev->bsl = bslCreate(wals_bdev->bsl_node_pool, wals_bdev->bstat_pool);
 	wals_bdev->bslfn = bslfnCreate(wals_bdev->bsl_node_pool, wals_bdev->bstat_pool);
 	TAILQ_INIT(&wals_bdev->pending_writes);
-	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
-		wals_bdev->mover_context[i].state = MOVER_IDLE;
-	}
 	// TODO: recover
 	wals_bdev->log_head = wals_bdev->move_head = 0;
 	wals_bdev->log_tail = 0;
 	wals_bdev->head_round = wals_bdev->move_round = 0;
 	wals_bdev->tail_round = 0;
-
-	wals_bdev->log_info = spdk_zmalloc(wals_bdev->log_bdev_info.bdev->blocklen, 0,
-		NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 
 	return 0;
 }
@@ -1528,6 +1288,7 @@ wals_bdev_start(struct wals_bdev *wals_bdev)
 static void
 wals_bdev_stop(struct wals_bdev *wals_bdev)
 {
+	// TODO: call target module stop
 	// flush?
 }
 
@@ -1545,18 +1306,8 @@ static void
 wals_bdev_examine(struct spdk_bdev *bdev)
 {
 	struct wals_bdev_config	*wals_cfg;
-	bool			is_log;
-
-	if (wals_bdev_can_claim_bdev(bdev->name, &wals_cfg, &is_log)) {
-		if (is_log) {
-			wals_bdev_add_log_device(wals_cfg);
-		} else {
-			wals_bdev_add_core_device(wals_cfg);
-		}
-	} else {
-		SPDK_DEBUGLOG(bdev_wals, "bdev %s can't be claimed\n",
-			      bdev->name);
-	}
+	
+	// TODO: let target module to examine
 
 	spdk_bdev_module_examine_done(&g_wals_if);
 }
@@ -1566,141 +1317,19 @@ wals_bdev_submit_pending_writes(void *ctx)
 {
 	struct wals_bdev *wals_bdev = ctx;
 	struct wals_bdev_io	*wals_io;
-	struct wals_base_bdev_info	*base_info;
-	struct spdk_io_channel		*base_ch;
-	int		ret;
-	uint64_t log_blocks, next_tail, log_offset;
 
 	while (!TAILQ_EMPTY(&wals_bdev->pending_writes)) {
 		wals_io = TAILQ_FIRST(&wals_bdev->pending_writes);
-
-		base_info = &wals_bdev->log_bdev_info;
-		base_ch = wals_bdev->log_channel;
-
-		log_blocks = (wals_io->metadata->core_length << wals_bdev->blocklen_shift) + 1;
-		next_tail = wals_bdev->log_tail + log_blocks;
-		if (next_tail >= wals_bdev->log_max) {
-			if (spdk_unlikely(wals_bdev->tail_round > wals_bdev->head_round || log_blocks > wals_bdev->log_head)) {
-				return SPDK_POLLER_BUSY;
-			} else {
-				log_offset = 0;
-				wals_bdev->log_tail = log_blocks;
-				wals_bdev->tail_round++;
-			}
-		} else if (wals_bdev->tail_round > wals_bdev->head_round && next_tail > wals_bdev->log_head) {
-			return SPDK_POLLER_BUSY;
-		} else {
-			log_offset = wals_bdev->log_tail;
-			wals_bdev->log_tail += log_blocks;
-		}
-		wals_io->metadata->next_offset = wals_bdev->log_tail;
-		wals_io->metadata->length = log_blocks - 1;
-		wals_io->metadata->round = wals_bdev->tail_round;
-
-		ret = wals_log_bdev_writev_blocks_with_md(base_info->desc, base_ch,
-						wals_io->orig_io->u.bdev.iovs, wals_io->orig_io->u.bdev.iovcnt, wals_io->metadata,
-						log_offset, wals_io->metadata->length, wals_io);
-
-		if (spdk_likely(ret == 0)) {
-			TAILQ_REMOVE(&wals_bdev->pending_writes, wals_io, tailq);
-		} else if (ret == -ENOMEM) {	
-			// retry next time
-		} else {
-			SPDK_ERRLOG("pending write submit error due to %d, it should not happen\n", ret);
-			wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
-		}
 		return SPDK_POLLER_BUSY;
 	}
 
 	return SPDK_POLLER_IDLE;
 }
 
-
-static int
-wals_bdev_mover(void *ctx)
-{
-	struct wals_bdev *bdev = ctx;
-	int ret;
-	ret = spdk_bdev_read_blocks(bdev->log_bdev_info.desc, bdev->log_channel, bdev->log_info, bdev->log_max + 1, 1, 
-									wals_bdev_mover_do_update, bdev);
-	
-	if (ret) {
-		SPDK_ERRLOG("failed to read last block %d\n", ret);
-	}
-
-	return SPDK_POLLER_BUSY;
-}
-
-static void wals_bdev_mover_do_update(struct spdk_bdev_io* bdev_io, bool success, void* ctx) {
-	if (!success) {
-		SPDK_ERRLOG("Failed to read last block\n");
-		return;
-	}
-
-	struct wals_bdev* bdev = ctx;
-	spdk_bdev_free_io(bdev_io);
-	SPDK_DEBUGLOG(bdev_wals,
-		"Got head %ld round %ld\n", bdev->log_info->head, bdev->log_info->round);
-	
-	if (bdev->log_info->head == -1 && bdev->log_info->round == -1) {
-		SPDK_WARNLOG("Got destage info from non-attached bdev.\n");
-	}
-	bdev->log_head = bdev->log_info->head;
-	bdev->head_round = bdev->log_info->round;
-}
-
 static int
 wals_bdev_cleaner(void *ctx)
 {
 	struct wals_bdev *wals_bdev = ctx;
-	bskiplistNode *update[BSKIPLIST_MAXLEVEL], *x, *tmp;
-	int i, j, count = 0, total;
-	
-    long rand = random();
-
-    for (i = 0; i < 3; i++) {
-        rand <<= 4;
-        rand += random();
-    }
-    rand %= wals_bdev->bdev.blockcnt;
-
-    x = wals_bdev->bsl->header;
-    for (i = wals_bdev->bsl->level-1; i >= 0; i--) {
-        while (x->level[i].forward &&
-                (x->level[i].forward->end < rand))
-        {
-            x = x->level[i].forward;
-        }
-        update[i] = x;
-    }
-
-	// try removal for level times.
-	for (i = 0; i < wals_bdev->bsl->level; i++) {
-		tmp = x->level[0].forward;
-		if (tmp) {
-			if (wals_bdev_is_valid_entry(wals_bdev, tmp->ele)) {
-				for (j = 0; j < tmp->height; j++) {
-					update[j] = tmp;
-				}
-			} else {
-				for (j = 0; j < tmp->height; j++) {
-					update[j]->level[j].forward = tmp->level[j].forward;
-					tmp->level[j].forward = NULL;
-				}
-				wals_bdev->bslfn->tail->level[0].forward = tmp;
-				wals_bdev->bslfn->tail = tmp;
-				count++;
-			}
-		} else {
-			break;
-		}
-	}
-
-	total = bslfnFree(wals_bdev->bslfn, 10);
-
-	if (total) {
-		return SPDK_POLLER_BUSY;
-	}
 
 	return SPDK_POLLER_IDLE;
 }
@@ -1709,9 +1338,6 @@ static int
 wals_bdev_stat_report(void *ctx)
 {
 	struct wals_bdev *bdev = ctx;
-
-	// bslPrint(bdev->bsl, 1);
-	SPDK_NOTICELOG("WALS bdev head: %ld(%ld), tail: %ld(%ld).\n", bdev->log_head, bdev->head_round, bdev->log_tail, bdev->tail_round);
 
 	return SPDK_POLLER_BUSY;
 }

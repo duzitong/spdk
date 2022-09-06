@@ -31,6 +31,12 @@
  *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/*_
+ * WALS consists functionalities of WAL, Replica, and even sort of remote connection.
+ * 'S' stands for the advanced version of WAL.
+ * It can also stand for 'sliced' version of WAL.
+ */
+
 #ifndef SPDK_BDEV_WALS_INTERNAL_H
 #define SPDK_BDEV_WALS_INTERNAL_H
 
@@ -42,10 +48,11 @@
 #include "../wal/bsl.h"
 
 #define METADATA_VERSION		10086	// XD
-#define MAX_OUTSTANDING_MOVES	32
+#define NUM_TARGETS				4
+#define QUORUM_TARGETS			3
 
-#define OWNER_WALS		0x9
-#define OBJECT_WALS_IO		0x9
+#define OWNER_WALS				0x9
+#define OBJECT_WALS_IO			0x9
 #define TRACE_GROUP_WALS		0xE
 
 #define TRACE_WALS_BSTAT_CREATE_START	SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x10)
@@ -89,26 +96,37 @@ enum wals_bdev_state {
 };
 
 /*
- * wals_base_bdev_info contains information for the base bdevs which are part of some
- * wals. This structure contains the per base bdev information. Whatever is
- * required per base device for wals bdev will be kept here
+ * WALS target module descriptor
  */
-struct wals_base_bdev_info {
-	/* pointer to base spdk bdev */
-	struct spdk_bdev	*bdev;
-
-	/* pointer to base bdev descriptor opened by wals bdev */
-	struct spdk_bdev_desc	*desc;
+struct wals_target_module {
+	/* name of the module */
+	char	*name;
 
 	/*
-	 * When underlying base device calls the hot plug function on drive removal,
-	 * this flag will be set and later after doing some processing, base device
-	 * descriptor will be closed
+	 * Called when the wals is starting, right before changing the state to
+	 * online and registering the bdev. Parameters of the bdev like blockcnt
+	 * should be set here.
+	 *
+	 * Non-zero return value will abort the startup process.
 	 */
-	bool			remove_scheduled;
+	struct wals_target* (*start)(struct wals_target_config *config);
 
-	/* thread where base device is opened */
-	struct spdk_thread	*thread;
+	/*
+	 * Called when the wals is stopping, right before changing the state to
+	 * offline and unregistering the bdev. Optional.
+	 */
+	void (*stop)(struct wals_target *target);
+
+	/* Handler for log read requests */
+	void (*submit_log_read_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
+
+	/* Handler for core read requests */
+	void (*submit_core_read_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
+
+	/* Handler for log write requests */
+	void (*submit_log_write_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
+
+	TAILQ_ENTRY(wals_slice_module) link;
 };
 
 struct wals_metadata {
@@ -118,48 +136,47 @@ struct wals_metadata {
 
 	uint64_t	next_offset;
 
+	/* log blockcnt */
 	uint64_t	length;
 
 	uint64_t	core_offset;
 
+	/* core blockcnt */
 	uint64_t	core_length;
 
 	uint64_t	round;
 };
 
-/* info stored in the last block of log bdev */
-struct wals_log_info {
-	uint64_t	head;
+struct wals_target_info {
+	char		*nqn;
 
-	uint64_t	round;
+	char		*address;
+
+	uint16_t	port;
+}
+
+struct wals_target_config {
+	struct wals_target_info 	target_log_info;
+
+	struct wals_target_info 	target_core_info;
+}
+
+struct wals_target {
+	volatile uint64_t				log_head_offset;
+
+	volatile uint64_t				log_head_round;
+
+	void							*private_info;
 };
 
-enum wals_mover_state{
-	MOVER_IDLE,
+struct wals_slice {
+	uint64_t	seq;
 
-	MOVER_READING_MD,
+	uint64_t	log_tail_offset;
 
-	MOVER_READING_DATA,
+	uint64_t	log_tail_round;
 
-	MOVER_WRITING_DATA,
-
-	MOVER_UPDATING_HEAD,
-
-	MOVER_PERSIST_HEAD,
-};
-
-struct wals_mover_context {
-	int							id;
-
-	struct wals_bdev				*bdev;
-
-	struct wals_metadata 		*metadata;
-
-	void 						*data;
-
-	struct wals_log_info			*info;
-
-	enum wals_mover_state		state;
+	struct wals_target	target[NUM_TARGETS];
 };
 
 /*
@@ -213,12 +230,6 @@ struct wals_bdev {
 	/* pointer to config file entry */
 	struct wals_bdev_config		*config;
 
-	/* bdev info of log bdev */
-	struct wals_base_bdev_info	log_bdev_info;
-
-	/* bdev info of core bdev */
-	struct wals_base_bdev_info	core_bdev_info;
-
 	/* block length bit shift for optimized calculation */
 	uint32_t			blocklen_shift;
 
@@ -234,23 +245,17 @@ struct wals_bdev {
 	/* count of open channels */
 	uint32_t			ch_count;
 
-	/* open thread */
-	struct spdk_thread		*open_thread;
+	/* write thread */
+	struct spdk_thread		*write_thread;
+
+	/* read thread */
+	struct spdk_thread		*read_thread;
 
 	/* mutex to set thread and pollers */
 	pthread_mutex_t			mutex;
 
-	/* IO channel of log bdev */
-	struct spdk_io_channel	*log_channel;
-
-	/* IO channel of core bdev */
-	struct spdk_io_channel  *core_channel;
-
 	/* poller to complete pending writes */
 	struct spdk_poller		*pending_writes_poller;
-
-	/* poller to move data from log bdev to core bdev */
-	struct spdk_poller		*mover_poller;
 
 	/* poller to clean index */
 	struct spdk_poller		*cleaner_poller;
@@ -258,31 +263,29 @@ struct wals_bdev {
 	/* poller to report stat */
 	struct spdk_poller		*stat_poller;
 
+	/* number of slices */
+	uint64_t			slicecnt;
+
+	/* number of blocks per slice */
+	uint64_t			slice_blockcnt;
+
+	struct wals_slice	*slices;
+
+	/* buffer block length */
+	uint64_t			buffer_blocklen;
+
+	/* number of blocks of the buffer */
+	uint64_t			buffer_blockcnt;
+
+	uint64_t			buffer_tail;
+
+	uint64_t			buffer_head;
+
 	/* bsl node mempool */
 	struct spdk_mempool		*bsl_node_pool;
 
 	/* bstat mempool */
 	struct spdk_mempool		*bstat_pool;
-
-	struct spdk_mempool		*iovs_pool;
-
-	/* sequence id */
-	uint64_t	seq;
-
-	/* head offset of logs */
-	uint64_t	log_head;
-	
-	/* current round of log head */
-	uint64_t	head_round;
-
-	/* tail offset of logs */
-	uint64_t	log_tail;
-
-	/* current round of log tail */
-	uint64_t	tail_round;
-
-	/* max blocks of logs */
-	uint64_t	log_max;
 
 	/* skip list index */
 	struct bskiplist 	*bsl;
@@ -290,48 +293,31 @@ struct wals_bdev {
 	/* nodes to free */
 	struct bskiplistFreeNodes *bslfn;
 
-	/* pending writes due to no enough space on log device */
+	struct wals_target_module	*module;
+
+	/* pending writes due to no enough space on log device or (unlikely) buffer */
 	TAILQ_HEAD(, wals_bdev_io)	pending_writes;
-
-	/* mover task context */
-	struct wals_mover_context	mover_context[MAX_OUTSTANDING_MOVES];
-
-	/* sorted mover task context */
-	struct wals_mover_context	*sorted_context[MAX_OUTSTANDING_MOVES];
-
-	uint64_t	move_head;
-
-	uint64_t	move_round;
-
-	// the final block in the log bdev. When allocating, the size
-	// must be equal to the block size of the log bdev. 
-	struct wals_log_info* log_info;
 };
 
-/*
- * wals_base_bdev_config is the per base bdev data structure which contains
- * information w.r.t to per base bdev during parsing config
- */
-struct wals_base_bdev_config {
-	/* base bdev name from config file */
-	char				*name;
-};
+struct wals_slice_config {
+	struct wals_target_config	targets[NUM_TARGETS];
+}
 
 /*
  * wals_bdev_config contains the wals bdev config related information after
  * parsing the config file
  */
 struct wals_bdev_config {
-	/* base bdev of log bdev */
-	struct wals_base_bdev_config	log_bdev;
+	char						*name;
 
-	/* base bdev of core bdev */
-	struct wals_base_bdev_config	core_bdev;
+	struct wals_slice_config 	*slices;
+
+	uint64_t					slicecnt;
+
+	char						*module_name;
 
 	/* Points to already created wals bdev  */
-	struct wals_bdev		*wals_bdev;
-
-	char				*name;
+	struct wals_bdev			*wals_bdev;
 
 	TAILQ_ENTRY(wals_bdev_config)	link;
 };
@@ -371,51 +357,14 @@ extern struct wals_config		g_wals_config;
 
 typedef void (*wals_bdev_destruct_cb)(void *cb_ctx, int rc);
 
+int wals_bdev_config_add(const char *wals_name, uint64_t slicecnt, const char *module_name,
+			 struct wals_bdev_config **_wals_cfg);
 int wals_bdev_create(struct wals_bdev_config *wals_cfg);
-int wals_bdev_add_base_devices(struct wals_bdev_config *wals_cfg);
+int wals_bdev_add_targets(struct wals_bdev_config *wals_cfg, uint64_t slicenum, struct wals_target_config *targets);
 void wals_bdev_remove_base_devices(struct wals_bdev_config *wals_cfg,
 				   wals_bdev_destruct_cb cb_fn, void *cb_ctx);
-int wals_bdev_config_add(const char *wals_name, const char *log_bdev_name, const char *core_bdev_name,
-			 struct wals_bdev_config **_wals_cfg);
 void wals_bdev_config_cleanup(struct wals_bdev_config *wals_cfg);
 struct wals_bdev_config *wals_bdev_config_find_by_name(const char *wals_name);
-
-/*
- * WALS module descriptor
- */
-struct wals_bdev_module {
-	/* Minimum required number of base bdevs. Must be > 0. */
-	uint8_t base_bdevs_min;
-
-	/*
-	 * Maximum number of base bdevs that can be removed without failing
-	 * the array.
-	 */
-	uint8_t base_bdevs_max_degraded;
-
-	/*
-	 * Called when the wals is starting, right before changing the state to
-	 * online and registering the bdev. Parameters of the bdev like blockcnt
-	 * should be set here.
-	 *
-	 * Non-zero return value will abort the startup process.
-	 */
-	int (*start)(struct wals_bdev *wals_bdev);
-
-	/*
-	 * Called when the wals is stopping, right before changing the state to
-	 * offline and unregistering the bdev. Optional.
-	 */
-	void (*stop)(struct wals_bdev *wals_bdev);
-
-	/* Handler for R/W requests */
-	void (*submit_rw_request)(struct wals_bdev_io *wals_io);
-
-	/* Handler for requests without payload (flush, unmap). Optional. */
-	void (*submit_null_payload_request)(struct wals_bdev_io *wals_io);
-
-	TAILQ_ENTRY(wals_bdev_module) link;
-};
 
 bool
 wals_bdev_io_complete_part(struct wals_bdev_io *wals_io, uint64_t completed,

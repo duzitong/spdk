@@ -39,6 +39,8 @@
 #include "spdk/log.h"
 #include "spdk/env.h"
 
+#define RPC_MAX_SLICES 256 // TODO: Add rpc to add slices in future
+
 /*
  * Input structure for bdev_wals_get_bdevs RPC
  */
@@ -139,17 +141,77 @@ SPDK_RPC_REGISTER("bdev_wals_get_bdevs", rpc_bdev_wals_get_bdevs, SPDK_RPC_RUNTI
 SPDK_RPC_REGISTER_ALIAS_DEPRECATED(bdev_wals_get_bdevs, get_wals_bdevs)
 
 /*
+ * Slices for creation
+ */
+
+struct rpc_bdev_wals_target {
+	char		*nqn;
+
+	char		*address;
+
+	uint16_t	port;
+};
+
+static const struct spdk_json_object_decoder rpc_bdev_wals_target_decoders[] = {
+	{"nqn", offsetof(struct rpc_bdev_wals_target, nqn), spdk_json_decode_string},
+	{"address", offsetof(struct rpc_bdev_wals_target, address), spdk_json_decode_string},
+	{"port", offsetof(struct rpc_bdev_wals_target, port), spdk_json_decode_uint16},
+};
+
+static int
+decode_target(const struct spdk_json_val *val, void *out)
+{
+	return spdk_json_decode_object(val, rpc_bdev_wals_target_decoders, SPDK_COUNTOF(rpc_bdev_wals_target_decoders), out);
+}
+
+struct rpc_bdev_wals_slice {
+	struct rpc_bdev_wals_target	log;
+	
+	struct rpc_bdev_wals_target	core;
+};
+
+static const struct spdk_json_object_decoder rpc_bdev_wals_slice_decoders[] = {
+	{"log", offsetof(struct rpc_bdev_wals_slice, log), decode_target},
+	{"core", offsetof(struct rpc_bdev_wals_slice, core), decode_target},
+};
+
+static int
+decode_slice(const struct spdk_json_val *val, void *out)
+{
+	return spdk_json_decode_object(val, rpc_bdev_wals_slice_decoders, SPDK_COUNTOF(rpc_bdev_wals_slice_decoders), out);
+}
+
+struct rpc_bdev_wals_create_slices {
+	size_t           			num_slices;
+
+	struct rpc_bdev_wals_slice	slices[RPC_MAX_SLICES];
+};
+
+static int
+decode_slices(const struct spdk_json_val *val, void *out)
+{
+	struct rpc_bdev_wals_create_slices *slices = out;
+	return spdk_json_decode_array(val, decode_slice, slices->slices,
+				      RPC_MAX_SLICES, &slices->num_slices, sizeof(struct rpc_bdev_wals_slice));
+}
+
+/*
  * Input structure for RPC rpc_bdev_wals_create
  */
 struct rpc_bdev_wals_create {
 	/* wals bdev name */
 	char             *name;
 
-	/* log bdev name */
-	char             *log_bdev;
+	/* wals target module name */
+	char             *module;
 
-	/* core bdev name */
-	char             *core_bdev;
+	struct rpc_bdev_wals_create_slices	slices;
+};
+
+static const struct spdk_json_object_decoder rpc_bdev_wals_create_decoders[] = {
+	{"name", offsetof(struct rpc_bdev_wals_create, name), spdk_json_decode_string},
+	{"module", offsetof(struct rpc_bdev_wals_create, module), spdk_json_decode_string},
+	{"slices", offsetof(struct rpc_bdev_wals_create, slices), decode_slices},
 };
 
 /*
@@ -163,19 +225,17 @@ struct rpc_bdev_wals_create {
 static void
 free_rpc_bdev_wals_create(struct rpc_bdev_wals_create *req)
 {
-	free(req->name);
-	free(req->log_bdev);
-	free(req->core_bdev);
-}
+	int i;
 
-/*
- * Decoder object for RPC bdev_wals_create
- */
-static const struct spdk_json_object_decoder rpc_bdev_wals_create_decoders[] = {
-	{"name", offsetof(struct rpc_bdev_wals_create, name), spdk_json_decode_string},
-	{"log_bdev", offsetof(struct rpc_bdev_wals_create, log_bdev), spdk_json_decode_string},
-	{"core_bdev", offsetof(struct rpc_bdev_wals_create, core_bdev), spdk_json_decode_string},
-};
+	free(req->name);
+	free(req->module);
+	for (i = 0; i < req->slices->num_slices; i++) {
+		free(req->slices->slices[i]->log->nqn);
+		free(req->slices->slices[i]->log->address);
+		free(req->slices->slices[i]->core->nqn);
+		free(req->slices->slices[i]->core->address);
+	}
+}
 
 /*
  * brief:
@@ -203,30 +263,30 @@ rpc_bdev_wals_create(struct spdk_jsonrpc_request *request,
 		goto cleanup;
 	}
 
-	rc = wals_bdev_config_add(req.name, req.log_bdev, req.core_bdev, &wals_cfg);
-	if (rc != 0) {
-		spdk_jsonrpc_send_error_response_fmt(request, rc,
-						     "Failed to add wals bdev config %s: %s",
-						     req.name, spdk_strerror(-rc));
-		goto cleanup;
-	}
+	// rc = wals_bdev_config_add(req.name, req.log_bdev, req.core_bdev, &wals_cfg);
+	// if (rc != 0) {
+	// 	spdk_jsonrpc_send_error_response_fmt(request, rc,
+	// 					     "Failed to add wals bdev config %s: %s",
+	// 					     req.name, spdk_strerror(-rc));
+	// 	goto cleanup;
+	// }
 
-	rc = wals_bdev_create(wals_cfg);
-	if (rc != 0) {
-		wals_bdev_config_cleanup(wals_cfg);
-		spdk_jsonrpc_send_error_response_fmt(request, rc,
-						     "Failed to create wals bdev %s: %s",
-						     req.name, spdk_strerror(-rc));
-		goto cleanup;
-	}
+	// rc = wals_bdev_create(wals_cfg);
+	// if (rc != 0) {
+	// 	wals_bdev_config_cleanup(wals_cfg);
+	// 	spdk_jsonrpc_send_error_response_fmt(request, rc,
+	// 					     "Failed to create wals bdev %s: %s",
+	// 					     req.name, spdk_strerror(-rc));
+	// 	goto cleanup;
+	// }
 
-	rc = wals_bdev_add_base_devices(wals_cfg);
-	if (rc != 0) {
-		spdk_jsonrpc_send_error_response_fmt(request, rc,
-						     "Failed to add any base bdev to wals bdev %s: %s",
-						     req.name, spdk_strerror(-rc));
-		goto cleanup;
-	}
+	// rc = wals_bdev_add_base_devices(wals_cfg);
+	// if (rc != 0) {
+	// 	spdk_jsonrpc_send_error_response_fmt(request, rc,
+	// 					     "Failed to add any base bdev to wals bdev %s: %s",
+	// 					     req.name, spdk_strerror(-rc));
+	// 	goto cleanup;
+	// }
 
 	spdk_jsonrpc_send_bool_response(request, true);
 
