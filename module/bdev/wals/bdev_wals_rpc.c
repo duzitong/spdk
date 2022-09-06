@@ -270,6 +270,7 @@ rpc_bdev_wals_create(struct spdk_jsonrpc_request *request,
 {
 	struct rpc_bdev_wals_create	req = {};
 	struct wals_bdev_config		*wals_cfg;
+	struct spdk_json_write_ctx *w;
 	int				rc;
 
 	if (spdk_json_decode_object(params, rpc_bdev_wals_create_decoders,
@@ -305,7 +306,9 @@ rpc_bdev_wals_create(struct spdk_jsonrpc_request *request,
 	// 	goto cleanup;
 	// }
 
-	spdk_jsonrpc_send_bool_response(request, true);
+	w = spdk_jsonrpc_begin_result(request);
+	spdk_json_write_string(w, spdk_bdev_get_name(req.name));
+	spdk_jsonrpc_end_result(request, w);
 
 cleanup:
 	free_rpc_bdev_wals_create(&req);
