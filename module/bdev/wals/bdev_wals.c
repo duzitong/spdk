@@ -137,7 +137,7 @@ _wals_bdev_destroy_cb(void *arg)
 	spdk_poller_unregister(&wals_bdev->cleaner_poller);
 	spdk_poller_unregister(&wals_bdev->stat_poller);
 	
-	wals_bdev->open_thread = NULL;
+	wals_bdev->write_thread = wals_bdev->read_thread = NULL;
 }
 
 /*
@@ -163,8 +163,8 @@ wals_bdev_destroy_cb(void *io_device, void *ctx_buf)
 	pthread_mutex_lock(&wals_bdev->mutex);
 	wals_bdev->ch_count--;
 	if (wals_bdev->ch_count == 0) {
-		if (wals_bdev->open_thread != spdk_get_thread()) {
-			spdk_thread_send_msg(wals_bdev->open_thread,
+		if (wals_bdev->write_thread != spdk_get_thread()) {
+			spdk_thread_send_msg(wals_bdev->write_thread,
 					     _wals_bdev_destroy_cb, wals_bdev);
 		} else {
 			_wals_bdev_destroy_cb(wals_bdev);
@@ -281,17 +281,7 @@ wals_bdev_queue_io_wait(struct wals_bdev_io *wals_io, struct spdk_bdev *bdev,
 static bool wals_bdev_is_valid_entry(struct wals_bdev *bdev, struct bstat *bstat)
 {
     if (bstat->type == LOCATION_BDEV) {
-        if (bstat->round == bdev->tail_round) {
-            return true;
-        }
-
-        if (bstat->round < bdev->tail_round - 1) {
-            return false;
-        }
-
-        if (bstat->l.bdevOffset >= bdev->log_tail) {
-            return true;
-        }
+		// TODO
         return false;
     }
 
@@ -533,9 +523,9 @@ wals_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 	wals_io->orig_io = bdev_io;
 	wals_io->orig_thread = spdk_get_thread();
 
-	/* Send this request to the open_thread if that's not what we're on. */
-	if (wals_io->orig_thread != wals_io->wals_bdev->open_thread) {
-		spdk_thread_send_msg(wals_io->wals_bdev->open_thread, _wals_bdev_submit_request, bdev_io);
+	/* Send this request to the write_thread if that's not what we're on. */
+	if (wals_io->orig_thread != wals_io->wals_bdev->write_thread) {
+		spdk_thread_send_msg(wals_io->wals_bdev->write_thread, _wals_bdev_submit_request, bdev_io);
 	} else {
 		_wals_bdev_submit_request(bdev_io);
 	}
@@ -668,8 +658,7 @@ wals_bdev_config_cleanup(struct wals_bdev_config *wals_cfg)
 	TAILQ_REMOVE(&g_wals_config.wals_bdev_config_head, wals_cfg, link);
 	g_wals_config.total_wals_bdev--;
 
-	free(wals_cfg->log_bdev.name);
-	free(wals_cfg->core_bdev.name);
+	// TODO: free
 	free(wals_cfg->name);
 	free(wals_cfg);
 }
@@ -724,8 +713,8 @@ wals_bdev_config_find_by_name(const char *wals_name)
  * _wals_cfg - Pointer to newly added configuration
  */
 int
-wals_bdev_config_add(const char *wals_name, const char *log_bdev_name, const char *core_bdev_name, 
-					struct wals_bdev_config **_wals_cfg)
+wals_bdev_config_add(const char *wals_name, uint64_t slicecnt, const char *module_name,
+			 struct wals_bdev_config **_wals_cfg)
 {
 	struct wals_bdev_config *wals_cfg;
 
@@ -749,22 +738,7 @@ wals_bdev_config_add(const char *wals_name, const char *log_bdev_name, const cha
 		return -ENOMEM;
 	}
 
-	wals_cfg->log_bdev.name = strdup(log_bdev_name);
-	if (!wals_cfg->log_bdev.name) {
-		free(wals_cfg->name);
-		free(wals_cfg);
-		SPDK_ERRLOG("unable to allocate memory\n");
-		return -ENOMEM;
-	}
-
-	wals_cfg->core_bdev.name = strdup(core_bdev_name);
-	if (!wals_cfg->core_bdev.name) {
-		free(wals_cfg->log_bdev.name);
-		free(wals_cfg->name);
-		free(wals_cfg);
-		SPDK_ERRLOG("unable to allocate memory\n");
-		return -ENOMEM;
-	}
+	// TODO: add
 
 	TAILQ_INSERT_TAIL(&g_wals_config.wals_bdev_config_head, wals_cfg, link);
 	g_wals_config.total_wals_bdev++;
@@ -1050,10 +1024,6 @@ wals_bdev_start(struct wals_bdev *wals_bdev)
 	wals_bdev->bslfn = bslfnCreate(wals_bdev->bsl_node_pool, wals_bdev->bstat_pool);
 	TAILQ_INIT(&wals_bdev->pending_writes);
 	// TODO: recover
-	wals_bdev->log_head = wals_bdev->move_head = 0;
-	wals_bdev->log_tail = 0;
-	wals_bdev->head_round = wals_bdev->move_round = 0;
-	wals_bdev->tail_round = 0;
 
 	return 0;
 }
