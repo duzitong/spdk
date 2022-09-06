@@ -263,6 +263,8 @@ rpc_bdev_wals_create(struct spdk_jsonrpc_request *request,
 		goto cleanup;
 	}
 
+	SPDK_NOTICELOG("Decoded\n");
+
 	// rc = wals_bdev_config_add(req.name, req.log_bdev, req.core_bdev, &wals_cfg);
 	// if (rc != 0) {
 	// 	spdk_jsonrpc_send_error_response_fmt(request, rc,
