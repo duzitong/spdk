@@ -1043,7 +1043,7 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 		for (j = 0; j < NUM_TARGETS; j++) {
 			wals_bdev->slices[i].targets[j] = wals_bdev->module->start(&wals_cfg->slices[i].targets[j]);
 			if (wals_bdev->slices[i].targets[j] == NULL) {
-				SPDK_ERRLOG("Failed to start target '%d' in slice '%d'.", j, i);
+				SPDK_ERRLOG("Failed to start target '%ld' in slice '%ld'.", j, i);
 				return -EFAULT;
 			}
 		}

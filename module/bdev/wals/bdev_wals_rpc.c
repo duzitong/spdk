@@ -291,7 +291,7 @@ rpc_bdev_wals_create(struct spdk_jsonrpc_request *request,
 	rc = wals_bdev_start_all(wals_cfg);
 	if (rc != 0) {
 		spdk_jsonrpc_send_error_response_fmt(request, rc,
-						     "Failed to add any base bdev to wals bdev %s: %s",
+						     "Failed to add start wals bdev %s: %s",
 						     req.name, spdk_strerror(-rc));
 		goto cleanup;
 	}
