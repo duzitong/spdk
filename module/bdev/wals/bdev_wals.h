@@ -146,6 +146,39 @@ struct wals_slice {
 };
 
 /*
+ * wals_bdev_io is the context part of bdev_io. It contains the information
+ * related to bdev_io for a wals bdev
+ */
+struct wals_bdev_io {
+	/* The wals bdev associated with this IO */
+	struct wals_bdev *wals_bdev;
+
+	/* WaitQ entry, used only in waitq logic */
+	struct spdk_bdev_io_wait_entry	waitq_entry;
+
+	/* Context of the original channel for this IO */
+	struct wals_bdev_io_channel	*wals_ch;
+
+	/* the original IO */
+	struct spdk_bdev_io	*orig_io;
+
+	/* the original thread */
+	struct spdk_thread	*orig_thread;
+
+	/* save for completion on orig thread */
+	enum spdk_bdev_io_status status;
+
+	struct wals_metadata	*metadata;
+	
+	uint16_t	remaining_base_bdev_io;
+
+	void	*read_buf;
+
+	/* link next for pending writes */
+	TAILQ_ENTRY(wals_bdev_io)	tailq;
+};
+
+/*
  * WALS target module descriptor
  */
 struct wals_target_module {
@@ -177,39 +210,6 @@ struct wals_target_module {
 	void (*submit_log_write_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
 
 	TAILQ_ENTRY(wals_slice_module) link;
-};
-
-/*
- * wals_bdev_io is the context part of bdev_io. It contains the information
- * related to bdev_io for a wals bdev
- */
-struct wals_bdev_io {
-	/* The wals bdev associated with this IO */
-	struct wals_bdev *wals_bdev;
-
-	/* WaitQ entry, used only in waitq logic */
-	struct spdk_bdev_io_wait_entry	waitq_entry;
-
-	/* Context of the original channel for this IO */
-	struct wals_bdev_io_channel	*wals_ch;
-
-	/* the original IO */
-	struct spdk_bdev_io	*orig_io;
-
-	/* the original thread */
-	struct spdk_thread	*orig_thread;
-
-	/* save for completion on orig thread */
-	enum spdk_bdev_io_status status;
-
-	struct wals_metadata	*metadata;
-	
-	uint16_t	remaining_base_bdev_io;
-
-	void	*read_buf;
-
-	/* link next for pending writes */
-	TAILQ_ENTRY(wals_bdev_io)	tailq;
 };
 
 /*
