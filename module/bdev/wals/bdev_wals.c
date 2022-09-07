@@ -429,14 +429,12 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 }
 
 static void
-wals_bdev_submit_write_request(struct wals_bdev_io *wals_io);
+wals_bdev_submit_write_request(void *arg);
 
 static void
 _wals_bdev_submit_write_request(void *_wals_io)
 {
-	struct wals_bdev_io *wals_io = _wals_io;
-
-	wals_bdev_submit_write_request(wals_io);
+	wals_bdev_submit_write_request(_wals_io);
 }
 
 /*
