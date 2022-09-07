@@ -176,7 +176,7 @@ struct wals_slice {
 
 	uint64_t	log_tail_round;
 
-	struct wals_target	targets[NUM_TARGETS];
+	struct wals_target	*targets[NUM_TARGETS];
 };
 
 /*
