@@ -230,7 +230,7 @@ static const struct spdk_json_object_decoder rpc_bdev_wals_create_decoders[] = {
 static void
 free_rpc_bdev_wals_create(struct rpc_bdev_wals_create *req)
 {
-	int i, j;
+	size_t i, j;
 
 	free(req->name);
 	free(req->module);

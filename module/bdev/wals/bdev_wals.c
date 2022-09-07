@@ -716,7 +716,7 @@ wals_bdev_config_add(const char *wals_name, const char *module_name,
 			struct wals_bdev_config **_wals_cfg)
 {
 	struct wals_bdev_config *wals_cfg;
-	int i, j;
+	uint64_t	i, j;
 
 	wals_cfg = wals_bdev_config_find_by_name(wals_name);
 	if (wals_cfg != NULL) {
@@ -1001,7 +1001,7 @@ int
 wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 {
 	struct wals_bdev	*wals_bdev;
-	int 		i, j;
+	uint64_t	i, j;
 	int			rc;
 
 	wals_bdev = wals_cfg->wals_bdev;
