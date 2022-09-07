@@ -450,8 +450,9 @@ _wals_bdev_submit_write_request(void *_wals_io)
  * none
  */
 static void
-wals_bdev_submit_write_request(struct wals_bdev_io *wals_io)
+wals_bdev_submit_write_request(void *arg)
 {
+	struct wals_bdev_io 	*wals_io = arg;
 	struct spdk_bdev_io		*bdev_io = spdk_bdev_io_from_ctx(wals_io);
 	struct wals_bdev		*wals_bdev;
 	int				ret;
@@ -489,37 +490,12 @@ wals_bdev_get_buf_cb(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_io,
 	wals_bdev_submit_read_request(wals_io);
 }
 
-/*
- * brief:
- * _wals_bdev_submit_request function is single thread entry point of IO.
- * params:
- * args - wals io
- * returns:
- * none
- */
 static void
-_wals_bdev_submit_request(void *arg)
+wals_bdev_io_get_buf(void *arg)
 {
 	struct spdk_bdev_io *bdev_io = arg;
-	struct wals_bdev_io *wals_io = (struct wals_bdev_io *)bdev_io->driver_ctx;
-
-	switch (bdev_io->type) {
-	case SPDK_BDEV_IO_TYPE_READ:
-		spdk_bdev_io_get_buf(bdev_io, wals_bdev_get_buf_cb,
+	spdk_bdev_io_get_buf(bdev_io, wals_bdev_get_buf_cb,
 				     bdev_io->u.bdev.num_blocks * bdev_io->bdev->blocklen);
-		break;
-	case SPDK_BDEV_IO_TYPE_WRITE:
-		wals_bdev_submit_write_request(wals_io);
-		break;
-
-	case SPDK_BDEV_IO_TYPE_RESET:
-	case SPDK_BDEV_IO_TYPE_FLUSH:
-	case SPDK_BDEV_IO_TYPE_UNMAP:
-	default:
-		SPDK_ERRLOG("submit request, invalid io type %u\n", bdev_io->type);
-		wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
-		break;
-	}
 }
 
 /*
@@ -543,11 +519,28 @@ wals_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 	wals_io->orig_io = bdev_io;
 	wals_io->orig_thread = spdk_get_thread();
 
-	/* Send this request to the write_thread if that's not what we're on. */
-	if (wals_io->orig_thread != wals_io->wals_bdev->write_thread) {
-		spdk_thread_send_msg(wals_io->wals_bdev->write_thread, _wals_bdev_submit_request, bdev_io);
-	} else {
-		_wals_bdev_submit_request(bdev_io);
+	switch (bdev_io->type) {
+	case SPDK_BDEV_IO_TYPE_READ:
+		if (wals_io->orig_thread != wals_io->wals_bdev->read_thread) {
+			spdk_thread_send_msg(wals_io->wals_bdev->read_thread, wals_bdev_io_get_buf, bdev_io);
+		} else {
+			wals_bdev_io_get_buf(bdev_io);
+		}
+		break;
+	case SPDK_BDEV_IO_TYPE_WRITE:
+		if (wals_io->orig_thread != wals_io->wals_bdev->write_thread) {
+			spdk_thread_send_msg(wals_io->wals_bdev->write_thread, wals_bdev_submit_write_request, wals_io);
+		} else {
+			wals_bdev_submit_write_request(wals_io);
+		}
+		break;
+	case SPDK_BDEV_IO_TYPE_RESET:
+	case SPDK_BDEV_IO_TYPE_FLUSH:
+	case SPDK_BDEV_IO_TYPE_UNMAP:
+	default:
+		SPDK_ERRLOG("submit request, invalid io type %u\n", bdev_io->type);
+		wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
+		break;
 	}
 }
 
@@ -1187,79 +1180,6 @@ SPDK_TRACE_REGISTER_FN(wals_trace, "wals", TRACE_GROUP_WALS)
 		{
 			"WALS_BSL_RAND_END", TRACE_WALS_BSL_RAND_END,
 			OWNER_WALS, OBJECT_WALS_IO, 0,
-			{}
-		},
-		{
-			"WALS_MOVE_READ_MD", TRACE_WALS_MOVE_READ_MD,
-			OWNER_WALS, OBJECT_WALS_IO, 1,
-			{
-				{ "id", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "offset", SPDK_TRACE_ARG_TYPE_INT, 8 },
-			}
-		},
-		{
-			"WALS_MOVE_READ_DATA", TRACE_WALS_MOVE_READ_DATA,
-			OWNER_WALS, OBJECT_WALS_IO, 0,
-			{
-				{ "id", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "offset", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "length", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "round", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "next", SPDK_TRACE_ARG_TYPE_INT, 8 },
-			}
-		},
-		{
-			"WALS_MOVE_WRITE_DATA", TRACE_WALS_MOVE_WRITE_DATA,
-			OWNER_WALS, OBJECT_WALS_IO, 0,
-			{
-				{ "id", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "offset", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "length", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "round", SPDK_TRACE_ARG_TYPE_INT, 8 },
-			}
-		},
-		{
-			"WALS_MOVE_UPDATE_HEAD", TRACE_WALS_MOVE_UPDATE_HEAD,
-			OWNER_WALS, OBJECT_WALS_IO, 0,
-			{
-				{ "id", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "head", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "round", SPDK_TRACE_ARG_TYPE_INT, 8 },
-			}
-		},
-		{
-			"WALS_MOVE_WAIT_OTHERS", TRACE_WALS_MOVE_WAIT_OTHERS,
-			OWNER_WALS, OBJECT_WALS_IO, 0,
-			{
-				{ "head", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "round", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "o_id", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "o_head", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "o_round", SPDK_TRACE_ARG_TYPE_INT, 8 },
-			}
-		},
-		{
-			"WALS_MOVE_UPDATE_HEAD_END", TRACE_WALS_MOVE_UPDATE_HEAD_END,
-			OWNER_WALS, OBJECT_WALS_IO, 0,
-			{
-				{ "id", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "head", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "round", SPDK_TRACE_ARG_TYPE_INT, 8 },
-			}
-		},
-		{
-			"WALS_MOVE_CALLED", TRACE_WALS_MOVE_CALLED,
-			OWNER_WALS, OBJECT_WALS_IO, 1,
-			{}
-		},
-		{
-			"WALS_MOVE_MD_LOCKED", TRACE_WALS_MOVE_MD_LOCKED,
-			OWNER_WALS, OBJECT_WALS_IO, 1,
-			{}
-		},
-		{
-			"WALS_MOVE_NO_WORKER", TRACE_WALS_MOVE_NO_WORKER,
-			OWNER_WALS, OBJECT_WALS_IO, 1,
 			{}
 		},
 	};
