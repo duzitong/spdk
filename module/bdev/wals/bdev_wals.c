@@ -428,6 +428,32 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	return;
 }
 
+/*
+ * Updates the tail
+ * return true if there's enough space. Otherwise, return false.
+ */
+static bool
+wals_bdev_update_tail(uint64_t size_to_put, uint64_t tail_offset, uint64_t tail_round, uint64_t max,
+					uint64_t head_offset, uint64_t head_round,
+					uint64_t *new_offset, uint64_t *new_round)
+{
+	uint64_t next = tail_offset + size_to_put;
+	if (next > max) {
+		if (tail_round > head_round || size_to_put > head_offset) {
+			return false;
+		} else {
+			*new_offset = size_to_put;
+			*new_round = tail_round + 1;
+		}
+	} else if (tail_round > head_round && next > head_offset) {
+		return false;
+	} else {
+		*new_offset = next;
+	}
+
+	return true;
+}
+
 static void
 wals_bdev_submit_write_request(void *arg);
 
@@ -452,11 +478,60 @@ wals_bdev_submit_write_request(void *arg)
 {
 	struct wals_bdev_io 	*wals_io = arg;
 	struct spdk_bdev_io		*bdev_io = spdk_bdev_io_from_ctx(wals_io);
-	struct wals_bdev		*wals_bdev;
-	int				ret;
-	struct spdk_io_channel		*base_ch;
-	struct wals_metadata			*metadata;
-	uint64_t	log_offset, log_blocks, next_tail;
+	struct wals_bdev		*wals_bdev = wals_io->wals_bdev;
+
+	int						ret;
+	struct wals_slice		*slice;
+	struct wals_metadata	*metadata;
+	uint64_t				slice_tail_offset, slice_tail_round, buffer_tail_offset, buffer_tail_round;
+	void					*data;
+	int						i;
+	struct iovec			*iovs;
+
+	slice = wals_bdev->slices[bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt];
+
+	// check slice space
+	if (!wals_bdev_update_tail(bdev_io->u.bdev.num_blocks + METADATA_BLOCKS,
+								slice->log_tail_offset, slice->log_tail_round, wals_bdev->slice_blockcnt,
+								slice->log_head_offset, slice->log_head_round, &slice_tail_offset, &slice_tail_round)) {
+		SPDK_DEBUGLOG(bdev_wals, "queue bdev io submit due to no enough space left on slice log.\n");
+		TAILQ_INSERT_TAIL(&wals_bdev->pending_writes, wals_io, tailq);
+	}
+
+	// check buffer space
+	if (!wals_bdev_update_tail(bdev_io->u.bdev.num_blocks + METADATA_BLOCKS, 
+								wals_bdev->buffer_tail_offset, wals_bdev->buffer_tail_round, wals_bdev->buffer_blockcnt,
+								wals_bdev->buffer_head_offset, wals_bdev->buffer_head_round, &buffer_tail_offset, &buffer_tail_round)) {
+		SPDK_DEBUGLOG(bdev_wals, "queue bdev io submit due to no enough space left on buffer.\n");
+		TAILQ_INSERT_TAIL(&wals_bdev->pending_writes, wals_io, tailq);
+	}
+
+	metadata = (struct wals_metadata *) wals_bdev->buffer + wals_bdev->buffer_tail_offset * wals_bdev->buffer_blocklen;
+	memset(metadata, 0, wals_bdev->buffer_blocklen);
+	metadata->version = METADATA_VERSION; // TODO: add CRC
+	metadata->seq = ++slice.seq;
+	metadata->core_offset = bdev_io->u.bdev.offset_blocks;
+	metadata->next_offset = slice_tail_offset;
+	metadata->length = bdev_io->u.bdev.num_blocks;
+	metadata->round = wals_bdev->buffer_tail_round;
+
+	wals_io->metadata = metadata;
+
+	// memcpy data
+	data = wals_bdev->buffer + (wals_bdev->buffer_tail_offset + METADATA_BLOCKS) * wals_bdev->buffer_blocklen;
+	iovs = bdev_io->u.bdev.iovs;
+	for (i = 0; i < bdev_io->u.bdev.iovcnt; i++) {
+		memcpy(data, iovs[i].iov_base, iovs[i].iov_len);
+		data += iovs[i].iov_len;
+	}
+
+	// update tails
+	slice->log_tail_offset = slice_tail_offset;
+	slice->log_tail_round = slice_tail_round;
+	wals_bdev->buffer_tail_offset = buffer_tail_offset;
+	wals_bdev->buffer_tail_round = buffer_tail_round;
+
+	// call module to submit to all targets
 	
 	wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
 	return;
@@ -1046,6 +1121,7 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 	wals_bdev->bdev.blocklen = wals_cfg->blocklen;
 	wals_bdev->bdev.blockcnt = wals_cfg->slice_blockcnt * wals_cfg->slicecnt;
 	wals_bdev->bdev.optimal_io_boundary = wals_cfg->slice_blockcnt;
+	wals_bdev->bdev.split_on_optimal_io_boundary = true;
 	wals_bdev->slice_blockcnt = wals_cfg->slice_blockcnt;
 	wals_bdev->buffer_blocklen = wals_cfg->blocklen;
 	wals_bdev->buffer_blockcnt = wals_cfg->buffer_blockcnt;

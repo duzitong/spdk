@@ -48,6 +48,8 @@
 #include "../wal/bsl.h"
 
 #define METADATA_VERSION		10086	// XD
+#define METADATA_BLOCKS			1
+
 #define NUM_TARGETS				4
 #define QUORUM_TARGETS			3
 
@@ -93,13 +95,9 @@ struct wals_metadata {
 
 	uint64_t	next_offset;
 
-	/* log blockcnt */
 	uint64_t	length;
 
 	uint64_t	core_offset;
-
-	/* core blockcnt */
-	uint64_t	core_length;
 
 	uint64_t	round;
 };
@@ -132,6 +130,11 @@ struct wals_slice {
 	uint64_t	log_tail_offset;
 
 	uint64_t	log_tail_round;
+
+	// min(outstanding read requests offset, target[0-2].offset)
+	uint64_t	log_head_offset;
+
+	uint64_t	log_head_round;
 
 	struct wals_target	*targets[NUM_TARGETS];
 };
@@ -192,13 +195,13 @@ struct wals_target_module {
 	void (*stop)(struct wals_target *target);
 
 	/* Handler for log read requests */
-	void (*submit_log_read_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
+	int (*submit_log_read_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
 
 	/* Handler for core read requests */
-	void (*submit_core_read_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
+	int (*submit_core_read_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
 
 	/* Handler for log write requests */
-	void (*submit_log_write_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
+	int (*submit_log_write_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
 
 	TAILQ_ENTRY(wals_slice_module) link;
 };
@@ -270,9 +273,13 @@ struct wals_bdev {
 	/* number of blocks of the buffer */
 	uint64_t			buffer_blockcnt;
 
-	uint64_t			buffer_tail;
+	uint64_t			buffer_tail_offset;
 
-	uint64_t			buffer_head;
+	uint64_t			buffer_tail_round;
+
+	uint64_t			buffer_head_offset;
+	
+	uint64_t			buffer_head_round;
 
 	/* bsl node mempool */
 	struct spdk_mempool		*bsl_node_pool;

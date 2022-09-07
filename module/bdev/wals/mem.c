@@ -19,19 +19,19 @@ mem_stop(struct wals_target *target)
 
 }
 
-static void
+static int
 mem_submit_log_read_request(struct wals_target* target, struct wals_bdev_io *wals_io)
 {
 
 }
 
-static void
+static int
 mem_submit_core_read_request(struct wals_target* target, struct wals_bdev_io *wals_io)
 {
 
 }
 
-static void
+static int
 mem_submit_log_write_request(struct wals_target* target, struct wals_bdev_io *wals_io)
 {
 
