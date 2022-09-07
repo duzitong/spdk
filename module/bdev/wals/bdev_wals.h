@@ -95,40 +95,6 @@ enum wals_bdev_state {
 	WALS_BDEV_MAX
 };
 
-/*
- * WALS target module descriptor
- */
-struct wals_target_module {
-	/* name of the module */
-	char	*name;
-
-	/*
-	 * Called when the wals is starting, right before changing the state to
-	 * online and registering the bdev. Parameters of the bdev like blockcnt
-	 * should be set here.
-	 *
-	 * Non-zero return value will abort the startup process.
-	 */
-	struct wals_target* (*start)(struct wals_target_config *config);
-
-	/*
-	 * Called when the wals is stopping, right before changing the state to
-	 * offline and unregistering the bdev. Optional.
-	 */
-	void (*stop)(struct wals_target *target);
-
-	/* Handler for log read requests */
-	void (*submit_log_read_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
-
-	/* Handler for core read requests */
-	void (*submit_core_read_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
-
-	/* Handler for log write requests */
-	void (*submit_log_write_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
-
-	TAILQ_ENTRY(wals_slice_module) link;
-};
-
 struct wals_metadata {
 	uint64_t	version;
 	
@@ -177,6 +143,40 @@ struct wals_slice {
 	uint64_t	log_tail_round;
 
 	struct wals_target	*targets[NUM_TARGETS];
+};
+
+/*
+ * WALS target module descriptor
+ */
+struct wals_target_module {
+	/* name of the module */
+	char	*name;
+
+	/*
+	 * Called when the wals is starting, right before changing the state to
+	 * online and registering the bdev. Parameters of the bdev like blockcnt
+	 * should be set here.
+	 *
+	 * Non-zero return value will abort the startup process.
+	 */
+	struct wals_target* (*start)(struct wals_target_config *config);
+
+	/*
+	 * Called when the wals is stopping, right before changing the state to
+	 * offline and unregistering the bdev. Optional.
+	 */
+	void (*stop)(struct wals_target *target);
+
+	/* Handler for log read requests */
+	void (*submit_log_read_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
+
+	/* Handler for core read requests */
+	void (*submit_core_read_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
+
+	/* Handler for log write requests */
+	void (*submit_log_write_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
+
+	TAILQ_ENTRY(wals_slice_module) link;
 };
 
 /*
