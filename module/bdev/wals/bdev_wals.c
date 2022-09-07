@@ -735,7 +735,7 @@ wals_bdev_config_find_by_name(const char *wals_name)
 int
 wals_bdev_config_add(const char *wals_name, const char *module_name,
 			struct rpc_bdev_wals_slice *slices, uint64_t slicecnt,
-			uint64_t blocklen, uint64_t blockcnt, uint64_t buffer_blockcnt,
+			uint64_t blocklen, uint64_t slice_blockcnt, uint64_t buffer_blockcnt,
 			struct wals_bdev_config **_wals_cfg)
 {
 	struct wals_bdev_config *wals_cfg;
@@ -770,7 +770,7 @@ wals_bdev_config_add(const char *wals_name, const char *module_name,
 	}
 	
 	wals_cfg->blocklen = blocklen;
-	wals_cfg->blockcnt = blockcnt;
+	wals_cfg->slice_blockcnt = slice_blockcnt;
 	wals_cfg->buffer_blockcnt = buffer_blockcnt;
 
 	wals_cfg->slicecnt = slicecnt;
@@ -1053,7 +1053,9 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 	}
 
 	wals_bdev->bdev.blocklen = wals_cfg->blocklen;
-	wals_bdev->bdev.blockcnt = wals_cfg->blockcnt;
+	wals_bdev->bdev.blockcnt = wals_cfg->slice_blockcnt * wals_cfg->slicecnt;
+	wals_bdev->bdev.optimal_io_boundary = wals_cfg->slice_blockcnt;
+	wals_bdev->slice_blockcnt = wals_cfg->slice_blockcnt;
 	wals_bdev->buffer_blocklen = wals_cfg->blocklen;
 	wals_bdev->buffer_blockcnt = wals_cfg->buffer_blockcnt;
 

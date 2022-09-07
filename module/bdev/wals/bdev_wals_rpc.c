@@ -205,7 +205,7 @@ struct rpc_bdev_wals_create {
 
 	uint64_t		blocklen;
 
-	uint64_t		blockcnt;
+	uint64_t		slice_blockcnt;
 
 	uint64_t		buffer_blockcnt;
 };
@@ -215,7 +215,7 @@ static const struct spdk_json_object_decoder rpc_bdev_wals_create_decoders[] = {
 	{"module", offsetof(struct rpc_bdev_wals_create, module), spdk_json_decode_string},
 	{"slices", offsetof(struct rpc_bdev_wals_create, slices), decode_slices},
 	{"blocklen", offsetof(struct rpc_bdev_wals_create, blocklen), spdk_json_decode_uint64},
-	{"blockcnt", offsetof(struct rpc_bdev_wals_create, blockcnt), spdk_json_decode_uint64},
+	{"slice_blockcnt", offsetof(struct rpc_bdev_wals_create, slice_blockcnt), spdk_json_decode_uint64},
 	{"buffer_blockcnt", offsetof(struct rpc_bdev_wals_create, buffer_blockcnt), spdk_json_decode_uint64},
 };
 
@@ -271,7 +271,7 @@ rpc_bdev_wals_create(struct spdk_jsonrpc_request *request,
 		goto cleanup;
 	}
 
-	rc = wals_bdev_config_add(req.name, req.module, req.slices.slices, req.slices.num_slices, req.blocklen, req.blockcnt, req.buffer_blockcnt, &wals_cfg);
+	rc = wals_bdev_config_add(req.name, req.module, req.slices.slices, req.slices.num_slices, req.blocklen, req.slice_blockcnt, req.buffer_blockcnt, &wals_cfg);
 	if (rc != 0) {
 		spdk_jsonrpc_send_error_response_fmt(request, rc,
 						     "Failed to add wals bdev config %s: %s",

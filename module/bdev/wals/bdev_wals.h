@@ -318,7 +318,7 @@ struct wals_bdev_config {
 
 	uint64_t					blocklen;
 
-	uint64_t					blockcnt;
+	uint64_t					slice_blockcnt;
 
 	uint64_t					buffer_blockcnt;
 
