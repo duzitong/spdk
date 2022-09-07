@@ -2084,10 +2084,10 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     p.set_defaults(func=bdev_wals_get_bdevs)
 
     def bdev_wals_create(args):
-        rpc.bdev.bdev_wals_create(args.client,
+        print_json(rpc.bdev.bdev_wals_create(args.client,
                                   name=args.name,
                                   module=args.module,
-                                  slices=json.loads(args.slices))
+                                  slices=json.loads(args.slices)))
     p = subparsers.add_parser('bdev_wals_create', aliases=['construct_wals_bdev'],
                               help='Create new wals bdev')
     p.add_argument('-n', '--name', help='wals bdev name', required=True)
