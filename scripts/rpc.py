@@ -2087,9 +2087,9 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
         print_json(rpc.bdev.bdev_wals_create(args.client,
                                   name=args.name,
                                   module=args.module,
-                                  blocklen=args.blocklen,
-                                  blockcnt=args.blockcnt,
-                                  buffer_blockcnt=args.buffer_blockcnt,
+                                  blocklen=int(args.blocklen),
+                                  blockcnt=int(args.blockcnt),
+                                  buffer_blockcnt=int(args.buffer_blockcnt),
                                   slices=json.loads(args.slices)))
     p = subparsers.add_parser('bdev_wals_create', aliases=['construct_wals_bdev'],
                               help='Create new wals bdev')
