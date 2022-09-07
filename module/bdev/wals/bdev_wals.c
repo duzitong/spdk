@@ -710,10 +710,13 @@ wals_bdev_config_find_by_name(const char *wals_name)
  * _wals_cfg - Pointer to newly added configuration
  */
 int
-wals_bdev_config_add(const char *wals_name, uint64_t slicecnt, const char *module_name,
-			 struct wals_bdev_config **_wals_cfg)
+wals_bdev_config_add(const char *wals_name, const char *module_name,
+			struct rpc_bdev_wals_slice *slices, uint64_t slicecnt,
+			uint64_t blocklen, uint64_t blockcnt, uint64_t buffer_blockcnt,
+			struct wals_bdev_config **_wals_cfg)
 {
 	struct wals_bdev_config *wals_cfg;
+	int i, j;
 
 	wals_cfg = wals_bdev_config_find_by_name(wals_name);
 	if (wals_cfg != NULL) {
@@ -735,7 +738,38 @@ wals_bdev_config_add(const char *wals_name, uint64_t slicecnt, const char *modul
 		return -ENOMEM;
 	}
 
-	// TODO: add
+	wals_cfg->module_name = strdup(module_name);
+	if (!wals_cfg->module_name) {
+		free(wals_cfg->name);
+		free(wals_cfg);
+		SPDK_ERRLOG("unable to allocate memory\n");
+		return -ENOMEM;
+	}
+	
+	wals_cfg->blocklen = blocklen;
+	wals_cfg->blockcnt = blockcnt;
+	wals_cfg->buffer_blockcnt = buffer_blockcnt;
+
+	wals_cfg->slicecnt = slicecnt;
+	wals_cfg->slices = calloc(slicecnt, sizeof(struct wals_slice_config));
+	if (!wals_cfg->slices) {
+		free(wals_cfg->module_name);
+		free(wals_cfg->name);
+		free(wals_cfg);
+		SPDK_ERRLOG("unable to allocate memory\n");
+		return -ENOMEM;
+	}
+
+	for (i = 0; i < slicecnt; i++) {
+		for (j = 0; j < NUM_TARGETS; j++) {
+			wals_cfg->slices[i].targets[j].target_log_info.nqn = strdup(slices[i].targets[j].log.nqn);
+			wals_cfg->slices[i].targets[j].target_log_info.address = strdup(slices[i].targets[j].log.address);
+			wals_cfg->slices[i].targets[j].target_log_info.port = slices[i].targets[j].log.port;
+			wals_cfg->slices[i].targets[j].target_core_info.nqn = strdup(slices[i].targets[j].core.nqn);
+			wals_cfg->slices[i].targets[j].target_core_info.address = strdup(slices[i].targets[j].core.address);
+			wals_cfg->slices[i].targets[j].target_core_info.port = slices[i].targets[j].core.port;
+		}
+	}
 
 	TAILQ_INSERT_TAIL(&g_wals_config.wals_bdev_config_head, wals_cfg, link);
 	g_wals_config.total_wals_bdev++;
@@ -887,7 +921,7 @@ wals_bdev_configure(struct wals_bdev *wals_bdev)
 
 	assert(wals_bdev->state == WALS_BDEV_STATE_CONFIGURING);
 
-	wals_bdev->blocklen_shift = 0;
+	wals_bdev->blocklen_shift = 0; // TODO: set when log and core have different blocklen
 	wals_bdev_gen = &wals_bdev->bdev;
 
 	wals_bdev->state = WALS_BDEV_STATE_ONLINE;
@@ -963,24 +997,11 @@ wals_bdev_remove_base_devices(struct wals_bdev_config *wals_cfg,
 	return;
 }
 
-/*
- * brief:
- * Add base bdevs to the wals bdev one by one.  Skip any base bdev which doesn't
- *  exist or fails to add. If all base bdevs are successfully added, the wals bdev
- *  moves to the configured state and becomes available. Otherwise, the wals bdev
- *  stays at the configuring state with added base bdevs.
- * params:
- * wals_cfg - pointer to wals bdev config
- * returns:
- * 0 - The wals bdev moves to the configured state or stays at the configuring
- *     state with added base bdevs due to any nonexistent base bdev.
- * non zero - Failed to add any base bdev and stays at the configuring state with
- *            added base bdevs.
- */
 int
-wals_bdev_add_base_devices(struct wals_bdev_config *wals_cfg)
+wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 {
 	struct wals_bdev	*wals_bdev;
+	int 		i, j;
 	int			rc;
 
 	wals_bdev = wals_cfg->wals_bdev;
@@ -989,7 +1010,16 @@ wals_bdev_add_base_devices(struct wals_bdev_config *wals_cfg)
 		return -ENODEV;
 	}
 
-	// TODO: call all slice targets to start
+	for (i = 0; i < wals_cfg->slicecnt; i++) {
+		for (j = 0; j < NUM_TARGETS; j++) {
+			wals_bdev->slices[i].targets[j] = wals_bdev->module->start(wals_cfg->slices[i].targets[j]);
+		}
+	}
+
+	wals_bdev->bdev.blocklen = wals_cfg->blocklen;
+	wals_bdev->bdev.blockcnt = wals_cfg->blockcnt;
+	wals_bdev->buffer_blocklen = wals_cfg->blocklen;
+	wals_bdev->buffer_blockcnt = wals_cfg->buffer_blockcnt;
 
 	rc = wals_bdev_start(wals_bdev);
 	if (rc) {
@@ -1020,6 +1050,9 @@ wals_bdev_start(struct wals_bdev *wals_bdev)
 	wals_bdev->bsl = bslCreate(wals_bdev->bsl_node_pool, wals_bdev->bstat_pool);
 	wals_bdev->bslfn = bslfnCreate(wals_bdev->bsl_node_pool, wals_bdev->bstat_pool);
 	TAILQ_INIT(&wals_bdev->pending_writes);
+
+	wals_bdev->buffer = spdk_zmalloc(wals_bdev->buffer_blockcnt * wals_bdev->buffer_blocklen, 2 * 1024 * 1024, NULL,
+					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 	// TODO: recover
 
 	return 0;

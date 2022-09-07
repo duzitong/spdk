@@ -176,7 +176,7 @@ struct wals_slice {
 
 	uint64_t	log_tail_round;
 
-	struct wals_target	target[NUM_TARGETS];
+	struct wals_target	targets[NUM_TARGETS];
 };
 
 /*
@@ -271,6 +271,8 @@ struct wals_bdev {
 
 	struct wals_slice	*slices;
 
+	void*				buffer;
+
 	/* buffer block length */
 	uint64_t			buffer_blocklen;
 
@@ -313,6 +315,12 @@ struct wals_bdev_config {
 	struct wals_slice_config 	*slices;
 
 	uint64_t					slicecnt;
+
+	uint64_t					blocklen;
+
+	uint64_t					blockcnt;
+
+	uint64_t					buffer_blockcnt;
 
 	char						*module_name;
 
@@ -357,9 +365,12 @@ extern struct wals_config		g_wals_config;
 
 typedef void (*wals_bdev_destruct_cb)(void *cb_ctx, int rc);
 
-int wals_bdev_config_add(const char *wals_name, uint64_t slicecnt, const char *module_name,
-			 struct wals_bdev_config **_wals_cfg);
+int wals_bdev_config_add(const char *wals_name, const char *module_name,
+			struct rpc_bdev_wals_slice *slices, uint64_t slicecnt,
+			uint64_t blocklen, uint64_t blockcnt, uint64_t buffer_blockcnt,
+			struct wals_bdev_config **_wals_cfg);
 int wals_bdev_create(struct wals_bdev_config *wals_cfg);
+int wals_bdev_start_all(struct wals_bdev_config *wal_cfg);
 int wals_bdev_add_targets(struct wals_bdev_config *wals_cfg, uint64_t slicenum, struct wals_target_config *targets);
 void wals_bdev_remove_base_devices(struct wals_bdev_config *wals_cfg,
 				   wals_bdev_destruct_cb cb_fn, void *cb_ctx);

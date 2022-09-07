@@ -221,12 +221,21 @@ struct rpc_bdev_wals_create {
 	char             *module;
 
 	struct rpc_bdev_wals_create_slices	slices;
+
+	uint64_t		blocklen;
+
+	uint64_t		blockcnt;
+
+	uint64_t		buffer_blockcnt;
 };
 
 static const struct spdk_json_object_decoder rpc_bdev_wals_create_decoders[] = {
 	{"name", offsetof(struct rpc_bdev_wals_create, name), spdk_json_decode_string},
 	{"module", offsetof(struct rpc_bdev_wals_create, module), spdk_json_decode_string},
 	{"slices", offsetof(struct rpc_bdev_wals_create, slices), decode_slices},
+	{"blocklen", offsetof(struct rpc_bdev_wals_create, blocklen), spdk_json_decode_uint64},
+	{"blockcnt", offsetof(struct rpc_bdev_wals_create, blockcnt), spdk_json_decode_uint64},
+	{"buffer_blockcnt", offsetof(struct rpc_bdev_wals_create, buffer_blockcnt), spdk_json_decode_uint64},
 };
 
 /*
@@ -281,32 +290,30 @@ rpc_bdev_wals_create(struct spdk_jsonrpc_request *request,
 		goto cleanup;
 	}
 
-	SPDK_NOTICELOG("Decode succeeded. %s\n", req.name);
+	rc = wals_bdev_config_add(req.name, req.module, req.slices.slices, req.slices.num_slices, req.blocklen, req.blockcnt, req.buffer_blockcnt, &wals_cfg);
+	if (rc != 0) {
+		spdk_jsonrpc_send_error_response_fmt(request, rc,
+						     "Failed to add wals bdev config %s: %s",
+						     req.name, spdk_strerror(-rc));
+		goto cleanup;
+	}
 
-	// rc = wals_bdev_config_add(req.name, req.log_bdev, req.core_bdev, &wals_cfg);
-	// if (rc != 0) {
-	// 	spdk_jsonrpc_send_error_response_fmt(request, rc,
-	// 					     "Failed to add wals bdev config %s: %s",
-	// 					     req.name, spdk_strerror(-rc));
-	// 	goto cleanup;
-	// }
+	rc = wals_bdev_create(wals_cfg);
+	if (rc != 0) {
+		wals_bdev_config_cleanup(wals_cfg);
+		spdk_jsonrpc_send_error_response_fmt(request, rc,
+						     "Failed to create wals bdev %s: %s",
+						     req.name, spdk_strerror(-rc));
+		goto cleanup;
+	}
 
-	// rc = wals_bdev_create(wals_cfg);
-	// if (rc != 0) {
-	// 	wals_bdev_config_cleanup(wals_cfg);
-	// 	spdk_jsonrpc_send_error_response_fmt(request, rc,
-	// 					     "Failed to create wals bdev %s: %s",
-	// 					     req.name, spdk_strerror(-rc));
-	// 	goto cleanup;
-	// }
-
-	// rc = wals_bdev_add_base_devices(wals_cfg);
-	// if (rc != 0) {
-	// 	spdk_jsonrpc_send_error_response_fmt(request, rc,
-	// 					     "Failed to add any base bdev to wals bdev %s: %s",
-	// 					     req.name, spdk_strerror(-rc));
-	// 	goto cleanup;
-	// }
+	rc = wals_bdev_add_base_devices(wals_cfg);
+	if (rc != 0) {
+		spdk_jsonrpc_send_error_response_fmt(request, rc,
+						     "Failed to add any base bdev to wals bdev %s: %s",
+						     req.name, spdk_strerror(-rc));
+		goto cleanup;
+	}
 
 	w = spdk_jsonrpc_begin_result(request);
 	spdk_json_write_string(w, req.name);

@@ -2087,11 +2087,17 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
         print_json(rpc.bdev.bdev_wals_create(args.client,
                                   name=args.name,
                                   module=args.module,
+                                  blocklen=args.blocklen,
+                                  blockcnt=args.blockcnt,
+                                  buffer_blockcnt=args.buffer_blockcnt,
                                   slices=json.loads(args.slices)))
     p = subparsers.add_parser('bdev_wals_create', aliases=['construct_wals_bdev'],
                               help='Create new wals bdev')
     p.add_argument('-n', '--name', help='wals bdev name', required=True)
     p.add_argument('-m', '--module', help='target module name', required=True)
+    p.add_argument('--blocklen', help='block length, e.g. 512', required=True)
+    p.add_argument('--blockcnt', help='block count', required=True)
+    p.add_argument('--buffer-blockcnt', help='buffer block count', required=True)
     p.add_argument('-s', '--slices', help='json string of slices, e.g. [[{"address":"192.168.0.1", "port":4420, "nqn":"1"},{"address":"192.168.0.2", "port":4420, "nqn":"2"},{"address":"192.168.0.3", "port":4420, "nqn":"3"},{"address":"192.168.0.4", "port":4420, "nqn":"4"}]]', required=True)
     p.set_defaults(func=bdev_wals_create)
 
