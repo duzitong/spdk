@@ -307,13 +307,13 @@ rpc_bdev_wals_create(struct spdk_jsonrpc_request *request,
 		goto cleanup;
 	}
 
-	rc = wals_bdev_add_base_devices(wals_cfg);
-	if (rc != 0) {
-		spdk_jsonrpc_send_error_response_fmt(request, rc,
-						     "Failed to add any base bdev to wals bdev %s: %s",
-						     req.name, spdk_strerror(-rc));
-		goto cleanup;
-	}
+	// rc = wals_bdev_start_all(wals_cfg);
+	// if (rc != 0) {
+	// 	spdk_jsonrpc_send_error_response_fmt(request, rc,
+	// 					     "Failed to add any base bdev to wals bdev %s: %s",
+	// 					     req.name, spdk_strerror(-rc));
+	// 	goto cleanup;
+	// }
 
 	w = spdk_jsonrpc_begin_result(request);
 	spdk_json_write_string(w, req.name);
