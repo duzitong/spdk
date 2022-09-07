@@ -897,6 +897,9 @@ wals_bdev_create(struct wals_bdev_config *wals_cfg)
 		return -ENOMEM;
 	}
 
+	wals_bdev->slicecnt = wals_cfg->slicecnt;
+	wals_bdev->slices = calloc(wals_bdev->slicecnt, sizeof(struct wal_slice));
+
 	wals_bdev->state = WALS_BDEV_STATE_CONFIGURING;
 	wals_bdev->config = wals_cfg;
 
