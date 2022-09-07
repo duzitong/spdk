@@ -68,6 +68,29 @@ struct wals_offline_tailq	g_wals_bdev_offline_list = TAILQ_HEAD_INITIALIZER(
 
 static TAILQ_HEAD(, wals_target_module) g_wals_target_modules = TAILQ_HEAD_INITIALIZER(g_wals_target_modules);
 
+static struct wals_target_module *wals_bdev_target_module_find(char *name)
+{
+	struct wals_target_module *target_module;
+
+	TAILQ_FOREACH(target_module, &g_wals_target_modules, link) {
+		if (strcmp(target_module->name, name) == 0) {
+			return target_module;
+		}
+	}
+
+	return NULL;
+}
+
+void wals_bdev_target_module_list_add(struct wals_target_module *target_module)
+{
+	if (wals_bdev_target_module_find(target_module->name) != NULL) {
+		SPDK_ERRLOG("target module '%s' already registered.\n", target_module->name);
+		assert(false);
+	} else {
+		TAILQ_INSERT_TAIL(&g_wals_target_modules, target_module, link);
+	}
+}
+
 /* Function declarations */
 static void	wals_bdev_examine(struct spdk_bdev *bdev);
 static int	wals_bdev_start(struct wals_bdev *bdev);
@@ -1010,9 +1033,19 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 		return -ENODEV;
 	}
 
+	wals_bdev->module = wals_bdev_target_module_find(wals_cfg->module_name);
+	if (wals_bdev->module == NULL) {
+		SPDK_ERRLOG("WALS target module '%s' not found", wals_cfg->module_name);
+		return -EINVAL;
+	}
+
 	for (i = 0; i < wals_cfg->slicecnt; i++) {
 		for (j = 0; j < NUM_TARGETS; j++) {
 			wals_bdev->slices[i].targets[j] = wals_bdev->module->start(&wals_cfg->slices[i].targets[j]);
+			if (wals_bdev->slices[i].targets[j] == NULL) {
+				SPDK_ERRLOG("Failed to start target '%d' in slice '%d'.", j, i);
+				return -EFAULT;
+			}
 		}
 	}
 

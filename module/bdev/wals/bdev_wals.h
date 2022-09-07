@@ -398,6 +398,18 @@ void wals_bdev_remove_base_devices(struct wals_bdev_config *wals_cfg,
 void wals_bdev_config_cleanup(struct wals_bdev_config *wals_cfg);
 struct wals_bdev_config *wals_bdev_config_find_by_name(const char *wals_name);
 
+void wals_bdev_target_module_list_add(struct wals_target_module *target_module);
+
+#define __TARGET_MODULE_REGISTER(line) __TARGET_MODULE_REGISTER_(line)
+#define __TARGET_MODULE_REGISTER_(line) target_module_register_##line
+
+#define TARGET_MODULE_REGISTER(_module)					\
+__attribute__((constructor)) static void				\
+__TARGET_MODULE_REGISTER(__LINE__)(void)					\
+{									\
+    wals_bdev_target_module_list_add(_module);					\
+}
+
 bool
 wals_bdev_io_complete_part(struct wals_bdev_io *wals_io, uint64_t completed,
 			   enum spdk_bdev_io_status status);
