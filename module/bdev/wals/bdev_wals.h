@@ -351,6 +351,27 @@ struct wals_bdev_io_channel {
 	struct wals_bdev			*wals_bdev;
 };
 
+/* structs for rpc*/
+struct rpc_bdev_wals_target_info {
+	char		*nqn;
+
+	char		*address;
+
+	uint16_t	port;
+};
+
+struct rpc_bdev_wals_target {
+	struct rpc_bdev_wals_target_info	log;
+	
+	struct rpc_bdev_wals_target_info	core;
+};
+
+struct rpc_bdev_wals_slice {
+	size_t						 	num_targets;
+
+	struct rpc_bdev_wals_target		targets[NUM_TARGETS];
+};
+
 /* TAIL heads for various wals bdev lists */
 TAILQ_HEAD(wals_configured_tailq, wals_bdev);
 TAILQ_HEAD(wals_configuring_tailq, wals_bdev);
