@@ -1012,7 +1012,7 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 
 	for (i = 0; i < wals_cfg->slicecnt; i++) {
 		for (j = 0; j < NUM_TARGETS; j++) {
-			wals_bdev->slices[i].targets[j] = wals_bdev->module->start(wals_cfg->slices[i].targets[j]);
+			wals_bdev->slices[i].targets[j] = wals_bdev->module->start(&wals_cfg->slices[i].targets[j]);
 		}
 	}
 
