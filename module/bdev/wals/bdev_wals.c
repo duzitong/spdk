@@ -560,8 +560,6 @@ wals_bdev_submit_write_request(void *arg)
 		SPDK_ERRLOG("IO submit failure to quorum targets on slice %ld.\n", wals_io->slice_index);
 		wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
 	}
-	
-	return;
 }
 
 // TODO - end
