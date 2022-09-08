@@ -505,7 +505,7 @@ wals_bdev_submit_write_request(void *arg)
 
 	// check slice space
 	if (!wals_bdev_update_tail(bdev_io->u.bdev.num_blocks + METADATA_BLOCKS,
-								slice->log_tail_offset, slice->log_tail_round, wals_bdev->slice_blockcnt,
+								slice->log_tail_offset, slice->log_tail_round, slice->log_blockcnt,
 								slice->log_head_offset, slice->log_head_round, &slice_tail_offset, &slice_tail_round)) {
 		SPDK_DEBUGLOG(bdev_wals, "queue bdev io submit due to no enough space left on slice log.\n");
 		TAILQ_INSERT_TAIL(&wals_bdev->pending_writes, wals_io, tailq);
@@ -1134,11 +1134,15 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 	}
 
 	for (i = 0; i < wals_cfg->slicecnt; i++) {
+		wals_bdev->slices[i].log_blockcnt = UINT64_MAX;
 		for (j = 0; j < NUM_TARGETS; j++) {
-			wals_bdev->slices[i].targets[j] = wals_bdev->module->start(&wals_cfg->slices[i].targets[j]);
+			wals_bdev->slices[i].targets[j] = wals_bdev->module->start(&wals_cfg->slices[i].targets[j], wals_bdev);
 			if (wals_bdev->slices[i].targets[j] == NULL) {
 				SPDK_ERRLOG("Failed to start target '%ld' in slice '%ld'.", j, i);
 				return -EFAULT;
+			}
+			if (wals_bdev->slices[i].targets[j]->log_blockcnt < wals_bdev->slices[i].log_blockcnt) {
+				wals_bdev->slices[i].log_blockcnt = wals_bdev->slices[i].targets[j]->log_blockcnt;
 			}
 		}
 	}

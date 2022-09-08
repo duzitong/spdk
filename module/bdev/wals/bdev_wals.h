@@ -117,6 +117,8 @@ struct wals_target_config {
 };
 
 struct wals_target {
+	volatile uint64_t				log_blockcnt;
+
 	volatile uint64_t				log_head_offset;
 
 	volatile uint64_t				log_head_round;
@@ -126,6 +128,8 @@ struct wals_target {
 
 struct wals_slice {
 	uint64_t	seq;
+
+	uint64_t	log_blockcnt;
 
 	uint64_t	log_tail_offset;
 
@@ -192,13 +196,13 @@ struct wals_target_module {
 	 *
 	 * Non-zero return value will abort the startup process.
 	 */
-	struct wals_target* (*start)(struct wals_target_config *config);
+	struct wals_target* (*start)(struct wals_target_config *config, struct wals_bdev *wals_bdev);
 
 	/*
 	 * Called when the wals is stopping, right before changing the state to
 	 * offline and unregistering the bdev. Optional.
 	 */
-	void (*stop)(struct wals_target *target);
+	void (*stop)(struct wals_target *target, struct wals_bdev *wals_bdev);
 
 	/* Handler for log read requests */
 	int (*submit_log_read_request)(struct wals_target* target, struct wals_bdev_io *wals_io);

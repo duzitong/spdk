@@ -7,14 +7,33 @@
 
 #include "spdk/log.h"
 
+#define LOG_BUFFER_SIZE     131072
+
+struct wals_mem_target {
+    void *log_buf;
+
+    void *core_buf;
+}
+
 static struct wals_target* 
-mem_start(struct wals_target_config *config)
+mem_start(struct wals_target_config *config, struct wals_bdev *wals_bdev)
 {
-    return calloc(1, sizeof(struct wals_target));
+    struct wals_target *target = calloc(1, sizeof(struct wals_target));
+    struct wals_mem_target *mem_target = calloc(1, sizeof(struct wals_mem_target));
+
+    mem_target->log_buf = spdk_zmalloc(LOG_BUFFER_SIZE * wals_bdev->bdev.blocklen, 2 * 1024 * 1024, NULL,
+					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+    mem_target->core_buf = spdk_zmalloc(wals_bdev->slice_blockcnt * wals_bdev->bdev.blocklen, 2 * 1024 * 1024, NULL,
+					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+    
+    target->log_blockcnt = LOG_BUFFER_SIZE;
+    target->private_info = mem_target;
+
+    return target;
 }
 
 static void
-mem_stop(struct wals_target *target)
+mem_stop(struct wals_target *target, struct wals_bdev wals_bdev)
 {
 
 }
