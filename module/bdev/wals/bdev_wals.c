@@ -539,22 +539,22 @@ wals_bdev_submit_write_request(void *arg)
 		data += iovs[i].iov_len;
 	}
 
-	// update tails
-	slice->log_tail_offset = slice_tail_offset;
-	slice->log_tail_round = slice_tail_round;
-	wals_bdev->buffer_tail_offset = buffer_tail_offset;
-	wals_bdev->buffer_tail_round = buffer_tail_round;
-
 	// call module to submit to all targets
 	wals_io->targets_failed = 0;
 	wals_io->targets_completed = 0;
 	for (i = 0; i < NUM_TARGETS; i++) {
-		ret = wals_bdev->module->submit_log_write_request(slice->targets[i], ptr, bdev_io->u.bdev.num_blocks + METADATA_BLOCKS, wals_io);
+		ret = wals_bdev->module->submit_log_write_request(slice->targets[i], ptr, slice->log_tail_offset, bdev_io->u.bdev.num_blocks + METADATA_BLOCKS, wals_io);
 		if (spdk_unlikely(ret != 0)) {
 			wals_io->targets_failed++;
 			SPDK_ERRLOG("io submit error due to %d for target %d on slice %ld.\n", ret, i, wals_io->slice_index);
 		}
 	}
+	
+	// update tails
+	slice->log_tail_offset = slice_tail_offset;
+	slice->log_tail_round = slice_tail_round;
+	wals_bdev->buffer_tail_offset = buffer_tail_offset;
+	wals_bdev->buffer_tail_round = buffer_tail_round;
 
 	if (spdk_unlikely(wals_io->targets_failed > NUM_TARGETS - QUORUM_TARGETS)) {
 		SPDK_ERRLOG("IO submit failure to quorum targets on slice %ld.\n", wals_io->slice_index);
