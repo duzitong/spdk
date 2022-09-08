@@ -356,42 +356,49 @@ wals_base_bdev_read_complete_part(struct spdk_bdev_io *bdev_io, bool success, vo
 }
 
 static void
-wals_base_bdev_write_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
+wals_bdev_write_complete_quorum(struct wals_bdev_io *wals_io)
 {
-	struct wals_bdev_io *wals_io = cb_arg;
-	uint64_t begin, end;
-	begin = wals_io->metadata->core_offset;
-	end = wals_io->metadata->core_offset + wals_io->metadata->core_length - 1;
-
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_BSTAT_CREATE_START, 0, 0, (uintptr_t)wals_io);
-	struct bstat *bstat = bstatBdevCreate(begin, end, wals_io->metadata->round,
-										bdev_io->u.bdev.offset_blocks+1, wals_io->wals_bdev->bstat_pool);
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_BSTAT_CREATE_END, 0, 0, (uintptr_t)wals_io);
-	
-	
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_BSL_INSERT_START, 0, 0, (uintptr_t)wals_io);
-	bslInsert(wals_io->wals_bdev->bsl, begin, end,
-				bstat, wals_io->wals_bdev->bslfn);
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_BSL_INSERT_END, 0, 0, (uintptr_t)wals_io);
-
-	spdk_bdev_free_io(bdev_io);
-
-	spdk_free(wals_io->metadata);
-
-	wals_bdev_io_complete(wals_io, success ?
-				   SPDK_BDEV_IO_STATUS_SUCCESS :
-				   SPDK_BDEV_IO_STATUS_FAILED);
+	// TODO: send msg to read thread to update index
+	wals_io->orig_io->free_deferred = true;
+	spdk_bdev_io_complete(wals_io->orig_io, SPDK_BDEV_IO_STATUS_SUCCESS);
 }
 
-int
-wals_log_bdev_writev_blocks_with_md(struct spdk_bdev_desc *desc, struct spdk_io_channel *ch,
-				struct iovec *iovs, int iovcnt, void *md_buf,
-				uint64_t offset_blocks, uint64_t num_blocks,
-				struct wals_bdev_io *wals_io)
+static void
+wals_bdev_write_complete_all(struct wals_bdev_io *wals_io)
 {
-	return spdk_bdev_writev_blocks_with_md(desc, ch,
-					iovs, iovcnt, md_buf,
-					offset_blocks, num_blocks, wals_base_bdev_write_complete, wals_io);
+	wals_io->orig_io->free_deferred = false;
+	spdk_bdev_free_io(wals_io->orig_io);
+}
+
+static void
+wals_target_write_complete(struct wals_bdev_io *wals_io, bool success)
+{
+	wals_io->targets_completed++;
+
+	if (spdk_unlikely(!success)) {
+		wals_io->targets_failed++;
+
+		if (wals_io->targets_failed > NUM_TARGETS - QUORUM_TARGETS) {
+			SPDK_ERRLOG("Write failure to quorum targets on slice %ld.\n", wals_io->slice_index);
+			wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
+		}
+	}
+
+	if (wals_io->targets_completed - wals_io->targets_failed == QUORUM_TARGETS) {
+		if (wals_io->orig_thread != spdk_get_thread()) {
+			spdk_thread_send_msg(wals_io->orig_thread, wals_bdev_write_complete_quorum, wals_io);
+		} else {
+			wals_bdev_write_complete_quorum(wals_io);
+		}
+	}
+
+	if (wals_io->targets_completed == NUM_TARGETS) {
+		if (wals_io->orig_thread != spdk_get_thread()) {
+			spdk_thread_send_msg(wals_io->orig_thread, wals_bdev_write_complete_all, wals_io);
+		} else {
+			wals_bdev_write_complete_all(wals_io);
+		}
+	}
 }
 
 static void
@@ -488,7 +495,8 @@ wals_bdev_submit_write_request(void *arg)
 	int						i;
 	struct iovec			*iovs;
 
-	slice = wals_bdev->slices[bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt];
+	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
+	slice = wals_bdev->slices[wals_io->slice_index];
 
 	// check slice space
 	if (!wals_bdev_update_tail(bdev_io->u.bdev.num_blocks + METADATA_BLOCKS,
@@ -532,8 +540,20 @@ wals_bdev_submit_write_request(void *arg)
 	wals_bdev->buffer_tail_round = buffer_tail_round;
 
 	// call module to submit to all targets
+	wals_io->targets_failed = 0;
+	for (i = 0; i < NUM_TARGETS; i++) {
+		ret = wals_bdev->module->submit_log_write_request(slice->targets[i], wals_io);
+		if (spdk_unlikely(ret != 0)) {
+			wals_io->targets_failed++;
+			SPDK_ERRLOG("io submit error due to %d for target %d on slice %ld.\n", ret, i, wals_io->slice_index);
+		}
+	}
+
+	if (spdk_unlikely(wals_io->targets_failed > NUM_TARGETS - QUORUM_TARGETS)) {
+		SPDK_ERRLOG("IO submit failure to quorum targets on slice %ld.\n", wals_io->slice_index);
+		wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
+	}
 	
-	wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
 	return;
 }
 

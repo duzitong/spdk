@@ -1933,11 +1933,14 @@ bdev_channel_get_io(struct spdk_bdev_channel *channel)
 		bdev_io = spdk_mempool_get(g_bdev_mgr.bdev_io_pool);
 	}
 
+	bdev_io->free_called = false;
+	bdev_io->free_deferred = false;
+
 	return bdev_io;
 }
 
-void
-spdk_bdev_free_io(struct spdk_bdev_io *bdev_io)
+static void
+_spdk_bdev_free_io(struct spdk_bdev_io *bdev_io)
 {
 	struct spdk_bdev_mgmt_channel *ch;
 
@@ -1964,6 +1967,14 @@ spdk_bdev_free_io(struct spdk_bdev_io *bdev_io)
 		/* We should never have a full cache with entries on the io wait queue. */
 		assert(TAILQ_EMPTY(&ch->io_wait_queue));
 		spdk_mempool_put(g_bdev_mgr.bdev_io_pool, (void *)bdev_io);
+	}
+}
+
+void spdk_bdev_free_io(struct spdk_bdev_io *bdev_io)
+{
+	bdev_io->free_called = true;
+	if (!bdev_io->free_deferred) {
+		_spdk_bdev_free_io(bdev_io);
 	}
 }
 

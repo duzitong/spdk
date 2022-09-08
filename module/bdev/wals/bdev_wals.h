@@ -168,6 +168,12 @@ struct wals_bdev_io {
 
 	void	*read_buf;
 
+	uint64_t	slice_index;
+
+	int		targets_failed;
+
+	int		targets_completed;
+
 	/* link next for pending writes */
 	TAILQ_ENTRY(wals_bdev_io)	tailq;
 };
@@ -408,9 +414,8 @@ __TARGET_MODULE_REGISTER(__LINE__)(void)					\
     wals_bdev_target_module_list_add(_module);					\
 }
 
-bool
-wals_bdev_io_complete_part(struct wals_bdev_io *wals_io, uint64_t completed,
-			   enum spdk_bdev_io_status status);
+static void
+wals_target_write_complete(struct wals_bdev_io *wals_io, bool success);
 void
 wals_bdev_queue_io_wait(struct wals_bdev_io *wals_io, struct spdk_bdev *bdev,
 			struct spdk_io_channel *ch, spdk_bdev_io_wait_cb cb_fn);

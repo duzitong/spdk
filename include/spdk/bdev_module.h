@@ -554,6 +554,10 @@ struct spdk_bdev_io {
 	/** Array of iovecs used for I/O splitting. */
 	struct iovec child_iov[BDEV_IO_NUM_CHILD_IOV];
 
+	bool free_deferred;
+
+	bool free_called;
+
 	union {
 		struct {
 			/** For SG buffer cases, array of iovecs to transfer. */
