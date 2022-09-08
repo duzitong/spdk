@@ -543,6 +543,7 @@ wals_bdev_submit_write_request(void *arg)
 
 	// call module to submit to all targets
 	wals_io->targets_failed = 0;
+	wals_io->targets_completed = 0;
 	for (i = 0; i < NUM_TARGETS; i++) {
 		ret = wals_bdev->module->submit_log_write_request(slice->targets[i], wals_io);
 		if (spdk_unlikely(ret != 0)) {
