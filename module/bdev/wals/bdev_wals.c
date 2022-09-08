@@ -372,6 +372,7 @@ wals_bdev_write_complete_all(void* arg)
 	if (wals_io->orig_io->free_called) {
 		spdk_bdev_free_io(wals_io->orig_io);
 	}
+	wals_io->orig_io->free_called = false;
 }
 
 void
@@ -495,7 +496,7 @@ wals_bdev_submit_write_request(void *arg)
 	struct wals_slice		*slice;
 	struct wals_metadata	*metadata;
 	uint64_t				slice_tail_offset, slice_tail_round, buffer_tail_offset, buffer_tail_round;
-	void					*data;
+	void					*data, *ptr;
 	int						i;
 	struct iovec			*iovs;
 
@@ -518,8 +519,9 @@ wals_bdev_submit_write_request(void *arg)
 		TAILQ_INSERT_TAIL(&wals_bdev->pending_writes, wals_io, tailq);
 	}
 
-	metadata = (struct wals_metadata *) wals_bdev->buffer + wals_bdev->buffer_tail_offset * wals_bdev->buffer_blocklen;
-	memset(metadata, 0, wals_bdev->buffer_blocklen);
+	ptr = wals_bdev->buffer + wals_bdev->buffer_tail_offset * wals_bdev->buffer_blocklen;
+	memset(ptr, 0, wals_bdev->buffer_blocklen);
+	metadata = (struct wals_metadata *) ptr;
 	metadata->version = METADATA_VERSION; // TODO: add CRC
 	metadata->seq = ++slice->seq;
 	metadata->core_offset = bdev_io->u.bdev.offset_blocks;
