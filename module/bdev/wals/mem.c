@@ -22,19 +22,20 @@ mem_stop(struct wals_target *target)
 static int
 mem_submit_log_read_request(struct wals_target* target, struct wals_bdev_io *wals_io)
 {
-
+    return 0;
 }
 
 static int
 mem_submit_core_read_request(struct wals_target* target, struct wals_bdev_io *wals_io)
 {
-
+    return 0;
 }
 
 static int
 mem_submit_log_write_request(struct wals_target* target, struct wals_bdev_io *wals_io)
 {
     wals_target_write_complete(wals_io, true);
+    return 0;
 }
 
 

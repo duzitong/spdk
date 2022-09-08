@@ -356,16 +356,18 @@ wals_base_bdev_read_complete_part(struct spdk_bdev_io *bdev_io, bool success, vo
 }
 
 static void
-wals_bdev_write_complete_quorum(struct wals_bdev_io *wals_io)
+wals_bdev_write_complete_quorum(void* arg)
 {
+	struct wals_bdev_io *wals_io = arg;
 	// TODO: send msg to read thread to update index
 	wals_io->orig_io->free_deferred = true;
 	spdk_bdev_io_complete(wals_io->orig_io, SPDK_BDEV_IO_STATUS_SUCCESS);
 }
 
 static void
-wals_bdev_write_complete_all(struct wals_bdev_io *wals_io)
+wals_bdev_write_complete_all(void* arg)
 {
+	struct wals_bdev_io *wals_io = arg;
 	wals_io->orig_io->free_deferred = false;
 	spdk_bdev_free_io(wals_io->orig_io);
 }
