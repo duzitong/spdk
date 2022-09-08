@@ -13,7 +13,7 @@ struct wals_mem_target {
     void *log_buf;
 
     void *core_buf;
-}
+};
 
 static struct wals_target* 
 mem_start(struct wals_target_config *config, struct wals_bdev *wals_bdev)
