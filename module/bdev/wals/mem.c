@@ -10,9 +10,11 @@
 #define LOG_BUFFER_SIZE     131072
 
 struct wals_mem_target {
-    void *log_buf;
+    void        *log_buf;
 
-    void *core_buf;
+    void        *core_buf;
+
+    uint64_t    blocklen;
 };
 
 static struct wals_target* 
@@ -21,9 +23,10 @@ mem_start(struct wals_target_config *config, struct wals_bdev *wals_bdev)
     struct wals_target *target = calloc(1, sizeof(struct wals_target));
     struct wals_mem_target *mem_target = calloc(1, sizeof(struct wals_mem_target));
 
-    mem_target->log_buf = spdk_zmalloc(LOG_BUFFER_SIZE * wals_bdev->bdev.blocklen, 2 * 1024 * 1024, NULL,
+    mem_target->blocklen = wals_bdev->bdev.blocklen;
+    mem_target->log_buf = spdk_zmalloc(LOG_BUFFER_SIZE * mem_target->blocklen, 2 * 1024 * 1024, NULL,
 					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-    mem_target->core_buf = spdk_zmalloc(wals_bdev->slice_blockcnt * wals_bdev->bdev.blocklen, 2 * 1024 * 1024, NULL,
+    mem_target->core_buf = spdk_zmalloc(wals_bdev->slice_blockcnt * mem_target->blocklen, 2 * 1024 * 1024, NULL,
 					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
     
     target->log_blockcnt = LOG_BUFFER_SIZE;
@@ -33,26 +36,32 @@ mem_start(struct wals_target_config *config, struct wals_bdev *wals_bdev)
 }
 
 static void
-mem_stop(struct wals_target *target, struct wals_bdev wals_bdev)
+mem_stop(struct wals_target *target, struct wals_bdev *wals_bdev)
 {
 
 }
 
 static int
-mem_submit_log_read_request(struct wals_target* target, struct wals_bdev_io *wals_io)
+mem_submit_log_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
     return 0;
 }
 
 static int
-mem_submit_core_read_request(struct wals_target* target, struct wals_bdev_io *wals_io)
+mem_submit_core_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
     return 0;
 }
 
 static int
-mem_submit_log_write_request(struct wals_target* target, struct wals_bdev_io *wals_io)
+mem_submit_log_write_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
+    struct wals_mem_target *mem_target = target->private_info;
+    memcpy(mem_target->log_buf + offset * mem_target->blocklen, data, cnt * mem_target->blocklen);
+
+    struct wals_metadata *metadata = data;
+    memcpy(mem_target->core_buf + metadata->core_offset * mem_target->blocklen, data + METADATA_BLOCKS * mem_target->blocklen, metadata->length * mem_target->blocklen);
+
     wals_target_write_complete(wals_io, true);
     return 0;
 }

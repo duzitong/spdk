@@ -549,7 +549,7 @@ wals_bdev_submit_write_request(void *arg)
 	wals_io->targets_failed = 0;
 	wals_io->targets_completed = 0;
 	for (i = 0; i < NUM_TARGETS; i++) {
-		ret = wals_bdev->module->submit_log_write_request(slice->targets[i], wals_io);
+		ret = wals_bdev->module->submit_log_write_request(slice->targets[i], ptr, bdev_io->u.bdev.num_blocks + METADATA_BLOCKS, wals_io);
 		if (spdk_unlikely(ret != 0)) {
 			wals_io->targets_failed++;
 			SPDK_ERRLOG("io submit error due to %d for target %d on slice %ld.\n", ret, i, wals_io->slice_index);

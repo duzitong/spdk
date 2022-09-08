@@ -205,13 +205,13 @@ struct wals_target_module {
 	void (*stop)(struct wals_target *target, struct wals_bdev *wals_bdev);
 
 	/* Handler for log read requests */
-	int (*submit_log_read_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
+	int (*submit_log_read_request)(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io);
 
 	/* Handler for core read requests */
-	int (*submit_core_read_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
+	int (*submit_core_read_request)(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io);
 
 	/* Handler for log write requests */
-	int (*submit_log_write_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
+	int (*submit_log_write_request)(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io);
 
 	TAILQ_ENTRY(wals_target_module) link;
 };
