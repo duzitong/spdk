@@ -196,7 +196,7 @@ struct wals_target_module {
 	 *
 	 * Non-zero return value will abort the startup process.
 	 */
-	struct wals_target* (*start)(struct wals_target_config *config, struct wals_bdev *wals_bdev);
+	struct wals_target* (*start)(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct wals_slice *slice);
 
 	/*
 	 * Called when the wals is stopping, right before changing the state to
