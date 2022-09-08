@@ -209,7 +209,7 @@ struct wals_target_module {
 	/* Handler for log write requests */
 	int (*submit_log_write_request)(struct wals_target* target, struct wals_bdev_io *wals_io);
 
-	TAILQ_ENTRY(wals_slice_module) link;
+	TAILQ_ENTRY(wals_target_module) link;
 };
 
 /*
@@ -414,7 +414,7 @@ __TARGET_MODULE_REGISTER(__LINE__)(void)					\
     wals_bdev_target_module_list_add(_module);					\
 }
 
-static void
+void
 wals_target_write_complete(struct wals_bdev_io *wals_io, bool success);
 void
 wals_bdev_queue_io_wait(struct wals_bdev_io *wals_io, struct spdk_bdev *bdev,

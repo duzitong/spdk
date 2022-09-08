@@ -372,7 +372,7 @@ wals_bdev_write_complete_all(void* arg)
 	spdk_bdev_free_io(wals_io->orig_io);
 }
 
-static void
+void
 wals_target_write_complete(struct wals_bdev_io *wals_io, bool success)
 {
 	wals_io->targets_completed++;
