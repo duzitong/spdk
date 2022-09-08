@@ -496,7 +496,7 @@ wals_bdev_submit_write_request(void *arg)
 	struct iovec			*iovs;
 
 	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
-	slice = wals_bdev->slices[wals_io->slice_index];
+	slice = &wals_bdev->slices[wals_io->slice_index];
 
 	// check slice space
 	if (!wals_bdev_update_tail(bdev_io->u.bdev.num_blocks + METADATA_BLOCKS,
@@ -517,7 +517,7 @@ wals_bdev_submit_write_request(void *arg)
 	metadata = (struct wals_metadata *) wals_bdev->buffer + wals_bdev->buffer_tail_offset * wals_bdev->buffer_blocklen;
 	memset(metadata, 0, wals_bdev->buffer_blocklen);
 	metadata->version = METADATA_VERSION; // TODO: add CRC
-	metadata->seq = ++slice.seq;
+	metadata->seq = ++slice->seq;
 	metadata->core_offset = bdev_io->u.bdev.offset_blocks;
 	metadata->next_offset = slice_tail_offset;
 	metadata->length = bdev_io->u.bdev.num_blocks;
