@@ -369,7 +369,9 @@ wals_bdev_write_complete_all(void* arg)
 {
 	struct wals_bdev_io *wals_io = arg;
 	wals_io->orig_io->free_deferred = false;
-	spdk_bdev_free_io(wals_io->orig_io);
+	if (wals_io->orig_io->free_called) {
+		spdk_bdev_free_io(wals_io->orig_io);
+	}
 }
 
 void
