@@ -31,6 +31,9 @@ mem_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
 					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
     mem_target->core_buf = spdk_zmalloc(wals_bdev->slice_blockcnt * mem_target->blocklen, 2 * 1024 * 1024, NULL,
 					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+
+    SPDK_NOTICELOG("log ptr: %p\n", mem_target->log_buf);
+    SPDK_NOTICELOG("core ptr: %p\n", mem_target->core_buf);
     
     target->log_blockcnt = LOG_BUFFER_SIZE;
     target->private_info = mem_target;
