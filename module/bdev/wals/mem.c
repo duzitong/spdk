@@ -78,6 +78,7 @@ mem_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
 {
     SPDK_NOTICELOG("log write: %ld+%ld\n", offset, cnt);
     struct wals_mem_target *mem_target = target->private_info;
+    SPDK_NOTICELOG("dst ptr: %p\n", mem_target->log_buf + offset * mem_target->blocklen);
     memcpy(mem_target->log_buf + offset * mem_target->blocklen, data, cnt * mem_target->blocklen);
 
     struct wals_metadata *metadata = data;
