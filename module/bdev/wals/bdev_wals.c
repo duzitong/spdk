@@ -388,6 +388,13 @@ static struct wals_read_after*
 wals_bdev_insert_read_after(struct wals_log_position pos, struct wals_bdev *wals_bdev) {
 	struct wals_read_after *i, *read_after = calloc(1, sizeof(*read_after));
 	read_after->pos = pos;
+
+	if (LIST_EMPTY(&wals_bdev->outstanding_read_afters)) {
+		LIST_INSERT_HEAD(&wals_bdev->outstanding_read_afters, read_after, entries);
+
+		return read_after;
+	}
+
 	i = LIST_FIRST(&wals_bdev->outstanding_read_afters);
 	while (i != NULL) {
 		if (i->pos.round > pos.round) {
