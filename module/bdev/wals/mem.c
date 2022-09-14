@@ -80,7 +80,7 @@ mem_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
     struct wals_metadata *metadata = data;
     SPDK_NOTICELOG("core write: %ld+%ld\n", metadata->core_offset, metadata->length);
     memcpy(mem_target->core_buf + metadata->core_offset * mem_target->blocklen, data + METADATA_BLOCKS * mem_target->blocklen, metadata->length * mem_target->blocklen);
-    if (cnt == 1) {
+    if (cnt <= 2) {
         SPDK_NOTICELOG("%s\n", mem_target->core_buf + metadata->core_offset * mem_target->blocklen);
     }
 
