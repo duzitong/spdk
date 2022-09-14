@@ -97,10 +97,6 @@ static int	wals_bdev_start(struct wals_bdev *bdev);
 static void	wals_bdev_stop(struct wals_bdev *bdev);
 static int	wals_bdev_init(void);
 static bool wals_bdev_is_valid_entry(struct wals_log_position after, struct bstat *bstat);
-int wals_log_bdev_writev_blocks_with_md(struct spdk_bdev_desc *desc, struct spdk_io_channel *ch,
-										struct iovec *iovs, int iovcnt, void *md_buf,
-										uint64_t offset_blocks, uint64_t num_blocks,
-										struct wals_bdev_io *wals_io);
 static int wals_bdev_submit_pending_writes(void *ctx);
 static int wals_bdev_cleaner(void *ctx);
 static int wals_bdev_stat_report(void *ctx);

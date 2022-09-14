@@ -47,12 +47,18 @@ mem_stop(struct wals_target *target, struct wals_bdev *wals_bdev)
 static int
 mem_submit_log_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
+    struct wals_mem_target *mem_target = target->private_info;
+    memcpy(data, mem_target->log_buf + offset * mem_target->blocklen, cnt * mem_target->blocklen);
+    wals_target_read_complete(wals_io, true);
     return 0;
 }
 
 static int
 mem_submit_core_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
+    struct wals_mem_target *mem_target = target->private_info;
+    memcpy(data, mem_target->core_buf + offset * mem_target->blocklen, cnt * mem_target->blocklen);
+    wals_target_read_complete(wals_io, true);
     return 0;
 }
 
