@@ -125,7 +125,7 @@ struct wals_read_after {
 	wals_log_position pos;
 
 	LIST_ENTRY(wals_read_after) entries;
-}
+};
 
 struct wals_target {
 	volatile uint64_t			log_blockcnt;
@@ -175,7 +175,7 @@ struct wals_bdev_io {
 	
 	uint16_t	remaining_read_requests;
 
-	struct wals_read_after	read_after;
+	struct wals_read_after	*read_after;
 
 	void	*read_buf;
 
@@ -382,7 +382,7 @@ struct wals_index_msg {
 	uint64_t			offset;
 
 	struct wals_bdev	*wals_bdev;
-}
+};
 
 /* structs for rpc*/
 struct rpc_bdev_wals_target_info {
