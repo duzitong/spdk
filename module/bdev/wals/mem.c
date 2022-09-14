@@ -51,7 +51,7 @@ mem_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     struct wals_mem_target *mem_target = target->private_info;
     memcpy(data, mem_target->log_buf + offset * mem_target->blocklen, cnt * mem_target->blocklen);
     if (cnt == 1) {
-        SPDK_NOTICELOG("%s\n", data);
+        SPDK_NOTICELOG("data: %s$\n", data);
     }
     wals_target_read_complete(wals_io, true);
     return 0;
@@ -64,7 +64,7 @@ mem_submit_core_read_request(struct wals_target* target, void *data, uint64_t of
     struct wals_mem_target *mem_target = target->private_info;
     memcpy(data, mem_target->core_buf + offset * mem_target->blocklen, cnt * mem_target->blocklen);
     if (cnt == 1) {
-        SPDK_NOTICELOG("%s\n", data);
+        SPDK_NOTICELOG("data: %s$\n", data);
     }
     wals_target_read_complete(wals_io, true);
     return 0;
@@ -78,14 +78,14 @@ mem_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
     memcpy(mem_target->log_buf + offset * mem_target->blocklen, data, cnt * mem_target->blocklen);
 
     if (cnt <= 2) {
-        SPDK_NOTICELOG("%s\n", data);
+        SPDK_NOTICELOG("log data: %s$\n", data);
     }
 
     struct wals_metadata *metadata = data;
     SPDK_NOTICELOG("core write: %ld+%ld\n", metadata->core_offset, metadata->length);
     memcpy(mem_target->core_buf + metadata->core_offset * mem_target->blocklen, data + METADATA_BLOCKS * mem_target->blocklen, metadata->length * mem_target->blocklen);
     if (cnt <= 2) {
-        SPDK_NOTICELOG("%s\n", mem_target->core_buf + metadata->core_offset * mem_target->blocklen);
+        SPDK_NOTICELOG("core data: %s$\n", mem_target->core_buf + metadata->core_offset * mem_target->blocklen);
     }
 
     target->head.offset = mem_target->slice->tail.offset;
