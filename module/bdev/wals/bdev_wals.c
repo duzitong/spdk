@@ -132,7 +132,7 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 	wals_ch->wals_bdev = wals_bdev;
 
 	pthread_mutex_lock(&wals_bdev->mutex);
-	SPDK_NOTICELOG("Core mask of current thread: 0x%s", spdk_cpuset_fmt(set));
+	SPDK_NOTICELOG("Core mask of current thread: 0x%s\n", spdk_cpuset_fmt(set));
 	for (lcore = 0; lcore < SPDK_CPUSET_SIZE; lcore++) {
 		if (spdk_cpuset_get_cpu(set, lcore)) {
 			break;
@@ -145,6 +145,9 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 			wals_bdev->pending_writes_poller = SPDK_POLLER_REGISTER(wals_bdev_submit_pending_writes, wals_bdev, 0);
 
 			wals_bdev->write_thread = spdk_get_thread();
+			if (!wals_bdev->read_thread_set) {
+				wals_bdev->read_thread = wals_bdev->write_thread;
+			}
 			wals_bdev->write_thread_set = true;
 		}
 	} else {
