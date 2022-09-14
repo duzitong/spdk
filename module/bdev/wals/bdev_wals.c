@@ -438,7 +438,7 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 		}
 
 		if (wals_io->read_after == LIST_FIRST(&wals_io->wals_bdev->outstanding_read_afters)) {
-			wals_io->wals_bdev->slices[wals_io->slice_index].head = wals_io->read_after.pos;
+			wals_io->wals_bdev->slices[wals_io->slice_index].head = wals_io->read_after->pos;
 		}
 
 		LIST_REMOVE(wals_io->read_after, entries);
@@ -541,7 +541,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 		}
 
 		if (bn && read_cur >= bn->begin) {
-			tmp = bn->end ? read_end ? read_end : bn->end;
+			tmp = bn->end ? read_end : bn->end;
 
 			wals_io->remaining_read_requests++;
 			ret = wals_bdev->module->submit_log_read_request(slice->targets[target_index], wals_io->read_buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
