@@ -720,13 +720,14 @@ wals_bdev_submit_write_request(void *arg)
 	data = wals_bdev->buffer + (wals_bdev->buffer_tail.offset + METADATA_BLOCKS) * wals_bdev->buffer_blocklen;
 	iovs = bdev_io->u.bdev.iovs;
 
-	if (bdev_io->u.bdev.iovcnt == 1 && bdev_io->u.bdev.num_blocks == 1) {
-		SPDK_NOTICELOG("write %s$\n", iovs[0]);
-	}
-
 	for (i = 0; i < bdev_io->u.bdev.iovcnt; i++) {
 		memcpy(data, iovs[i].iov_base, iovs[i].iov_len);
 		data += iovs[i].iov_len;
+	}
+
+	if (bdev_io->u.bdev.iovcnt == 1 && bdev_io->u.bdev.num_blocks == 1) {
+		SPDK_NOTICELOG("write orig %s$\n", iovs[0].iov_base);
+		SPDK_NOTICELOG("write copy %s$\n", wals_bdev->buffer + (wals_bdev->buffer_tail.offset + METADATA_BLOCKS) * wals_bdev->buffer_blocklen);
 	}
 
 	// call module to submit to all targets
