@@ -482,6 +482,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
 	slice = &wals_bdev->slices[wals_io->slice_index];
 	wals_io->read_buf = spdk_zmalloc(bdev_io->u.bdev.num_blocks * wals_bdev->bdev.blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	SPDK_NOTICELOG("read buf ptr: %p\n", wals_io->read_buf);
 
 	valid_pos = wals_bdev_get_targets_log_head_min2(slice);
 	wals_io->read_after = wals_bdev_insert_read_after(valid_pos, wals_bdev);

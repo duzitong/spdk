@@ -48,6 +48,7 @@ static int
 mem_submit_log_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
     SPDK_NOTICELOG("log read: %ld+%ld\n", offset, cnt);
+    SPDK_NOTICELOG("data ptr: %p\n", data);
     struct wals_mem_target *mem_target = target->private_info;
     memcpy(data, mem_target->log_buf + offset * mem_target->blocklen, cnt * mem_target->blocklen);
 
@@ -59,6 +60,7 @@ static int
 mem_submit_core_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
     SPDK_NOTICELOG("core read: %ld+%ld\n", offset, cnt);
+    SPDK_NOTICELOG("data ptr: %p\n", data);
     struct wals_mem_target *mem_target = target->private_info;
     memcpy(data, mem_target->core_buf + offset * mem_target->blocklen, cnt * mem_target->blocklen);
 
