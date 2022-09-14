@@ -1322,6 +1322,14 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 		return -EINVAL;
 	}
 
+	wals_bdev->bdev.blocklen = wals_cfg->blocklen;
+	wals_bdev->bdev.blockcnt = wals_cfg->slice_blockcnt * wals_cfg->slicecnt;
+	wals_bdev->bdev.optimal_io_boundary = wals_cfg->slice_blockcnt;
+	wals_bdev->bdev.split_on_optimal_io_boundary = true;
+	wals_bdev->slice_blockcnt = wals_cfg->slice_blockcnt;
+	wals_bdev->buffer_blocklen = wals_cfg->blocklen;
+	wals_bdev->buffer_blockcnt = wals_cfg->buffer_blockcnt;
+
 	for (i = 0; i < wals_cfg->slicecnt; i++) {
 		wals_bdev->slices[i].log_blockcnt = UINT64_MAX;
 		for (j = 0; j < NUM_TARGETS; j++) {
@@ -1335,14 +1343,6 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 			}
 		}
 	}
-
-	wals_bdev->bdev.blocklen = wals_cfg->blocklen;
-	wals_bdev->bdev.blockcnt = wals_cfg->slice_blockcnt * wals_cfg->slicecnt;
-	wals_bdev->bdev.optimal_io_boundary = wals_cfg->slice_blockcnt;
-	wals_bdev->bdev.split_on_optimal_io_boundary = true;
-	wals_bdev->slice_blockcnt = wals_cfg->slice_blockcnt;
-	wals_bdev->buffer_blocklen = wals_cfg->blocklen;
-	wals_bdev->buffer_blockcnt = wals_cfg->buffer_blockcnt;
 
 	rc = wals_bdev_start(wals_bdev);
 	if (rc) {
