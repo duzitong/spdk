@@ -584,7 +584,7 @@ wals_bdev_write_complete_quorum(void *arg)
 	
 	msg->begin = metadata->core_offset;
 	msg->end = metadata->core_offset + metadata->length - 1;
-	msg->offset = metadata->next_offset - metadata->length + METADATA_BLOCKS;
+	msg->offset = metadata->next_offset - metadata->length;
 	msg->round = metadata->round;
 	msg->wals_bdev = wals_bdev;
 	spdk_thread_send_msg(wals_bdev->read_thread, wals_bdev_insert_read_index, msg);
