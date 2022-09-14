@@ -116,31 +116,36 @@ struct wals_target_config {
 	struct wals_target_info 	target_core_info;
 };
 
+typedef struct wals_log_position {
+	uint64_t	offset;
+	uint64_t	round;
+} wals_log_position;
+
+struct wals_read_after {
+	wals_log_position pos;
+
+	LIST_ENTRY(wals_read_after) entries;
+}
+
 struct wals_target {
-	volatile uint64_t				log_blockcnt;
+	volatile uint64_t			log_blockcnt;
 
-	volatile uint64_t				log_head_offset;
+	volatile wals_log_position	head;
 
-	volatile uint64_t				log_head_round;
-
-	void							*private_info;
+	void						*private_info;
 };
 
 struct wals_slice {
-	uint64_t	seq;
+	uint64_t					seq;
 
-	uint64_t	log_blockcnt;
+	uint64_t					log_blockcnt;
 
-	uint64_t	log_tail_offset;
+	wals_log_position			tail;
 
-	uint64_t	log_tail_round;
+	// min(outstanding read requests offset, min2(targets.offset))
+	volatile wals_log_position	head;
 
-	// min(outstanding read requests offset, target[0-2].offset)
-	uint64_t	log_head_offset;
-
-	uint64_t	log_head_round;
-
-	struct wals_target	*targets[NUM_TARGETS];
+	struct wals_target			*targets[NUM_TARGETS];
 };
 
 /*
@@ -168,7 +173,9 @@ struct wals_bdev_io {
 
 	struct wals_metadata	*metadata;
 	
-	uint16_t	remaining_base_bdev_io;
+	uint16_t	remaining_read_requests;
+
+	struct wals_read_after	read_after;
 
 	void	*read_buf;
 
@@ -283,19 +290,18 @@ struct wals_bdev {
 	/* number of blocks of the buffer */
 	uint64_t			buffer_blockcnt;
 
-	uint64_t			buffer_tail_offset;
+	wals_log_position	buffer_tail;
 
-	uint64_t			buffer_tail_round;
-
-	uint64_t			buffer_head_offset;
-	
-	uint64_t			buffer_head_round;
+	wals_log_position	buffer_head;
 
 	/* bsl node mempool */
 	struct spdk_mempool		*bsl_node_pool;
 
 	/* bstat mempool */
 	struct spdk_mempool		*bstat_pool;
+
+	/* index message pool */
+	struct spdk_mempool		*index_msg_pool;
 
 	/* skip list index */
 	struct bskiplist 	*bsl;
@@ -307,6 +313,13 @@ struct wals_bdev {
 
 	/* pending writes due to no enough space on log device or (unlikely) buffer */
 	TAILQ_HEAD(, wals_bdev_io)	pending_writes;
+
+	/* list of outstanding read_afters */
+	LIST_HEAD(, wals_read_after) outstanding_read_afters;
+
+	volatile bool				write_thread_set;
+
+	volatile bool				read_thread_set;
 };
 
 struct wals_slice_config {
@@ -358,6 +371,18 @@ struct wals_bdev_io_channel {
 	/* wals bdev */
 	struct wals_bdev			*wals_bdev;
 };
+
+struct wals_index_msg {
+	uint64_t			begin;
+
+	uint64_t			end;
+
+	uint64_t			round;
+
+	uint64_t			offset;
+
+	struct wals_bdev	*wals_bdev;
+}
 
 /* structs for rpc*/
 struct rpc_bdev_wals_target_info {
@@ -419,10 +444,9 @@ __TARGET_MODULE_REGISTER(__LINE__)(void)					\
 }
 
 void
-wals_target_write_complete(struct wals_bdev_io *wals_io, bool success);
+wals_target_read_complete(struct wals_bdev_io *wals_io, bool success);
 void
-wals_bdev_queue_io_wait(struct wals_bdev_io *wals_io, struct spdk_bdev *bdev,
-			struct spdk_io_channel *ch, spdk_bdev_io_wait_cb cb_fn);
+wals_target_write_complete(struct wals_bdev_io *wals_io, bool success);
 void
 wals_bdev_io_complete(struct wals_bdev_io *wals_io, enum spdk_bdev_io_status status);
 

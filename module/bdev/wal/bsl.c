@@ -1,5 +1,4 @@
 #include "bsl.h"
-#include "bdev_wal.h"
 #include "spdk/stdinc.h"
 #include "spdk/env.h"
 
@@ -170,7 +169,6 @@ bskiplistNode *bslInsert(bskiplist *bsl, long begin, long end, bstat *ele, bskip
     bskiplistNode *updateb[BSKIPLIST_MAXLEVEL], *updatee[BSKIPLIST_MAXLEVEL], *x, *y;
     int i, level;
 
-    spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_BSL_RAND_START, 0, 0, (uintptr_t)ele);
     x = bsl->header;
     for (i = bsl->level-1; i >= 0; i--) {
         while (x->level[i].forward &&
@@ -180,9 +178,7 @@ bskiplistNode *bslInsert(bskiplist *bsl, long begin, long end, bstat *ele, bskip
         }
         updateb[i] = x;
     }
-    spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_BSL_RAND_END, 0, 0, (uintptr_t)ele);
 
-    spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_BSL_RAND_START, 0, 0, (uintptr_t)ele);
     x = bsl->header;
     for (i = bsl->level-1; i >= 0; i--) {
         while (x->level[i].forward &&
@@ -192,7 +188,6 @@ bskiplistNode *bslInsert(bskiplist *bsl, long begin, long end, bstat *ele, bskip
         }
         updatee[i] = x;
     }
-    spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WAL_BSL_RAND_END, 0, 0, (uintptr_t)ele);
 
     level = bslRandomLevel();
     if (level > bsl->level) {
