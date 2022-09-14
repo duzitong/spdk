@@ -81,7 +81,8 @@ mem_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
     SPDK_NOTICELOG("core write: %ld+%ld\n", metadata->core_offset, metadata->length);
     memcpy(mem_target->core_buf + metadata->core_offset * mem_target->blocklen, data + METADATA_BLOCKS * mem_target->blocklen, metadata->length * mem_target->blocklen);
     if (cnt <= 2) {
-        SPDK_NOTICELOG("src ptr: %p$\n", data + METADATA_BLOCKS * mem_target->blocklen);
+        SPDK_NOTICELOG("md ptr: %p$\n", data);
+        SPDK_NOTICELOG("data ptr: %p$\n", data + METADATA_BLOCKS * mem_target->blocklen);
         SPDK_NOTICELOG("core data: %s$\n", mem_target->core_buf + metadata->core_offset * mem_target->blocklen);
     }
 

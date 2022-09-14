@@ -726,7 +726,8 @@ wals_bdev_submit_write_request(void *arg)
 	}
 
 	if (bdev_io->u.bdev.iovcnt == 1 && bdev_io->u.bdev.num_blocks == 1) {
-		SPDK_NOTICELOG("write copy %p\n", wals_bdev->buffer + (wals_bdev->buffer_tail.offset + METADATA_BLOCKS) * wals_bdev->buffer_blocklen);
+		SPDK_NOTICELOG("data ptr: %p\n", ptr);
+		SPDK_NOTICELOG("write copy: %p\n", wals_bdev->buffer + (wals_bdev->buffer_tail.offset + METADATA_BLOCKS) * wals_bdev->buffer_blocklen);
 	}
 
 	// call module to submit to all targets
