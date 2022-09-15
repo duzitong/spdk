@@ -298,29 +298,16 @@ bdev_persist_readv(struct persist_disk *pdisk,
 	pio->iov_offset = 0;
 	int rc;
 
-	// if (iovcnt == 1) {
-	// 	SPDK_NOTICELOG("use simple imple\n");
-	// 	rc = spdk_nvme_ns_cmd_read(pdisk->ns,
-	// 		pdisk->qpair,
-	// 		iov[0].iov_base,
-	// 		lba,
-	// 		lba_count,
-	// 		bdev_persist_read_done,
-	// 		pio,
-	// 		0);
-
-	// }
-	// else {
-		rc = spdk_nvme_ns_cmd_readv(pdisk->ns,
-			pdisk->qpair,
-			lba,
-			lba_count,
-			bdev_persist_read_done,
-			pio,
-			0,
-			bdev_persist_reset_sgl,
-			bdev_persist_next_sge
-			);
+	rc = spdk_nvme_ns_cmd_readv(pdisk->ns,
+		pdisk->qpair,
+		lba,
+		lba_count,
+		bdev_persist_read_done,
+		pio,
+		0,
+		bdev_persist_reset_sgl,
+		bdev_persist_next_sge
+		);
 
 	// }
 
@@ -577,6 +564,8 @@ persist_destage_poller(void *ctx)
 			// ignore the error for now, otherwise the error prints forever
 			pdisk->prev_seq = metadata->seq - 1;
 		}
+
+		// TODO: interval check
 
 		rc = spdk_nvme_ns_cmd_write(pdisk->ns,
 			pdisk->qpair,
@@ -1035,6 +1024,7 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 			SPDK_ERRLOG("Failed to register persist destage poller\n");
 			return -ENOMEM;
 		}
+		// TODO: catch up poller
 	}
 
 	rc = spdk_bdev_register(&pdisk->disk);
