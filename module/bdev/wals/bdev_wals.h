@@ -272,7 +272,7 @@ struct wals_bdev {
 	struct spdk_poller		*pending_writes_poller;
 
 	/* poller to update log head */
-	sturct spdk_poller		*log_head_update_poller;
+	struct spdk_poller		*log_head_update_poller;
 
 	/* poller to clean index */
 	struct spdk_poller		*cleaner_poller;
