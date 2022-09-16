@@ -142,10 +142,13 @@ struct wals_slice {
 
 	wals_log_position			tail;
 
-	// min(outstanding read requests offset, min2(targets.offset))
+	/* min(outstanding read requests offset, min2(targets.offset)) */
 	volatile wals_log_position	head;
 
 	struct wals_target			*targets[NUM_TARGETS];
+
+	/* avoid head update when there are outstanding reads */
+	uint64_t					outstanding_reads;
 };
 
 /*
@@ -267,6 +270,9 @@ struct wals_bdev {
 
 	/* poller to complete pending writes */
 	struct spdk_poller		*pending_writes_poller;
+
+	/* poller to update log head */
+	sturct spdk_poller		*log_head_update_poller;
 
 	/* poller to clean index */
 	struct spdk_poller		*cleaner_poller;

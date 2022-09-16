@@ -149,6 +149,7 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 	} else {
 		if (!wals_bdev->read_thread_set) {
 			// TODO: call module to register read pollers
+			wals_bdev->log_head_update_poller = SPDK_POLLER_REGISTER(wals_bdev_log_head_update, wals_bdev, 5);
 			wals_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wals_bdev_cleaner, wals_bdev, 10);
 			wals_bdev->stat_poller = SPDK_POLLER_REGISTER(wals_bdev_stat_report, wals_bdev, 30*1000*1000);
 
@@ -451,6 +452,7 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 		free(wals_io->read_after);
 
 		spdk_free(wals_io->read_buf);
+		wals_io->wals_bdev->slices[wals_io->orig_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt].outstanding_reads--;
 
 		wals_bdev_io_complete(wals_io, wals_io->status);
 	}
@@ -482,6 +484,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
 	slice = &wals_bdev->slices[wals_io->slice_index];
 	wals_io->read_buf = spdk_zmalloc(bdev_io->u.bdev.num_blocks * wals_bdev->bdev.blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	slice->outstanding_reads++;
 
 	valid_pos = wals_bdev_get_targets_log_head_min2(slice);
 	SPDK_NOTICELOG("valid pos: %ld(%ld)\n", valid_pos.offset, valid_pos.round);
@@ -506,7 +509,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 														bdev_io->u.bdev.num_blocks, wals_io);
 		if (spdk_unlikely(ret != 0)) {
 			SPDK_ERRLOG("submit log read request failed to target %d in slice %ld\n", target_index, wals_io->slice_index);
-			wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
+			wals_target_read_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
 		}
 		return;
 	}
@@ -1437,6 +1440,24 @@ wals_bdev_submit_pending_writes(void *ctx)
 	}
 
 	return SPDK_POLLER_IDLE;
+}
+
+static int 
+wals_bdev_log_head_update(void *ctx)
+{
+	struct wals_bdev *wals_bdev = ctx;
+	uint64_t i, cnt = 0;
+	struct wals_slice *slice;
+
+	for (i = 0; i < wals_bdev->slicecnt; i++) {
+		slice = &wals_bdev->slices[i];
+		if (slice->outstanding_reads == 0) {
+			slice->head = wals_bdev_get_targets_log_head_min2(slice);
+			cnt++;
+		}
+	}
+
+	return cnt > 0 ? SPDK_POLLER_BUSY : SPDK_POLLER_IDLE;
 }
 
 static int
