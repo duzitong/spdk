@@ -375,7 +375,7 @@ wals_bdev_is_valid_entry(struct wals_log_position after, struct bstat *bstat)
 		}
 
 		if (bstat->l.bdevOffset >= after.offset) {
-			return  true;
+			return true;
 		}
 
         return false;
@@ -728,7 +728,7 @@ wals_bdev_submit_write_request(void *arg)
 	metadata->core_offset = bdev_io->u.bdev.offset_blocks;
 	metadata->next_offset = slice_tail.offset;
 	metadata->length = bdev_io->u.bdev.num_blocks;
-	metadata->round = wals_bdev->buffer_tail.round;
+	metadata->round = slice->tail.round;
 
 	wals_io->metadata = metadata;
 
@@ -755,6 +755,8 @@ wals_bdev_submit_write_request(void *arg)
 	// update tails
 	slice->tail = slice_tail;
 	wals_bdev->buffer_tail = buffer_tail;
+	SPDK_NOTICELOG("slice tail updated: %ld(%ld)\n", slice->tail.offset, slice->tail.round);
+	SPDK_NOTICELOG("buffer tail updated: %ld(%ld)\n", wals_bdev->buffer_tail.offset, wals_bdev->buffer_tail.round);
 
 	if (spdk_unlikely(wals_io->targets_failed > NUM_TARGETS - QUORUM_TARGETS)) {
 		SPDK_ERRLOG("IO submit failure to quorum targets on slice %ld.\n", wals_io->slice_index);
