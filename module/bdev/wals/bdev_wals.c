@@ -521,7 +521,12 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 		return;
 	}
 
-	wals_io->remaining_read_requests = 0;
+	/*
+	 * Completion in read submit request leads to complete the whole read request every time.
+	 * Add the initial remaining read requests by 1 to avoid this.
+	 * The remaining read request will not be incremented on the last submission so that the whole request could be completed.
+	 */
+	wals_io->remaining_read_requests = 1;
 	read_cur = read_begin;
 	// TODO: round-robin?
 	target_index = 0;
@@ -538,7 +543,9 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 				tmp = bn->begin - 1 > read_end ? read_end : bn->begin - 1;
 			}
 
-			wals_io->remaining_read_requests++;
+			if (tmp != read_end) {
+				wals_io->remaining_read_requests++;
+			}
 			ret = wals_bdev->module->submit_core_read_request(slice->targets[target_index], wals_io->read_buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
 															read_cur, tmp - read_cur + 1, wals_io);
 			if (spdk_unlikely(ret != 0)) {
@@ -552,7 +559,9 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 		if (bn && read_cur >= bn->begin) {
 			tmp = bn->end > read_end ? read_end : bn->end;
 
-			wals_io->remaining_read_requests++;
+			if (tmp != read_end) {
+				wals_io->remaining_read_requests++;
+			}
 			ret = wals_bdev->module->submit_log_read_request(slice->targets[target_index], wals_io->read_buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
 															bn->ele->l.bdevOffset + read_cur - bn->ele->begin, tmp - read_cur + 1, wals_io);
 			if (spdk_unlikely(ret != 0)) {
