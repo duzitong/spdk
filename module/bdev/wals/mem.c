@@ -31,9 +31,6 @@ mem_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
 					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
     mem_target->core_buf = spdk_zmalloc(wals_bdev->slice_blockcnt * mem_target->blocklen, 2 * 1024 * 1024, NULL,
 					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-
-    SPDK_NOTICELOG("log ptr: %p\n", mem_target->log_buf);
-    SPDK_NOTICELOG("core ptr: %p\n", mem_target->core_buf);
     
     target->log_blockcnt = LOG_BUFFER_SIZE;
     target->private_info = mem_target;
@@ -51,9 +48,7 @@ static int
 mem_submit_log_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
     SPDK_NOTICELOG("log read: %ld+%ld\n", offset, cnt);
-    SPDK_NOTICELOG("data ptr: %p\n", data);
     struct wals_mem_target *mem_target = target->private_info;
-    SPDK_NOTICELOG("src ptr: %p\n", mem_target->log_buf + offset * mem_target->blocklen);
     memcpy(data, mem_target->log_buf + offset * mem_target->blocklen, cnt * mem_target->blocklen);
 
     wals_target_read_complete(wals_io, true);
@@ -64,9 +59,7 @@ static int
 mem_submit_core_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
     SPDK_NOTICELOG("core read: %ld+%ld\n", offset, cnt);
-    SPDK_NOTICELOG("data ptr: %p\n", data);
     struct wals_mem_target *mem_target = target->private_info;
-    SPDK_NOTICELOG("src ptr: %p\n", mem_target->core_buf + offset * mem_target->blocklen);
     memcpy(data, mem_target->core_buf + offset * mem_target->blocklen, cnt * mem_target->blocklen);
 
     wals_target_read_complete(wals_io, true);
@@ -78,7 +71,6 @@ mem_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
 {
     SPDK_NOTICELOG("log write: %ld+%ld\n", offset, cnt);
     struct wals_mem_target *mem_target = target->private_info;
-    SPDK_NOTICELOG("dst ptr: %p\n", mem_target->log_buf + offset * mem_target->blocklen);
     memcpy(mem_target->log_buf + offset * mem_target->blocklen, data, cnt * mem_target->blocklen);
 
     struct wals_metadata *metadata = data;
