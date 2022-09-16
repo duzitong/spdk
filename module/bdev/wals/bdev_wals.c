@@ -1452,7 +1452,7 @@ wals_bdev_submit_pending_writes(void *ctx)
 	struct spdk_bdev_io *bdev_io;
 	struct wals_slice *slice;
 	struct wals_log_position buffer_tail, slice_tail;
-	uint64_t i, cnt;
+	uint64_t i, cnt = 0;
 
 	for (i = 0; i < wals_bdev->slicecnt; i++) {
 		slice = &wals_bdev->slices[i];
@@ -1500,7 +1500,7 @@ static int
 wals_bdev_cleaner(void *ctx)
 {
 	struct wals_bdev *wals_bdev = ctx;
-	int i, idx, j, count = 0, total;
+	int i, j, count = 0, total;
 	bskiplistNode *update[BSKIPLIST_MAXLEVEL], *x, *tmp;
 	long rand = random();
 
