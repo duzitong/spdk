@@ -660,6 +660,7 @@ wals_bdev_update_tail(uint64_t size_to_put, wals_log_position tail, uint64_t max
 					wals_log_position head, wals_log_position *new)
 {
 	uint64_t next = tail.offset + size_to_put;
+	*new = tail;
 	if (next > max) {
 		if (tail.round > head.round || size_to_put > head.offset) {
 			return false;
