@@ -484,14 +484,19 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	wals_io->read_buf = spdk_zmalloc(bdev_io->u.bdev.num_blocks * wals_bdev->bdev.blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 
 	valid_pos = wals_bdev_get_targets_log_head_min2(slice);
+	SPDK_NOTICELOG("valid pos: %ld(%ld)\n", valid_pos.offset, valid_pos.round);
 	wals_io->read_after = wals_bdev_insert_read_after(valid_pos, wals_bdev);
 
 	read_begin = bdev_io->u.bdev.offset_blocks;
     read_end = bdev_io->u.bdev.offset_blocks + bdev_io->u.bdev.num_blocks - 1;
 
 	bn = bslFirstNodeAfterBegin(wals_bdev->bsl, read_begin);
+	while (bn && !wals_bdev_is_valid_entry(valid_pos, bn->ele)) {
+		bn = bn->level[0].forward;
+	}
 
-	if (bn && bn->begin <= read_begin && bn->end >= read_end && wals_bdev_is_valid_entry(valid_pos, bn->ele)) {
+	if (bn && bn->begin <= read_begin && bn->end >= read_end) {
+		SPDK_NOTICELOG("one entry in log\n");
 		// One entry in someone's log
 		wals_io->remaining_read_requests = 1;
 		// TODO: pick the best choice
@@ -507,6 +512,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	}
 
 	if (!bn || bn->begin > read_end) {
+		SPDK_NOTICELOG("one entry in core\n");
 		// not found in index
 		wals_io->remaining_read_requests = 1;
 		// TODO: round-robin?
@@ -520,6 +526,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 		return;
 	}
 
+	SPDK_NOTICELOG("merged read\n");
 	/*
 	 * Completion in read submit request leads to complete the whole read request every time.
 	 * Add the initial remaining read requests by 1 to avoid this.
