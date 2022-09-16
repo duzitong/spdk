@@ -98,6 +98,7 @@ static void	wals_bdev_stop(struct wals_bdev *bdev);
 static int	wals_bdev_init(void);
 static bool wals_bdev_is_valid_entry(struct wals_log_position after, struct bstat *bstat);
 static int wals_bdev_submit_pending_writes(void *ctx);
+static int wals_bdev_log_head_update(void *ctx);
 static int wals_bdev_cleaner(void *ctx);
 static int wals_bdev_stat_report(void *ctx);
 
@@ -452,7 +453,7 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 		free(wals_io->read_after);
 
 		spdk_free(wals_io->read_buf);
-		wals_io->wals_bdev->slices[wals_io->orig_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt].outstanding_reads--;
+		wals_io->wals_bdev->slices[wals_io->orig_io->u.bdev.offset_blocks / wals_io->wals_bdev->slice_blockcnt].outstanding_reads--;
 
 		wals_bdev_io_complete(wals_io, wals_io->status);
 	}
