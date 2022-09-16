@@ -147,8 +147,11 @@ struct wals_slice {
 
 	struct wals_target			*targets[NUM_TARGETS];
 
-	/* avoid head update when there are outstanding reads */
-	uint64_t					outstanding_reads;
+	/* pending writes due to no enough space on log device or (unlikely) buffer */
+	TAILQ_HEAD(, wals_bdev_io)	pending_writes;
+
+	/* list of outstanding read_afters */
+	LIST_HEAD(, wals_read_after) outstanding_read_afters;
 };
 
 /*
@@ -316,12 +319,6 @@ struct wals_bdev {
 	struct bskiplistFreeNodes *bslfn;
 
 	struct wals_target_module	*module;
-
-	/* pending writes due to no enough space on log device or (unlikely) buffer */
-	TAILQ_HEAD(, wals_bdev_io)	pending_writes;
-
-	/* list of outstanding read_afters */
-	LIST_HEAD(, wals_read_after) outstanding_read_afters;
 
 	volatile bool				write_thread_set;
 
