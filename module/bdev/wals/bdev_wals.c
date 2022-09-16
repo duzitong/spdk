@@ -687,7 +687,7 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 {
 	struct spdk_bdev_io		*bdev_io = spdk_bdev_io_from_ctx(wals_io);
 	struct wals_bdev		*wals_bdev = wals_io->wals_bdev;
-	struct wals_slice		*slice = wals_bdev->slices[wals_io->slice_index];
+	struct wals_slice		*slice = &wals_bdev->slices[wals_io->slice_index];
 	
 	int						ret, i;
 	struct wals_metadata	*metadata;
