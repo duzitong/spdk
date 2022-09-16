@@ -261,6 +261,7 @@ rpc_bdev_wals_create(struct spdk_jsonrpc_request *request,
 	struct rpc_bdev_wals_create	req = {};
 	struct wals_bdev_config		*wals_cfg;
 	struct spdk_json_write_ctx *w;
+	uint32_t i;
 	bool write_available = false, read_available = false;
 	int				rc;
 
