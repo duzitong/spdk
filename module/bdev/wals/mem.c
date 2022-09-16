@@ -77,8 +77,10 @@ mem_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
     SPDK_NOTICELOG("core write: %ld+%ld\n", metadata->core_offset, metadata->length);
     memcpy(mem_target->core_buf + metadata->core_offset * mem_target->blocklen, data + METADATA_BLOCKS * mem_target->blocklen, metadata->length * mem_target->blocklen);
 
-    target->head.offset = mem_target->slice->tail.offset;
-    target->head.round = mem_target->slice->tail.round;
+    if (offset < target->head.offset) {
+        target->head.round++;
+    }
+    target->head.offset = offset+cnt;
     SPDK_NOTICELOG("target head updated: %ld(%ld)\n", target->head.offset, target->head.round);
     wals_target_write_complete(wals_io, true);
     return 0;
