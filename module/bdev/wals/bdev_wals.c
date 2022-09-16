@@ -683,7 +683,7 @@ wals_bdev_update_tail(uint64_t size_to_put, wals_log_position tail, uint64_t max
 }
 
 static void
-_wals_bdev_submit_write_request(struct wals_io *wals_io, struct wals_log_postion slice_tail, struct wals_log_postion buffer_tail)
+_wals_bdev_submit_write_request(struct wals_io *wals_io, wals_log_position slice_tail, wals_log_position buffer_tail)
 {
 	struct spdk_bdev_io		*bdev_io = spdk_bdev_io_from_ctx(wals_io);
 	struct wals_bdev		*wals_bdev = wals_io->wals_bdev;
