@@ -261,6 +261,7 @@ rpc_bdev_wals_create(struct spdk_jsonrpc_request *request,
 	struct rpc_bdev_wals_create	req = {};
 	struct wals_bdev_config		*wals_cfg;
 	struct spdk_json_write_ctx *w;
+	bool write_available = false, read_available = false;
 	int				rc;
 
 	if (spdk_json_decode_object(params, rpc_bdev_wals_create_decoders,
@@ -268,6 +269,20 @@ rpc_bdev_wals_create(struct spdk_jsonrpc_request *request,
 				    &req)) {
 		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
 						 "spdk_json_decode_object failed");
+		goto cleanup;
+	}
+
+	SPDK_ENV_FOREACH_CORE(i) {
+		if (i % 2 == 0) {
+			write_available = true;
+		} else {
+			read_available = true;
+		}
+	}
+
+	if (!write_available || !read_available) {
+		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
+						 "Dedicated CPUs cannot serve WALS bdevs");
 		goto cleanup;
 	}
 
