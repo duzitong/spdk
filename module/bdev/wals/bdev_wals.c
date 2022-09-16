@@ -478,6 +478,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
     uint64_t    			read_begin, read_end, read_cur, tmp;
 
 	SPDK_NOTICELOG("submit read: %ld+%ld\n", bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks);
+	wals_io->status = SPDK_BDEV_IO_STATUS_SUCCESS;
 
 	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
 	slice = &wals_bdev->slices[wals_io->slice_index];
