@@ -314,9 +314,9 @@ wals_bdev_io_complete(struct wals_bdev_io *wals_io, enum spdk_bdev_io_status sta
 }
 
 static wals_log_position
-wals_bdev_get_targets_log_head_min2(struct wals_slice *slice)
+wals_bdev_get_targets_log_head_min(struct wals_slice *slice)
 {
-	int i, min = 0, min_2 = 0;
+	int i, min = 0;
 	wals_log_position head[4];
 
 	for (i = 0; i < NUM_TARGETS; i++) {
@@ -338,30 +338,7 @@ wals_bdev_get_targets_log_head_min2(struct wals_slice *slice)
 		}
 	}
 
-	if (min == 0) {
-		min_2 = 1;
-	}
-
-	for (i = 1; i < NUM_TARGETS; i++) {
-		if (i == min) {
-			continue;
-		}
-		
-		if (head[i].round > head[min_2].round) {
-			continue;
-		}
-
-		if (head[i].round < head[min_2].round) {
-			min_2 = i;
-			continue;
-		}
-
-		if (head[i].offset < head[min_2].offset) {
-			min_2 = i;
-		}
-	}
-
-	return head[min_2];
+	return head[min];
 }
 
 static bool
@@ -489,7 +466,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	// TODO: get buffer from bdev memory region
 	wals_io->read_buf = spdk_zmalloc(bdev_io->u.bdev.num_blocks * wals_bdev->bdev.blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 
-	valid_pos = wals_bdev_get_targets_log_head_min2(slice);
+	valid_pos = wals_bdev_get_targets_log_head_min(slice);
 	SPDK_NOTICELOG("valid pos: %ld(%ld)\n", valid_pos.offset, valid_pos.round);
 	wals_io->read_after = wals_bdev_insert_read_after(valid_pos, slice);
 
@@ -608,7 +585,7 @@ wals_bdev_insert_read_index(void *arg)
 	struct bstat *bstat = bstatBdevCreate(msg->begin, msg->end, msg->round, msg->offset, msg->wals_bdev->bstat_pool);
 	
 	bslInsert(msg->wals_bdev->bsl, msg->begin, msg->end, bstat, msg->wals_bdev->bslfn);
-	spdk_mempool_put(msg);
+	spdk_mempool_put(msg->wals_bdev->index_msg_pool, msg);
 }
 
 static void
@@ -1523,7 +1500,7 @@ wals_bdev_log_head_update(void *ctx)
 	for (i = 0; i < wals_bdev->slicecnt; i++) {
 		slice = &wals_bdev->slices[i];
 		if (LIST_EMPTY(&slice->outstanding_read_afters)) {
-			slice->head = wals_bdev_get_targets_log_head_min2(slice);
+			slice->head = wals_bdev_get_targets_log_head_min(slice);
 			cnt++;
 		}
 	}
@@ -1561,7 +1538,7 @@ wals_bdev_cleaner(void *ctx)
 		tmp = x->level[0].forward;
 		if (tmp) {
 			if (wals_bdev_is_valid_entry(
-				wals_bdev_get_targets_log_head_min2(&wals_bdev->slices[tmp->ele->begin / wals_bdev->slice_blockcnt]),
+				wals_bdev_get_targets_log_head_min(&wals_bdev->slices[tmp->ele->begin / wals_bdev->slice_blockcnt]),
 				tmp->ele)) {
 				for (j = 0; j < tmp->height; j++) {
 					update[j] = tmp;
