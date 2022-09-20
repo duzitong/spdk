@@ -192,7 +192,7 @@ struct wals_bdev_io {
 	int		targets_completed;
 
 	/* link next for pending writes */
-	TAILQ_ENTRY(wals_bdev_io)	tailq;
+	TAILQ_ENTRY(wals_bdev_io)	pending_write_next;
 };
 
 /*
