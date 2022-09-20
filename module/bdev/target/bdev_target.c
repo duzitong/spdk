@@ -791,8 +791,6 @@ target_reconnect_poller(void* ctx) {
 				break;
 			}
 
-			assert(connect_event->id == tdisk->cm_id);
-
 			SPDK_NOTICELOG("connected. posting send...\n");
 			SPDK_NOTICELOG("sending local addr %p rkey %d block_cnt %ld block_size %ld\n",
 				handshake->base_addr,
@@ -1003,7 +1001,7 @@ create_target_disk(struct spdk_bdev **bdev, const char *name, const char* ip, co
 		return -ENOMEM;
 	}
 
-	tdisk->reconnect_poller = SPDK_POLLER_REGISTER(target_reconnect_poller, tdisk, 1000 * 1000);
+	tdisk->reconnect_poller = SPDK_POLLER_REGISTER(target_reconnect_poller, tdisk, 5 * 1000);
 	if (!tdisk->reconnect_poller) {
 		SPDK_ERRLOG("Failed to register target reconnect poller\n");
 		return -ENOMEM;
