@@ -456,7 +456,7 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 {
 	struct spdk_bdev_io *orig_io = wals_io->orig_io;
 	int i;
-	void *copy = wals_io->read_buf;
+	void *copy = wals_io->read_buf->buf;
 	struct wals_slice *slice;
 
 	wals_io->remaining_read_requests--;
