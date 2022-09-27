@@ -366,7 +366,7 @@ wals_bdev_is_valid_entry(struct wals_log_position after, struct bstat *bstat)
 static struct wals_read_after*
 wals_bdev_insert_read_after(struct wals_log_position pos, struct wals_slice *slice)
 {
-	struct wals_read_after *i, *read_after = calloc(1, sizeof(*read_after));
+	struct wals_read_after *read_after = calloc(1, sizeof(*read_after));
 	read_after->pos = pos;
 
 	if (LIST_EMPTY(&slice->outstanding_read_afters)) {
@@ -386,7 +386,16 @@ wals_bdev_remove_read_after(struct wals_slice *slice, struct wals_read_after *re
 		slice->oldest = LIST_PREV(read_after, &slice->outstanding_read_afters, wals_read_after, entries);
 	}
 
-	LIST_REMOVE(read_after, entries);
+	QMD_SAVELINK(oldnext, (read_after)->entries.le_next); 
+	QMD_SAVELINK(oldprev, (read_after)->entries.le_prev);
+	QMD_LIST_CHECK_NEXT(read_after, entries);
+	QMD_LIST_CHECK_PREV(read_after, entries);
+	if (LIST_NEXT((read_after), entries) != NULL)
+		LIST_NEXT((read_after), entries)->entries.le_prev = (read_after)->entries.le_prev;
+	*(read_after)->entries.le_prev = LIST_NEXT((read_after), entries);
+	TRASHIT(*oldnext);
+	TRASHIT(*oldprev);
+	
 	free(read_after);
 }
 
@@ -434,6 +443,7 @@ wals_bdev_put_recycles(struct wals_bdev *wals_bdev, struct wals_bdev_read_buffer
 				}
 
 				LIST_REMOVE(buf, entries);
+				free(buf);
 				recycled = true;
 			}
 		}
@@ -445,16 +455,7 @@ wals_bdev_put_read_buf(struct wals_bdev *wals_bdev, struct wals_io_read_buffer *
 {
 	struct wals_bdev_read_buffer *buffer = &wals_bdev->read_buffer;
 
-	if (buf == buffer->buf + buffer->head * wals_bdev->buffer_blocklen) {
-		buffer->head += buf->blockcnt;
-
-		if (buffer->head == buffer->end) {
-			buffer->head = 0;
-			buffer->end = buffer->blockcnt;
-		}
-	} else {
-		LIST_INSERT_HEAD(&buffer->recycles, buf, entries);
-	}
+	LIST_INSERT_HEAD(&buffer->recycles, buf, entries);
 
 	wals_bdev_put_recycles(wals_bdev, buffer);
 }
