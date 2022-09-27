@@ -544,7 +544,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 
 		// TODO: pick the best choice
 		target_index = 0;
-		ret = wals_bdev->module->submit_log_read_request(slice->targets[target_index], wals_io->read_buf, 
+		ret = wals_bdev->module->submit_log_read_request(slice->targets[target_index], wals_io->read_buf.buf, 
 														bn->ele->l.bdevOffset + read_begin - bn->ele->begin,
 														bdev_io->u.bdev.num_blocks, wals_io);
 		if (spdk_unlikely(ret != 0)) {
@@ -560,7 +560,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 		wals_io->remaining_read_requests = 1;
 		// TODO: round-robin?
 		target_index = 0;
-		ret = wals_bdev->module->submit_core_read_request(slice->targets[target_index], wals_io->read_buf, 
+		ret = wals_bdev->module->submit_core_read_request(slice->targets[target_index], wals_io->read_buf.buf, 
 														bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, wals_io);
 		if (spdk_unlikely(ret != 0)) {
 			SPDK_ERRLOG("submit core read request failed to target %d in slice %ld\n", target_index, wals_io->slice_index);
@@ -599,7 +599,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 			 * TODO: Data on target may corrupt.
 			 * Either submit reads to all targets or try next target on failure returned.
 			 */
-			ret = wals_bdev->module->submit_core_read_request(slice->targets[target_index], wals_io->read_buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
+			ret = wals_bdev->module->submit_core_read_request(slice->targets[target_index], wals_io->read_buf.buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
 															read_cur, tmp - read_cur + 1, wals_io);
 			if (spdk_unlikely(ret != 0)) {
 				SPDK_ERRLOG("submit core read request failed to target %d in slice %ld\n", target_index, wals_io->slice_index);
@@ -619,7 +619,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 			 * TODO: Data on target may corrupt.
 			 * Either submit reads to all targets or try next target on failure returned.
 			 */
-			ret = wals_bdev->module->submit_log_read_request(slice->targets[target_index], wals_io->read_buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
+			ret = wals_bdev->module->submit_log_read_request(slice->targets[target_index], wals_io->read_buf.buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
 															bn->ele->l.bdevOffset + read_cur - bn->ele->begin, tmp - read_cur + 1, wals_io);
 			if (spdk_unlikely(ret != 0)) {
 				SPDK_ERRLOG("submit log read request failed to target %d in slice %ld\n", target_index, wals_io->slice_index);
