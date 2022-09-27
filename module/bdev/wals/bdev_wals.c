@@ -386,16 +386,7 @@ wals_bdev_remove_read_after(struct wals_slice *slice, struct wals_read_after *re
 		slice->oldest = LIST_PREV(read_after, &slice->outstanding_read_afters, wals_read_after, entries);
 	}
 
-	QMD_SAVELINK(oldnext, (read_after)->entries.le_next); 
-	QMD_SAVELINK(oldprev, (read_after)->entries.le_prev);
-	QMD_LIST_CHECK_NEXT(read_after, entries);
-	QMD_LIST_CHECK_PREV(read_after, entries);
-	if (LIST_NEXT((read_after), entries) != NULL)
-		LIST_NEXT((read_after), entries)->entries.le_prev = (read_after)->entries.le_prev;
-	*(read_after)->entries.le_prev = LIST_NEXT((read_after), entries);
-	TRASHIT(*oldnext);
-	TRASHIT(*oldprev);
-	
+	LIST_REMOVE(read_after, entries);
 	free(read_after);
 }
 
