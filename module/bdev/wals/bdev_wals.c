@@ -383,7 +383,7 @@ wals_bdev_remove_read_after(struct wals_slice *slice, struct wals_read_after *re
 {
 	if (read_after == slice->oldest) {
 		slice->head = read_after->pos;
-		slice->oldest = LIST_PREV(read_after);
+		slice->oldest = LIST_PREV(read_after, &slice->outstanding_read_afters, wals_read_after, entries);
 	}
 
 	LIST_REMOVE(read_after, entries);
