@@ -137,7 +137,7 @@ DEPDIRS-bdev_persist := $(BDEV_DEPS_THREAD) accel nvme
 DEPDIRS-bdev_uring := $(BDEV_DEPS_THREAD)
 DEPDIRS-bdev_virtio := $(BDEV_DEPS_THREAD) virtio
 DEPDIRS-bdev_wal := $(BDEV_DEPS_THREAD)
-DEPDIRS-bdev_wals := $(BDEV_DEPS_THREAD)
+DEPDIRS-bdev_wals := $(BDEV_DEPS_THREAD) nvme
 DEPDIRS-bdev_zone_block := $(BDEV_DEPS_THREAD)
 ifeq ($(OS),Linux)
 DEPDIRS-bdev_ftl := $(BDEV_DEPS_THREAD) ftl
