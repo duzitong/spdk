@@ -402,7 +402,6 @@ wals_bdev_get_read_buf(struct wals_bdev *wals_bdev, int blockcnt)
 {
 	struct wals_bdev_read_buffer *buffer = &wals_bdev->read_buffer;
 	struct wals_io_read_buffer* ret;
-	int cur = buffer->tail;
 
 	if (buffer->tail + blockcnt > buffer->blockcnt) {
 		if (blockcnt > buffer->head) {
@@ -425,14 +424,14 @@ wals_bdev_get_read_buf(struct wals_bdev *wals_bdev, int blockcnt)
 }
 
 static void
-wals_bdev_put_recycles(struct wals_bdev_read_buffer *buffer)
+wals_bdev_put_recycles(struct wals_bdev *wals_bdev, struct wals_bdev_read_buffer *buffer)
 {
 	bool recycled = false;
 	struct wals_io_read_buffer *buf;
 
 	do {
 		recycled = false;
-		LIST_FOREACH(buf, buffer->recycles, entries) {
+		LIST_FOREACH(buf, &buffer->recycles, entries) {
 			if (buf == buffer->buf + buffer->head * wals_bdev->buffer_blocklen) {
 				buffer->head += buf->blockcnt;
 				
@@ -445,7 +444,7 @@ wals_bdev_put_recycles(struct wals_bdev_read_buffer *buffer)
 				recycled = true;
 			}
 		}
-	} while (recycled)
+	} while (recycled);
 }
 
 static void
@@ -461,10 +460,10 @@ wals_bdev_put_read_buf(struct wals_bdev *wals_bdev, struct wals_io_read_buffer *
 			buffer->end = buffer->blockcnt;
 		}
 	} else {
-		LIST_INSERT_HEAD(buffer->recycles, buf, entries);
+		LIST_INSERT_HEAD(&buffer->recycles, buf, entries);
 	}
 
-	wals_bdev_put_recycles(buffer);
+	wals_bdev_put_recycles(wals_bdev, buffer);
 }
 
 void
@@ -502,7 +501,7 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 		LIST_REMOVE(wals_io->read_after, entries);
 		free(wals_io->read_after);
 
-		wals_bdev_put_read_buf(wals_io->wals_bdev, wals_io->read_buf, orig_io->u.bdev.num_blocks);
+		wals_bdev_put_read_buf(wals_io->wals_bdev, wals_io->read_buf);
 
 		wals_bdev_io_complete(wals_io, wals_io->status);
 	}
