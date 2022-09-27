@@ -147,11 +147,33 @@ struct wals_slice {
 
 	struct wals_target			*targets[NUM_TARGETS];
 
-	/* pending writes due to no enough space on log device or (unlikely) buffer */
+	/* pending writes due to no enough space on log device or buffer */
 	TAILQ_HEAD(, wals_bdev_io)	pending_writes;
 
 	/* list of outstanding read_afters */
 	LIST_HEAD(, wals_read_after) outstanding_read_afters;
+};
+
+struct wals_io_read_buffer {
+	void	*buf;
+
+	int		blockcnt;
+
+	LIST_ENTRY(wals_io_read_buffer) entries;
+};
+
+struct wals_bdev_read_buffer {
+	void	*buf;
+
+	int		blockcnt;
+
+	int		head;
+
+	int		tail;
+	
+	int		end;
+
+	LIST_HEAD(, wals_io_read_buffer)	recycles;
 };
 
 /*
@@ -183,7 +205,7 @@ struct wals_bdev_io {
 
 	struct wals_read_after	*read_after;
 
-	void	*read_buf;
+	struct wals_io_read_buffer	*read_buf;
 
 	uint64_t	slice_index;
 
@@ -291,7 +313,7 @@ struct wals_bdev {
 
 	struct wals_slice	*slices;
 
-	void*				buffer;
+	void				*buffer;
 
 	/* buffer block length */
 	uint64_t			buffer_blocklen;
@@ -302,6 +324,9 @@ struct wals_bdev {
 	wals_log_position	buffer_tail;
 
 	wals_log_position	buffer_head;
+
+	/* buffer for reads, with size of write buffer for now */
+	struct wals_bdev_read_buffer	read_buffer;
 
 	/* bsl node mempool */
 	struct spdk_mempool		*bsl_node_pool;

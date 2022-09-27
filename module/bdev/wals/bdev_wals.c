@@ -397,6 +397,76 @@ wals_bdev_insert_read_after(struct wals_log_position pos, struct wals_slice *sli
 	return read_after;
 }
 
+static struct wals_io_read_buffer*
+wals_bdev_get_read_buf(struct wals_bdev *wals_bdev, int blockcnt)
+{
+	struct wals_bdev_read_buffer *buffer = &wals_bdev->read_buffer;
+	struct wals_io_read_buffer* ret;
+	int cur = buffer->tail;
+
+	if (buffer->tail + blockcnt > buffer->blockcnt) {
+		if (blockcnt > buffer->head) {
+			return NULL;
+		}
+
+		ret = calloc(1, sizeof(struct wals_io_read_buffer));
+		ret->buf = buffer->buf;
+		ret->blockcnt = blockcnt;
+		buffer->end = buffer->tail;
+		buffer->tail = blockcnt;
+		return ret;
+	}
+
+	ret = calloc(1, sizeof(struct wals_io_read_buffer));
+	ret->buf = buffer->buf + buffer->tail * wals_bdev->buffer_blocklen;
+	ret->blockcnt = blockcnt;
+	buffer->tail += blockcnt;
+	return ret;
+}
+
+static void
+wals_bdev_put_recycles(struct wals_bdev_read_buffer *buffer)
+{
+	bool recycled = false;
+	struct wals_io_read_buffer *buf;
+
+	do {
+		recycled = false;
+		LIST_FOREACH(buf, buffer->recycles, entries) {
+			if (buf == buffer->buf + buffer->head * wals_bdev->buffer_blocklen) {
+				buffer->head += buf->blockcnt;
+				
+				if (buffer->head == buffer->end) {
+					buffer->head = 0;
+					buffer->end = buffer->blockcnt;
+				}
+
+				LIST_REMOVE(buf, entries);
+				recycled = true;
+			}
+		}
+	} while (recycled)
+}
+
+static void
+wals_bdev_put_read_buf(struct wals_bdev *wals_bdev, struct wals_io_read_buffer *buf)
+{
+	struct wals_bdev_read_buffer *buffer = &wals_bdev->read_buffer;
+
+	if (buf == buffer->buf + buffer->head * wals_bdev->buffer_blocklen) {
+		buffer->head += buf->blockcnt;
+
+		if (buffer->head == buffer->end) {
+			buffer->head = 0;
+			buffer->end = buffer->blockcnt;
+		}
+	} else {
+		LIST_INSERT_HEAD(buffer->recycles, buf, entries);
+	}
+
+	wals_bdev_put_recycles(buffer);
+}
+
 void
 wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 {
@@ -432,7 +502,7 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 		LIST_REMOVE(wals_io->read_after, entries);
 		free(wals_io->read_after);
 
-		spdk_free(wals_io->read_buf);
+		wals_bdev_put_read_buf(wals_io->wals_bdev, wals_io->read_buf, orig_io->u.bdev.num_blocks);
 
 		wals_bdev_io_complete(wals_io, wals_io->status);
 	}
@@ -464,7 +534,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
 	slice = &wals_bdev->slices[wals_io->slice_index];
 	// TODO: get buffer from bdev memory region
-	wals_io->read_buf = spdk_zmalloc(bdev_io->u.bdev.num_blocks * wals_bdev->bdev.blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	wals_io->read_buf = wals_bdev_get_read_buf(wals_bdev, bdev_io->u.bdev.num_blocks);
 
 	valid_pos = wals_bdev_get_targets_log_head_min(slice);
 	SPDK_NOTICELOG("valid pos: %ld(%ld)\n", valid_pos.offset, valid_pos.round);
@@ -1421,6 +1491,13 @@ wals_bdev_start(struct wals_bdev *wals_bdev)
 
 	wals_bdev->buffer = spdk_zmalloc(wals_bdev->buffer_blockcnt * wals_bdev->buffer_blocklen, 2 * 1024 * 1024, NULL,
 					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	
+	wals_bdev->read_buffer.blockcnt = wals_bdev->buffer_blockcnt;
+	wals_bdev->read_buffer.buf = spdk_zmalloc(wals_bdev->read_buffer.blockcnt * wals_bdev->buffer_blocklen, 2 * 1024 * 1024, NULL,
+					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	wals_bdev->read_buffer.head = wals_bdev->read_buffer.tail = 0;
+	wals_bdev->read_buffer.end = wals_bdev->read_buffer.blockcnt;
+	LIST_INIT(&wals_bdev->read_buffer.recycles);
 	// TODO: recover
 
 	return 0;
