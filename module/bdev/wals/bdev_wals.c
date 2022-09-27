@@ -314,9 +314,9 @@ wals_bdev_io_complete(struct wals_bdev_io *wals_io, enum spdk_bdev_io_status sta
 }
 
 static wals_log_position
-wals_bdev_get_targets_log_head_min2(struct wals_slice *slice)
+wals_bdev_get_targets_log_head_min(struct wals_slice *slice)
 {
-	int i, min = 0, min_2 = 0;
+	int i, min = 0;
 	wals_log_position head[4];
 
 	for (i = 0; i < NUM_TARGETS; i++) {
@@ -338,30 +338,7 @@ wals_bdev_get_targets_log_head_min2(struct wals_slice *slice)
 		}
 	}
 
-	if (min == 0) {
-		min_2 = 1;
-	}
-
-	for (i = 1; i < NUM_TARGETS; i++) {
-		if (i == min) {
-			continue;
-		}
-		
-		if (head[i].round > head[min_2].round) {
-			continue;
-		}
-
-		if (head[i].round < head[min_2].round) {
-			min_2 = i;
-			continue;
-		}
-
-		if (head[i].offset < head[min_2].offset) {
-			min_2 = i;
-		}
-	}
-
-	return head[min_2];
+	return head[min];
 }
 
 static bool
@@ -387,37 +364,91 @@ wals_bdev_is_valid_entry(struct wals_log_position after, struct bstat *bstat)
 }
 
 static struct wals_read_after*
-wals_bdev_insert_read_after(struct wals_log_position pos, struct wals_slice *slice) {
-	struct wals_read_after *i, *read_after = calloc(1, sizeof(*read_after));
+wals_bdev_insert_read_after(struct wals_log_position pos, struct wals_slice *slice)
+{
+	struct wals_read_after *read_after = calloc(1, sizeof(*read_after));
 	read_after->pos = pos;
 
 	if (LIST_EMPTY(&slice->outstanding_read_afters)) {
-		LIST_INSERT_HEAD(&slice->outstanding_read_afters, read_after, entries);
-
-		return read_after;
+		slice->oldest = read_after;
 	}
 
-	i = LIST_FIRST(&slice->outstanding_read_afters);
-	while (i != NULL) {
-		if (i->pos.round > pos.round) {
-			break;
-		}
-
-		if (i->pos.round < pos.round) {
-			i = LIST_NEXT(i, entries);
-			continue;
-		}
-
-		if (i->pos.offset > pos.offset) {
-			break;
-		}
-
-		i = LIST_NEXT(i, entries);
-	}
-
-	LIST_INSERT_BEFORE(i, read_after, entries);
+	LIST_INSERT_HEAD(&slice->outstanding_read_afters, read_after, entries);
 
 	return read_after;
+}
+
+static void
+wals_bdev_remove_read_after(struct wals_slice *slice, struct wals_read_after *read_after)
+{
+	if (read_after == slice->oldest) {
+		slice->head = read_after->pos;
+		slice->oldest = LIST_PREV(read_after, &slice->outstanding_read_afters, wals_read_after, entries);
+	}
+
+	LIST_REMOVE(read_after, entries);
+	free(read_after);
+}
+
+static struct wals_io_read_buffer*
+wals_bdev_get_read_buf(struct wals_bdev *wals_bdev, int blockcnt)
+{
+	struct wals_bdev_read_buffer *buffer = &wals_bdev->read_buffer;
+	struct wals_io_read_buffer* ret;
+
+	if (buffer->tail + blockcnt > buffer->blockcnt) {
+		if (blockcnt > buffer->head) {
+			return NULL;
+		}
+
+		ret = calloc(1, sizeof(struct wals_io_read_buffer));
+		ret->buf = buffer->buf;
+		ret->blockcnt = blockcnt;
+		buffer->end = buffer->tail;
+		buffer->tail = blockcnt;
+		return ret;
+	}
+
+	ret = calloc(1, sizeof(struct wals_io_read_buffer));
+	ret->buf = buffer->buf + buffer->tail * wals_bdev->buffer_blocklen;
+	ret->blockcnt = blockcnt;
+	buffer->tail += blockcnt;
+	return ret;
+}
+
+static void
+wals_bdev_put_recycles(struct wals_bdev *wals_bdev, struct wals_bdev_read_buffer *buffer)
+{
+	bool recycled = false;
+	struct wals_io_read_buffer *buf;
+
+	do {
+		recycled = false;
+		LIST_FOREACH(buf, &buffer->recycles, entries) {
+			if (buf == buffer->buf + buffer->head * wals_bdev->buffer_blocklen) {
+				buffer->head += buf->blockcnt;
+				
+				if (buffer->head == buffer->end) {
+					buffer->head = 0;
+					buffer->end = buffer->blockcnt;
+				}
+
+				LIST_REMOVE(buf, entries);
+				free(buf);
+				recycled = true;
+			}
+		}
+	} while (recycled);
+}
+
+static void
+wals_bdev_put_read_buf(struct wals_bdev *wals_bdev, struct wals_io_read_buffer *buf)
+{
+	struct wals_bdev_read_buffer *buffer = &wals_bdev->read_buffer;
+
+	LIST_INSERT_HEAD(&buffer->recycles, buf, entries);
+
+	wals_bdev_put_recycles(wals_bdev, buffer);
 }
 
 void
@@ -425,7 +456,7 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 {
 	struct spdk_bdev_io *orig_io = wals_io->orig_io;
 	int i;
-	void *copy = wals_io->read_buf;
+	void *copy = wals_io->read_buf->buf;
 	struct wals_slice *slice;
 
 	wals_io->remaining_read_requests--;
@@ -448,14 +479,9 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 
 		slice = &wals_io->wals_bdev->slices[wals_io->slice_index];
 
-		if (wals_io->read_after == LIST_FIRST(&slice->outstanding_read_afters)) {
-			wals_io->wals_bdev->slices[wals_io->slice_index].head = wals_io->read_after->pos;
-		}
+		wals_bdev_remove_read_after(slice, wals_io->read_after);
 
-		LIST_REMOVE(wals_io->read_after, entries);
-		free(wals_io->read_after);
-
-		spdk_free(wals_io->read_buf);
+		wals_bdev_put_read_buf(wals_io->wals_bdev, wals_io->read_buf);
 
 		wals_bdev_io_complete(wals_io, wals_io->status);
 	}
@@ -486,9 +512,15 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 
 	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
 	slice = &wals_bdev->slices[wals_io->slice_index];
-	wals_io->read_buf = spdk_zmalloc(bdev_io->u.bdev.num_blocks * wals_bdev->bdev.blocklen, 0, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	
+	wals_io->read_buf = wals_bdev_get_read_buf(wals_bdev, bdev_io->u.bdev.num_blocks);
+	if (!wals_io->read_buf) {
+		SPDK_NOTICELOG("No sufficient read buffer");
+		wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_NOMEM);
+		return;
+	}
 
-	valid_pos = wals_bdev_get_targets_log_head_min2(slice);
+	valid_pos = wals_bdev_get_targets_log_head_min(slice);
 	SPDK_NOTICELOG("valid pos: %ld(%ld)\n", valid_pos.offset, valid_pos.round);
 	wals_io->read_after = wals_bdev_insert_read_after(valid_pos, slice);
 
@@ -506,7 +538,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 		wals_io->remaining_read_requests = 1;
 		// TODO: pick the best choice
 		target_index = 0;
-		ret = wals_bdev->module->submit_log_read_request(slice->targets[target_index], wals_io->read_buf, 
+		ret = wals_bdev->module->submit_log_read_request(slice->targets[target_index], wals_io->read_buf->buf, 
 														bn->ele->l.bdevOffset + read_begin - bn->ele->begin,
 														bdev_io->u.bdev.num_blocks, wals_io);
 		if (spdk_unlikely(ret != 0)) {
@@ -522,7 +554,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 		wals_io->remaining_read_requests = 1;
 		// TODO: round-robin?
 		target_index = 0;
-		ret = wals_bdev->module->submit_core_read_request(slice->targets[target_index], wals_io->read_buf, 
+		ret = wals_bdev->module->submit_core_read_request(slice->targets[target_index], wals_io->read_buf->buf, 
 														bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, wals_io);
 		if (spdk_unlikely(ret != 0)) {
 			SPDK_ERRLOG("submit core read request failed to target %d in slice %ld\n", target_index, wals_io->slice_index);
@@ -557,7 +589,11 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 			if (tmp != read_end) {
 				wals_io->remaining_read_requests++;
 			}
-			ret = wals_bdev->module->submit_core_read_request(slice->targets[target_index], wals_io->read_buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
+			/*
+			 * TODO: Data on target may corrupt.
+			 * Either submit reads to all targets or try next target on failure returned.
+			 */
+			ret = wals_bdev->module->submit_core_read_request(slice->targets[target_index], wals_io->read_buf->buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
 															read_cur, tmp - read_cur + 1, wals_io);
 			if (spdk_unlikely(ret != 0)) {
 				SPDK_ERRLOG("submit core read request failed to target %d in slice %ld\n", target_index, wals_io->slice_index);
@@ -573,7 +609,11 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 			if (tmp != read_end) {
 				wals_io->remaining_read_requests++;
 			}
-			ret = wals_bdev->module->submit_log_read_request(slice->targets[target_index], wals_io->read_buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
+			/*
+			 * TODO: Data on target may corrupt.
+			 * Either submit reads to all targets or try next target on failure returned.
+			 */
+			ret = wals_bdev->module->submit_log_read_request(slice->targets[target_index], wals_io->read_buf->buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
 															bn->ele->l.bdevOffset + read_cur - bn->ele->begin, tmp - read_cur + 1, wals_io);
 			if (spdk_unlikely(ret != 0)) {
 				SPDK_ERRLOG("submit log read request failed to target %d in slice %ld\n", target_index, wals_io->slice_index);
@@ -593,6 +633,7 @@ wals_bdev_insert_read_index(void *arg)
 	struct bstat *bstat = bstatBdevCreate(msg->begin, msg->end, msg->round, msg->offset, msg->wals_bdev->bstat_pool);
 	
 	bslInsert(msg->wals_bdev->bsl, msg->begin, msg->end, bstat, msg->wals_bdev->bslfn);
+	spdk_mempool_put(msg->wals_bdev->index_msg_pool, msg);
 }
 
 static void
@@ -1412,6 +1453,13 @@ wals_bdev_start(struct wals_bdev *wals_bdev)
 
 	wals_bdev->buffer = spdk_zmalloc(wals_bdev->buffer_blockcnt * wals_bdev->buffer_blocklen, 2 * 1024 * 1024, NULL,
 					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	
+	wals_bdev->read_buffer.blockcnt = wals_bdev->buffer_blockcnt;
+	wals_bdev->read_buffer.buf = spdk_zmalloc(wals_bdev->read_buffer.blockcnt * wals_bdev->buffer_blocklen, 2 * 1024 * 1024, NULL,
+					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	wals_bdev->read_buffer.head = wals_bdev->read_buffer.tail = 0;
+	wals_bdev->read_buffer.end = wals_bdev->read_buffer.blockcnt;
+	LIST_INIT(&wals_bdev->read_buffer.recycles);
 	// TODO: recover
 
 	return 0;
@@ -1488,7 +1536,7 @@ wals_bdev_log_head_update(void *ctx)
 	for (i = 0; i < wals_bdev->slicecnt; i++) {
 		slice = &wals_bdev->slices[i];
 		if (LIST_EMPTY(&slice->outstanding_read_afters)) {
-			slice->head = wals_bdev_get_targets_log_head_min2(slice);
+			slice->head = wals_bdev_get_targets_log_head_min(slice);
 			cnt++;
 		}
 	}
@@ -1526,7 +1574,7 @@ wals_bdev_cleaner(void *ctx)
 		tmp = x->level[0].forward;
 		if (tmp) {
 			if (wals_bdev_is_valid_entry(
-				wals_bdev_get_targets_log_head_min2(&wals_bdev->slices[tmp->ele->begin / wals_bdev->slice_blockcnt]),
+				wals_bdev_get_targets_log_head_min(&wals_bdev->slices[tmp->ele->begin / wals_bdev->slice_blockcnt]),
 				tmp->ele)) {
 				for (j = 0; j < tmp->height; j++) {
 					update[j] = tmp;
