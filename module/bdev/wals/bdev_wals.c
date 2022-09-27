@@ -364,37 +364,30 @@ wals_bdev_is_valid_entry(struct wals_log_position after, struct bstat *bstat)
 }
 
 static struct wals_read_after*
-wals_bdev_insert_read_after(struct wals_log_position pos, struct wals_slice *slice) {
+wals_bdev_insert_read_after(struct wals_log_position pos, struct wals_slice *slice)
+{
 	struct wals_read_after *i, *read_after = calloc(1, sizeof(*read_after));
 	read_after->pos = pos;
 
 	if (LIST_EMPTY(&slice->outstanding_read_afters)) {
-		LIST_INSERT_HEAD(&slice->outstanding_read_afters, read_after, entries);
-
-		return read_after;
+		slice->oldest = read_after;
 	}
 
-	i = LIST_FIRST(&slice->outstanding_read_afters);
-	while (i != NULL) {
-		if (i->pos.round > pos.round) {
-			break;
-		}
-
-		if (i->pos.round < pos.round) {
-			i = LIST_NEXT(i, entries);
-			continue;
-		}
-
-		if (i->pos.offset > pos.offset) {
-			break;
-		}
-
-		i = LIST_NEXT(i, entries);
-	}
-
-	LIST_INSERT_BEFORE(i, read_after, entries);
+	LIST_INSERT_HEAD(&slice->outstanding_read_afters, read_after, entries);
 
 	return read_after;
+}
+
+static void
+wals_bdev_remove_read_after(struct wals_slice *slice, struct wals_read_after *read_after)
+{
+	if (read_after == slice->oldest) {
+		slice->head = read_after->pos;
+		slice->oldest = LIST_PREV(read_after);
+	}
+
+	LIST_REMOVE(read_after, entries);
+	free(read_after);
 }
 
 static struct wals_io_read_buffer*
@@ -494,12 +487,7 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 
 		slice = &wals_io->wals_bdev->slices[wals_io->slice_index];
 
-		if (wals_io->read_after == LIST_FIRST(&slice->outstanding_read_afters)) {
-			wals_io->wals_bdev->slices[wals_io->slice_index].head = wals_io->read_after->pos;
-		}
-
-		LIST_REMOVE(wals_io->read_after, entries);
-		free(wals_io->read_after);
+		wals_bdev_remove_read_after(slice, wals_io->read_after);
 
 		wals_bdev_put_read_buf(wals_io->wals_bdev, wals_io->read_buf);
 
@@ -532,8 +520,13 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 
 	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
 	slice = &wals_bdev->slices[wals_io->slice_index];
-	// TODO: get buffer from bdev memory region
+	
 	wals_io->read_buf = wals_bdev_get_read_buf(wals_bdev, bdev_io->u.bdev.num_blocks);
+	if (!wals_io->read_buf) {
+		SPDK_NOTICELOG("No sufficient read buffer");
+		wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_NOMEM);
+		return;
+	}
 
 	valid_pos = wals_bdev_get_targets_log_head_min(slice);
 	SPDK_NOTICELOG("valid pos: %ld(%ld)\n", valid_pos.offset, valid_pos.round);

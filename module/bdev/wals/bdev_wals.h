@@ -152,6 +152,8 @@ struct wals_slice {
 
 	/* list of outstanding read_afters */
 	LIST_HEAD(, wals_read_after) outstanding_read_afters;
+
+	struct wals_read_after		*oldest;
 };
 
 struct wals_io_read_buffer {
