@@ -508,7 +508,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	struct bskiplistNode	*bn;
     uint64_t    			read_begin, read_end, read_cur, tmp;
 
-	SPDK_NOTICELOG("submit read: %ld+%ld\n", bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks);
+	SPDK_DEBUGLOG("submit read: %ld+%ld\n", bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks);
 
 	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
 	slice = &wals_bdev->slices[wals_io->slice_index];
@@ -521,7 +521,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	}
 
 	valid_pos = wals_bdev_get_targets_log_head_min(slice);
-	SPDK_NOTICELOG("valid pos: %ld(%ld)\n", valid_pos.offset, valid_pos.round);
+	SPDK_DEBUGLOG(bdev_wals, "valid pos: %ld(%ld)\n", valid_pos.offset, valid_pos.round);
 	wals_io->read_after = wals_bdev_insert_read_after(valid_pos, slice);
 
 	read_begin = bdev_io->u.bdev.offset_blocks;
@@ -533,7 +533,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	}
 
 	if (bn && bn->begin <= read_begin && bn->end >= read_end) {
-		SPDK_NOTICELOG("one entry in log\n");
+		SPDK_DEBUGLOG(bdev_wals, "one entry in log\n");
 		// One entry in someone's log
 		wals_io->remaining_read_requests = 1;
 
@@ -555,7 +555,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	}
 
 	if (!bn || bn->begin > read_end) {
-		SPDK_NOTICELOG("one entry in core\n");
+		SSPDK_DEBUGLOG(bdev_wals, "one entry in core\n");
 		// not found in index
 		wals_io->remaining_read_requests = 1;
 		// TODO: round-robin?
@@ -569,7 +569,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 		return;
 	}
 
-	SPDK_NOTICELOG("merged read\n");
+	SPDK_DEBUGLOG(bdev_wals, "merged read\n");
 	/*
 	 * Completion in read submit request leads to complete the whole read request every time.
 	 * Add the initial remaining read requests by 1 to avoid this.
@@ -783,8 +783,8 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 	// update tails
 	slice->tail = slice_tail;
 	wals_bdev->buffer_tail = buffer_tail;
-	SPDK_NOTICELOG("slice tail updated: %ld(%ld)\n", slice->tail.offset, slice->tail.round);
-	SPDK_NOTICELOG("buffer tail updated: %ld(%ld)\n", wals_bdev->buffer_tail.offset, wals_bdev->buffer_tail.round);
+	SPDK_DEBUGLOG(bdev_wals, "slice tail updated: %ld(%ld)\n", slice->tail.offset, slice->tail.round);
+	SPDK_DEBUGLOG(bdev_wals, "buffer tail updated: %ld(%ld)\n", wals_bdev->buffer_tail.offset, wals_bdev->buffer_tail.round);
 
 	if (spdk_unlikely(wals_io->targets_failed > NUM_TARGETS - QUORUM_TARGETS)) {
 		SPDK_ERRLOG("IO submit failure to quorum targets on slice %ld.\n", wals_io->slice_index);
@@ -813,7 +813,7 @@ wals_bdev_submit_write_request(void *arg)
 	struct wals_slice		*slice;
 	wals_log_position		slice_tail, buffer_tail;
 
-	SPDK_NOTICELOG("submit write: %ld+%ld\n", bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks);
+	SPDK_DEBUGLOG(bdev_wals, "submit write: %ld+%ld\n", bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks);
 
 	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
 	slice = &wals_bdev->slices[wals_io->slice_index];
