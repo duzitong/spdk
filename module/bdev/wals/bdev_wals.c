@@ -669,7 +669,7 @@ wals_bdev_write_complete_quorum(void *arg)
 			SPDK_NOTICELOG("waiting msg\n");
 		}
 	}
-	SPDK_NOTICELOG("(%ld)msg got\n", spdk_thread_get_id(spdk_get_thread()));
+	SPDK_NOTICELOG("(%ld)msg got for io %p\n", spdk_thread_get_id(spdk_get_thread()), wals_io);
 	
 	msg->begin = metadata->core_offset;
 	msg->end = metadata->core_offset + metadata->length - 1;
