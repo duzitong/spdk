@@ -638,6 +638,7 @@ static void
 wals_bdev_insert_read_index(void *arg)
 {
 	struct wals_index_msg *msg = arg;
+	SPDK_NOTICELOG("insert read index\n");
 	struct bstat *bstat = bstatBdevCreate(msg->begin, msg->end, msg->round, msg->offset, msg->wals_bdev->bstat_pool);
 	
 	bslInsert(msg->wals_bdev->bsl, msg->begin, msg->end, bstat, msg->wals_bdev->bslfn);
@@ -653,6 +654,7 @@ wals_bdev_write_complete_quorum(void *arg)
 	struct wals_index_msg *msg = spdk_mempool_get(wals_bdev->index_msg_pool);
 
 	while (!msg) {
+		SPDK_NOTICELOG("waiting\n");
 		msg = spdk_mempool_get(wals_bdev->index_msg_pool);
 	}
 	
@@ -1469,7 +1471,7 @@ wals_bdev_start(struct wals_bdev *wals_bdev)
 
 	wals_bdev->bstat_pool = spdk_mempool_create("WALS_BSTAT_POOL", mempool_size, sizeof(bstat), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
 	wals_bdev->bsl_node_pool = spdk_mempool_create("WALS_BSL_NODE_POOL", mempool_size, sizeof(bskiplistNode), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
-	wals_bdev->index_msg_pool = spdk_mempool_create("WALS_INDEX_MSG_POOL", 2048, sizeof(struct wals_index_msg), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
+	wals_bdev->index_msg_pool = spdk_mempool_create("WALS_INDEX_MSG_POOL", 2048, sizeof(struct wals_index_msg), 0, SPDK_ENV_SOCKET_ID_ANY);
 
 	wals_bdev->bsl = bslCreate(wals_bdev->bsl_node_pool, wals_bdev->bstat_pool);
 	wals_bdev->bslfn = bslfnCreate(wals_bdev->bsl_node_pool, wals_bdev->bstat_pool);
