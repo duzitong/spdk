@@ -208,7 +208,7 @@ wals_bdev_destroy_cb(void *io_device, void *ctx_buf)
 	struct wals_bdev_io_channel *wals_ch = ctx_buf;
 	struct wals_bdev            *wals_bdev = wals_ch->wals_bdev;
 
-	SPDK_NOTICE("wals_bdev_destroy_cb\n");
+	SPDK_NOTICELOG("wals_bdev_destroy_cb\n");
 
 	assert(wals_ch != NULL);
 
