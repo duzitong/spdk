@@ -121,7 +121,7 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 	uint32_t 					lcore;
 	struct spdk_cpuset			*set = spdk_thread_get_cpumask(spdk_get_thread());
 
-	SPDK_DEBUGLOG(bdev_wals, "wals_bdev_create_cb, %p\n", wals_ch);
+	SPDK_NOTICELOG("wals_bdev_create_cb, %p\n", wals_ch);
 
 	assert(wals_bdev != NULL);
 	assert(wals_bdev->state == WALS_BDEV_STATE_ONLINE);
@@ -138,6 +138,7 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 
 	if (lcore % 2 == 0) {
 		if (!wals_bdev->write_thread_set) {
+			SPDK_NOTICELOG("register write pollers\n");
 			// TODO: call module to register write pollers
 			wals_bdev->pending_writes_poller = SPDK_POLLER_REGISTER(wals_bdev_submit_pending_writes, wals_bdev, 0);
 
@@ -149,6 +150,7 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 		}
 	} else {
 		if (!wals_bdev->read_thread_set) {
+			SPDK_NOTICELOG("register read pollers\n");
 			// TODO: call module to register read pollers
 			wals_bdev->log_head_update_poller = SPDK_POLLER_REGISTER(wals_bdev_log_head_update, wals_bdev, 5);
 			wals_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wals_bdev_cleaner, wals_bdev, 10);
@@ -206,7 +208,7 @@ wals_bdev_destroy_cb(void *io_device, void *ctx_buf)
 	struct wals_bdev_io_channel *wals_ch = ctx_buf;
 	struct wals_bdev            *wals_bdev = wals_ch->wals_bdev;
 
-	SPDK_DEBUGLOG(bdev_wals, "wals_bdev_destroy_cb\n");
+	SPDK_NOTICE("wals_bdev_destroy_cb\n");
 
 	assert(wals_ch != NULL);
 
