@@ -642,7 +642,7 @@ wals_bdev_insert_read_index(void *arg)
 	
 	bslInsert(msg->wals_bdev->bsl, msg->begin, msg->end, bstat, msg->wals_bdev->bslfn);
 	spdk_mempool_put(msg->wals_bdev->index_msg_pool, msg);
-	SPDK_NOTICELOG("msg returned\n");
+	SPDK_NOTICELOG("(%ld) msg returned\n", spdk_thread_get_id(spdk_get_thread()));
 }
 
 static void
@@ -669,7 +669,7 @@ wals_bdev_write_complete_quorum(void *arg)
 			SPDK_NOTICELOG("waiting msg\n");
 		}
 	}
-	SPDK_NOTICELOG("msg got\n");
+	SPDK_NOTICELOG("(%ld)msg got\n", spdk_thread_get_id(spdk_get_thread()));
 	
 	msg->begin = metadata->core_offset;
 	msg->end = metadata->core_offset + metadata->length - 1;
