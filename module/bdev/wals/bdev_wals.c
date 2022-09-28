@@ -657,7 +657,7 @@ wals_bdev_write_complete_quorum(void *arg)
 	while (!msg) {
 		msg = spdk_mempool_get(wals_bdev->index_msg_pool);
 		count++;
-		if (count & 0xFFFF == 0) {
+		if (count % 100000 == 0) {
 			SPDK_NOTICELOG("waiting msg\n");
 		}
 	}
@@ -671,7 +671,6 @@ wals_bdev_write_complete_quorum(void *arg)
 	do {
 		rc = spdk_thread_send_msg(wals_bdev->read_thread, wals_bdev_insert_read_index, msg);
 	} while (rc != 0);
-	SPDK_NOTICELOG("msg sent\n");
 
 	wals_io->orig_io->free_deferred = true;
 	spdk_bdev_io_complete(wals_io->orig_io, SPDK_BDEV_IO_STATUS_SUCCESS);
