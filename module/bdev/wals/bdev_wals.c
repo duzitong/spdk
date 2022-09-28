@@ -646,6 +646,14 @@ wals_bdev_insert_read_index(void *arg)
 }
 
 static void
+wals_bdev_write_complete_deferred_success(void *arg)
+{
+	struct wals_bdev_io *wals_io = arg;
+	wals_io->orig_io->free_deferred = true;
+	spdk_bdev_io_complete(wals_io->orig_io, SPDK_BDEV_IO_STATUS_SUCCESS);
+}
+
+static void
 wals_bdev_write_complete_quorum(void *arg)
 {
 	struct wals_bdev_io *wals_io = arg;
@@ -672,13 +680,16 @@ wals_bdev_write_complete_quorum(void *arg)
 		rc = spdk_thread_send_msg(wals_bdev->read_thread, wals_bdev_insert_read_index, msg);
 	} while (rc != 0);
 
-	wals_io->orig_io->free_deferred = true;
-	spdk_bdev_io_complete(wals_io->orig_io, SPDK_BDEV_IO_STATUS_SUCCESS);
+	if (wals_io->orig_thread != spdk_get_thread()) {
+		spdk_thread_send_msg(wals_io->orig_thread, wals_bdev_write_complete_deferred_success, wals_io);
+	} else {
+		wals_bdev_write_complete_deferred_success(wals_io);
+	}
 	// TODO: update buffer head
 }
 
 static void
-wals_bdev_write_complete_all(void* arg)
+wals_bdev_write_complete_free_deferred(void *arg)
 {
 	struct wals_bdev_io *wals_io = arg;
 	wals_io->orig_io->free_deferred = false;
@@ -686,6 +697,17 @@ wals_bdev_write_complete_all(void* arg)
 		spdk_bdev_free_io(wals_io->orig_io);
 	}
 	wals_io->orig_io->free_called = false;
+}
+
+static void
+wals_bdev_write_complete_all(void* arg)
+{
+	struct wals_bdev_io *wals_io = arg;
+	if (wals_io->orig_thread != spdk_get_thread()) {
+		spdk_thread_send_msg(wals_io->orig_thread, wals_bdev_write_complete_free_deferred, wals_io);
+	} else {
+		wals_bdev_write_complete_free_deferred(wals_io);
+	}
 }
 
 // TODO: add timeout
@@ -706,19 +728,11 @@ wals_target_write_complete(struct wals_bdev_io *wals_io, bool success)
 	}
 
 	if (wals_io->targets_completed - wals_io->targets_failed == QUORUM_TARGETS) {
-		if (wals_io->orig_thread != spdk_get_thread()) {
-			spdk_thread_send_msg(wals_io->orig_thread, wals_bdev_write_complete_quorum, wals_io);
-		} else {
-			wals_bdev_write_complete_quorum(wals_io);
-		}
+		wals_bdev_write_complete_quorum(wals_io);
 	}
 
 	if (wals_io->targets_completed == NUM_TARGETS) {
-		if (wals_io->orig_thread != spdk_get_thread()) {
-			spdk_thread_send_msg(wals_io->orig_thread, wals_bdev_write_complete_all, wals_io);
-		} else {
-			wals_bdev_write_complete_all(wals_io);
-		}
+		wals_bdev_write_complete_all(wals_io);
 	}
 }
 
