@@ -638,11 +638,11 @@ static void
 wals_bdev_insert_read_index(void *arg)
 {
 	struct wals_index_msg *msg = arg;
-	SPDK_NOTICELOG("insert read index\n");
 	struct bstat *bstat = bstatBdevCreate(msg->begin, msg->end, msg->round, msg->offset, msg->wals_bdev->bstat_pool);
 	
 	bslInsert(msg->wals_bdev->bsl, msg->begin, msg->end, bstat, msg->wals_bdev->bslfn);
 	spdk_mempool_put(msg->wals_bdev->index_msg_pool, msg);
+	SPDK_NOTICELOG("msg returned\n");
 }
 
 static void
@@ -652,11 +652,16 @@ wals_bdev_write_complete_quorum(void *arg)
 	struct wals_bdev	*wals_bdev = wals_io->wals_bdev;
 	struct wals_metadata *metadata = wals_io->metadata;
 	struct wals_index_msg *msg = spdk_mempool_get(wals_bdev->index_msg_pool);
-	int rc;
+	int rc, count = 0;
 
 	while (!msg) {
 		msg = spdk_mempool_get(wals_bdev->index_msg_pool);
+		count++;
+		if (count & 0xFFFF == 0) {
+			SPDK_NOTICELOG("waiting msg\n");
+		}
 	}
+	SPDK_NOTICELOG("msg got\n");
 	
 	msg->begin = metadata->core_offset;
 	msg->end = metadata->core_offset + metadata->length - 1;
