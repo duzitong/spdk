@@ -128,7 +128,7 @@ nvmf_cli_attach_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
 
         if (slice->wals_bdev->bdev.blocklen % spdk_nvme_ns_get_sector_size(ns) != 0) {
             // TODO: should fail
-            SPDK_ERRLOG("Backend ssd should provide sector size of multiples of %ld\n",
+            SPDK_ERRLOG("Backend ssd should provide sector size of multiples of %d\n",
                 spdk_nvme_ns_get_sector_size(ns));
         }
 
@@ -169,8 +169,10 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
 	struct addrinfo* addr_res = NULL;
 	hints.ai_family = AF_INET;
 	hints.ai_flags = AI_PASSIVE;
+    char port_buf[32];
+    snprintf(port_buf, 32, "%d", config->target_log_info.port);
 
-	getaddrinfo(config->target_log_info.address, config->target_log_info.port, &hints, &addr_res);
+	getaddrinfo(config->target_log_info.address, port_buf, &hints, &addr_res);
 	memcpy(&addr, addr_res->ai_addr, sizeof(addr));
 
     // 1. use or create rdma connection
@@ -230,7 +232,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
         if (g_nvmf_cli_conns[i].status != NVMF_CLI_UNINITIALIZED) {
             // compare ip and port
             if (strcmp(g_nvmf_cli_conns[i].transport_id.traddr, config->target_core_info.address) == 0
-                && strcmp(g_nvmf_cli_conns[i].transport_id.trsvcid, config->target_core_info.port) == 0) {
+                && atoi(g_nvmf_cli_conns[i].transport_id.trsvcid) == config->target_core_info.port) {
                 SPDK_NOTICELOG("Already created nvmf connection.\n");
                 cli_slice->nvmf_conn = &g_nvmf_cli_conns[i];
                 break;
@@ -246,7 +248,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                     SPDK_NVME_TRANSPORT_RDMA);
                 
                 strcpy(g_nvmf_cli_conns[i].transport_id.traddr, config->target_core_info.address);
-                strcpy(g_nvmf_cli_conns[i].transport_id.trsvcid, config->target_core_info.port);
+                snprintf(g_nvmf_cli_conns[i].transport_id.trsvcid, SPDK_NVMF_TRSVCID_MAX_LEN + 1, "%d", config->target_core_info.port);
                 strcpy(g_nvmf_cli_conns[i].transport_id.subnqn, config->target_core_info.nqn);
                 // TODO: should be in config
                 g_nvmf_cli_conns[i].transport_id.adrfam = SPDK_NVMF_ADRFAM_IPV4;
@@ -332,6 +334,10 @@ rdma_cli_connection_poller(void* ctx) {
     struct wals_bdev* wals_bdev = ctx;
     for (int i = 0; i < NUM_TARGETS; i++) {
         switch (g_rdma_cli_conns[i].status) {
+            case RDMA_CLI_UNINITIALIZED:
+            {
+                break;
+            }
             case RDMA_CLI_INITIALIZED:
             {
                 int rc;
@@ -340,7 +346,7 @@ rdma_cli_connection_poller(void* ctx) {
                 if (rc != 0) {
                     SPDK_ERRLOG("rdma_create_id failed\n");
                     g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
-                    return SPDK_POLLER_BUSY;
+                    break;
                 }
                 g_rdma_cli_conns[i].cm_id = cm_id;
 
@@ -348,7 +354,7 @@ rdma_cli_connection_poller(void* ctx) {
                 if (rc != 0) {
                     SPDK_ERRLOG("rdma_resolve_addr failed\n");
                     g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
-                    return SPDK_POLLER_BUSY;
+                    break;
                 }
                 g_rdma_cli_conns[i].status = RDMA_CLI_ADDR_RESOLVING;
                 break;
@@ -366,7 +372,7 @@ rdma_cli_connection_poller(void* ctx) {
                     else {
                         SPDK_ERRLOG("Unexpected CM error %d\n", errno);
                     }
-                    return SPDK_POLLER_IDLE;
+                    break;
                 }
                 enum rdma_cm_event_type expected_event_type;
                 if (g_rdma_cli_conns[i].status == RDMA_CLI_ADDR_RESOLVING) {
@@ -374,6 +380,12 @@ rdma_cli_connection_poller(void* ctx) {
                 }
                 else if (g_rdma_cli_conns[i].status == RDMA_CLI_ROUTE_RESOLVING) {
                     expected_event_type = RDMA_CM_EVENT_ROUTE_RESOLVED;
+                }
+                else {
+                    // should not happen
+                    SPDK_ERRLOG("ERROR\n");
+                    g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                    break;
                 }
 
                 // suppose addr and resolving never fails
@@ -530,7 +542,7 @@ rdma_cli_connection_poller(void* ctx) {
                     else {
                         SPDK_ERRLOG("Unexpected CM error %d\n", errno);
                     }
-                    return SPDK_POLLER_IDLE;
+                    break;
                 }
                 rc = rdma_ack_cm_event(cm_event);
                 if (rc != 0) {
@@ -545,14 +557,14 @@ rdma_cli_connection_poller(void* ctx) {
                     if (g_rdma_cli_conns[i].cm_id->qp != NULL) {
                         SPDK_NOTICELOG("cannot free qp\n");
                         g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
-                        return SPDK_POLLER_BUSY;
+                        break;
                     }
 
                     rc = rdma_destroy_id(g_rdma_cli_conns[i].cm_id);
                     if (rc != 0) {
                         SPDK_ERRLOG("cannot destroy id\n");
                         g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
-                        return SPDK_POLLER_BUSY;
+                        break;
                     }
                     g_rdma_cli_conns[i].cm_id = NULL;
 
@@ -560,7 +572,7 @@ rdma_cli_connection_poller(void* ctx) {
                     if (rc != 0) {
                         SPDK_ERRLOG("destroy cq failed\n");
                         g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
-                        return SPDK_POLLER_BUSY;
+                        break;
                     }
                     g_rdma_cli_conns[i].cq = NULL;
 
@@ -568,21 +580,21 @@ rdma_cli_connection_poller(void* ctx) {
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
                         g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
-                        return SPDK_POLLER_BUSY;
+                        break;
                     }
                     g_rdma_cli_conns[i].mr_read = NULL;
                     rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_write);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
                         g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
-                        return SPDK_POLLER_BUSY;
+                        break;
                     }
                     g_rdma_cli_conns[i].mr_write = NULL;
                     rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_handshake);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
                         g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
-                        return SPDK_POLLER_BUSY;
+                        break;
                     }
                     g_rdma_cli_conns[i].mr_handshake = NULL;
 
@@ -608,7 +620,7 @@ rdma_cli_connection_poller(void* ctx) {
                     else {
                         SPDK_ERRLOG("Unexpected CM error %d\n", errno);
                     }
-                    return SPDK_POLLER_IDLE;
+                    break;
                 }
                 rc = rdma_ack_cm_event(connect_event);
                 if (rc != 0) {
@@ -648,21 +660,21 @@ rdma_cli_connection_poller(void* ctx) {
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
                         g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
-                        return SPDK_POLLER_BUSY;
+                        break;
                     }
                     g_rdma_cli_conns[i].mr_read = NULL;
                     rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_write);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
                         g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
-                        return SPDK_POLLER_BUSY;
+                        break;
                     }
                     g_rdma_cli_conns[i].mr_write = NULL;
                     rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_handshake);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
                         g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
-                        return SPDK_POLLER_BUSY;
+                        break;
                     }
                     g_rdma_cli_conns[i].mr_handshake = NULL;
 
@@ -709,16 +721,16 @@ rdma_cli_connection_poller(void* ctx) {
                 int cnt = ibv_poll_cq(g_rdma_cli_conns[i].cq, 1, &wc);
                 if (cnt < 0) {
                     SPDK_ERRLOG("ibv_poll_cq failed\n");
-                    return SPDK_POLLER_IDLE;
+                    break;
                 }
 
                 if (cnt == 0) {
-                    return SPDK_POLLER_IDLE;
+                    break;
                 }
 
                 if (wc.status != IBV_WC_SUCCESS) {
                     SPDK_ERRLOG("WC bad status %d\n", wc.status);
-                    return SPDK_POLLER_IDLE;
+                    break;
                 }
 
                 if (wc.wr_id < NUM_TARGETS) {
@@ -733,7 +745,7 @@ rdma_cli_connection_poller(void* ctx) {
                     if (remote_handshake->block_cnt != handshake->block_cnt ||
                         remote_handshake->block_size != handshake->block_size) {
                         SPDK_ERRLOG("buffer config handshake mismatch\n");
-                        return SPDK_POLLER_BUSY;
+                        break;
                     }
                     SPDK_NOTICELOG("rdma handshake complete\n");
                     g_rdma_cli_conns[i].status = RDMA_CLI_CONNECTED;
