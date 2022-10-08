@@ -5,13 +5,14 @@
 #include "spdk/string.h"
 #include "spdk/util.h"
 #include "spdk/nvme.h"
+#include "spdk/rdma.h"
 
 #include "spdk/log.h"
 #include <infiniband/verbs.h>
 #include <rdma/rdma_cma.h>
 
 #define WC_BATCH_SIZE 32
-// TODO: make it configurable
+// TODO: make it configurable; server should decide it?
 #define LOG_BLOCKCNT 131072
 
 enum rdma_cli_status {
@@ -35,7 +36,9 @@ struct rdma_cli_connection {
     struct rdma_event_channel* channel;
     struct rdma_cm_id* cm_id;
     struct ibv_cq* cq;
-    struct ibv_mr* mr;
+    struct ibv_mr* mr_read;
+    struct ibv_mr* mr_write;
+    struct ibv_mr* mr_handshake;
     struct addrinfo* server_addr;
     struct ibv_wc wc_buf[WC_BATCH_SIZE];
     enum rdma_cli_status status;
@@ -50,19 +53,24 @@ struct nvmf_cli_connection {
     // when multiple slices connected to it, record the last one's tail (in blocks).
     // not trying to reuse a slice if it is deleted.
     uint64_t last_block_offset;
+
+    struct spdk_nvme_ctrlr* ctrlr;
+    struct spdk_nvme_ns* ns;
+    struct spdk_nvme_qpair* qp;
 };
 
 // actually should be num of servers
 struct rdma_cli_connection g_rdma_cli_conns[NUM_TARGETS];
 struct nvmf_cli_connection g_nvmf_cli_conns[NUM_TARGETS];
 
+struct rdma_handshake g_rdma_handshakes[NUM_TARGETS + 1];
+
 struct spdk_poller* connection_poller;
 
 struct wals_cli_slice {
+    struct wals_bdev* wals_bdev;
     struct rdma_cli_connection* rdma_conn;
     struct nvmf_cli_connection* nvmf_conn;
-    void* buf;
-    uint64_t blocklen;
     // if connected to the same ssd, then they need to share the same qp.
     uint64_t nvmf_block_offset;
 
@@ -70,11 +78,13 @@ struct wals_cli_slice {
 	TAILQ_ENTRY(wals_cli_slice)	tailq;
 };
 
+static int rdma_cli_connection_poller(void* ctx);
+
 static bool
 nvmf_cli_probe_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
 	 struct spdk_nvme_ctrlr_opts *opts)
 {
-	printf("Attaching to %s\n", trid->traddr);
+	SPDK_NOTICELOG("Attaching to %s:%s\n", trid->traddr, trid->trsvcid);
 
 	return true;
 }
@@ -83,6 +93,51 @@ static void
 nvmf_cli_attach_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
 	  struct spdk_nvme_ctrlr *ctrlr, const struct spdk_nvme_ctrlr_opts *opts)
 {
+	int nsid;
+	struct spdk_nvme_ns *ns;
+	struct wals_cli_slice* slice = (struct wals_cli_slice*)cb_ctx;
+
+	SPDK_DEBUGLOG(bdev_wals_cli, "Attached to %s\n", trid->traddr);
+	SPDK_NOTICELOG("IO queue = %d, IO request = %d\n",
+		opts->io_queue_size,
+		opts->io_queue_requests);
+	slice->nvmf_conn->ctrlr = ctrlr;
+
+	/*
+	 * Each controller has one or more namespaces.  An NVMe namespace is basically
+	 *  equivalent to a SCSI LUN.  The controller's IDENTIFY data tells us how
+	 *  many namespaces exist on the controller.  For Intel(R) P3X00 controllers,
+	 *  it will just be one namespace.
+	 *
+	 * Note that in NVMe, namespace IDs start at 1, not 0.
+	 */
+	int num_ns = 0;
+	for (nsid = spdk_nvme_ctrlr_get_first_active_ns(ctrlr); nsid != 0;
+	     nsid = spdk_nvme_ctrlr_get_next_active_ns(ctrlr, nsid)) {
+		ns = spdk_nvme_ctrlr_get_ns(ctrlr, nsid);
+		if (ns == NULL) {
+			continue;
+		}
+		SPDK_NOTICELOG("Namespace ID: %d size: %juGB\n", spdk_nvme_ns_get_id(ns),
+	       spdk_nvme_ns_get_size(ns) / 1000000000);
+		slice->nvmf_conn->ns = ns;
+
+		if (spdk_nvme_ns_get_sector_size(ns) != spdk_nvme_ns_get_extended_sector_size(ns)) {
+			SPDK_NOTICELOG("disk sector size mismatch with extended sector size\n");
+		}
+
+        if (slice->wals_bdev->bdev.blocklen % spdk_nvme_ns_get_sector_size(ns) != 0) {
+            // TODO: should fail
+            SPDK_ERRLOG("Backend ssd should provide sector size of multiples of %ld\n",
+                spdk_nvme_ns_get_sector_size(ns));
+        }
+
+		num_ns++;
+	}
+
+	if (num_ns != 1) {
+		SPDK_ERRLOG("Unexpected # of namespaces %d\n", num_ns);
+	}
 
 }
 
@@ -97,19 +152,17 @@ nvmf_cli_remove_cb(void *cb_ctx, struct spdk_nvme_ctrlr *ctrlr)
 static struct wals_target*
 cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct wals_slice *slice)
 {
+    if (wals_bdev->buffer_blocklen != wals_bdev->bdev.blocklen) {
+        SPDK_ERRLOG("Only support buffer blocklen == bdev blocklen\n");
+        return NULL;
+    }
+
     int rc;
     // TODO: error case should recycle resources
     struct wals_target *target = calloc(1, sizeof(struct wals_target));
     struct wals_cli_slice *cli_slice = calloc(1, sizeof(struct wals_cli_slice));
 
-    cli_slice->blocklen = wals_bdev->bdev.blocklen;
-    cli_slice->buf = spdk_zmalloc(LOG_BLOCKCNT * cli_slice->blocklen, 2 * 1024 * 1024, NULL,
-					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-
-    if (cli_slice->buf == NULL) {
-        SPDK_ERRLOG("Cannot allocate buffer for slice\n");
-        return NULL;
-    }
+    cli_slice->wals_bdev = wals_bdev;
 
 	struct sockaddr_in addr;
 	struct addrinfo hints = {};
@@ -120,6 +173,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
 	getaddrinfo(config->target_log_info.address, config->target_log_info.port, &hints, &addr_res);
 	memcpy(&addr, addr_res->ai_addr, sizeof(addr));
 
+    // 1. use or create rdma connection
     for (int i = 0; i < NUM_TARGETS; i++) {
         if (g_rdma_cli_conns[i].status != RDMA_CLI_UNINITIALIZED) {
             // compare ip and port
@@ -157,7 +211,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
 
                 // only need one poller for connecting the qps
                 if (connection_poller == NULL) {
-                    connection_poller = SPDK_POLLER_REGISTER(rdma_cli_connection_poller, NULL, 5 * 1000);
+                    connection_poller = SPDK_POLLER_REGISTER(rdma_cli_connection_poller, wals_bdev, 5 * 1000);
                 }
 
                 break;
@@ -171,17 +225,15 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
         }
     }
 
+    // 2. use or create nvmf connection
     for (int i = 0; i < NUM_TARGETS; i++) {
         if (g_nvmf_cli_conns[i].status != NVMF_CLI_UNINITIALIZED) {
             // compare ip and port
-            struct sockaddr_in* cur_addr = g_nvmf_cli_conns[i].server_addr->ai_addr;
             if (strcmp(g_nvmf_cli_conns[i].transport_id.traddr, config->target_core_info.address) == 0
                 && strcmp(g_nvmf_cli_conns[i].transport_id.trsvcid, config->target_core_info.port) == 0) {
                 SPDK_NOTICELOG("Already created nvmf connection.\n");
                 cli_slice->nvmf_conn = &g_nvmf_cli_conns[i];
-                // TODO: change offset
                 break;
-
             }
         }
     }
@@ -189,6 +241,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
     if (cli_slice->nvmf_conn == NULL) {
         for (int i = 0; i < NUM_TARGETS; i++) {
             if (g_nvmf_cli_conns[i].status == NVMF_CLI_UNINITIALIZED) {
+                cli_slice->nvmf_conn = &g_nvmf_cli_conns[i];
                 spdk_nvme_trid_populate_transport(&g_nvmf_cli_conns[i].transport_id,
                     SPDK_NVME_TRANSPORT_RDMA);
                 
@@ -199,21 +252,44 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                 g_nvmf_cli_conns[i].transport_id.adrfam = SPDK_NVMF_ADRFAM_IPV4;
 
                 rc = spdk_nvme_probe(&g_nvmf_cli_conns[i].transport_id,
-                    &g_nvmf_cli_conns[i],
+                    cli_slice,
                     nvmf_cli_probe_cb,
                     nvmf_cli_attach_cb,
                     nvmf_cli_remove_cb);
 
                 if (rc != 0) {
-                    
+                    SPDK_ERRLOG("failed to attach to nvmf\n");
+                    return NULL;
+                }
+
+                cli_slice->nvmf_conn->qp = spdk_nvme_ctrlr_alloc_io_qpair(cli_slice->nvmf_conn->ctrlr,
+                    NULL,
+                    0);
+                
+                if (cli_slice->nvmf_conn->qp == NULL) {
+                    SPDK_ERRLOG("failed to alloc io qp\n");
+                    return NULL;
                 }
 
             }
         }
-        
-
     }
 
+    uint64_t multiplier = cli_slice->wals_bdev->bdev.blocklen / spdk_nvme_ns_get_sector_size(cli_slice->nvmf_conn->ns);
+    SPDK_NOTICELOG("A block in buffer means %ld blocks in ssd\n", multiplier);
+
+    uint64_t slices_in_ssd = multiplier * cli_slice->wals_bdev->slice_blockcnt;
+    cli_slice->nvmf_block_offset = cli_slice->nvmf_conn->last_block_offset;
+    cli_slice->nvmf_conn->last_block_offset += slices_in_ssd;
+
+    if (cli_slice->nvmf_conn->last_block_offset > spdk_nvme_ns_get_num_sectors(cli_slice->nvmf_conn->ns)) {
+        SPDK_ERRLOG("SSD capacity exceeded: requires %ld but only has %ld sectors\n",
+            cli_slice->nvmf_conn->last_block_offset,
+            spdk_nvme_ns_get_num_sectors(cli_slice->nvmf_conn->ns));
+        return NULL;
+    }
+
+    // TODO: should not set log_blockcnt right now
     target->log_blockcnt = LOG_BLOCKCNT;
     target->private_info = cli_slice;
 
@@ -231,6 +307,7 @@ static int
 cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
     // TODO
+    wals_target_read_complete(wals_io, true);
     return 0;
 }
 
@@ -238,6 +315,7 @@ static int
 cli_submit_core_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
     // TODO
+    wals_target_read_complete(wals_io, true);
     return 0;
 }
 
@@ -245,11 +323,13 @@ static int
 cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
     // TODO
+    wals_target_write_complete(wals_io, true);
     return 0;
 }
 
 static int 
 rdma_cli_connection_poller(void* ctx) {
+    struct wals_bdev* wals_bdev = ctx;
     for (int i = 0; i < NUM_TARGETS; i++) {
         switch (g_rdma_cli_conns[i].status) {
             case RDMA_CLI_INITIALIZED:
@@ -359,44 +439,61 @@ rdma_cli_connection_poller(void* ctx) {
                         break;
                     }
 
-                    struct wals_cli_slice* slice;
-
-                    TAILQ_FOREACH(slice, &g_rdma_cli_conns[i].slices, tailq) {
-                        
-                    }
-
-
-                    struct ibv_mr* ibv_mr = ibv_reg_mr(g_rdma_cli_conns[i].cm_id->qp->pd,
-                        g_rdma_cli_conns[i].malloc_buf,
-                        g_rdma_cli_conns[i].disk.blockcnt * g_rdma_cli_conns[i].disk.blocklen + 2 * sizeof(struct rdma_handshake),
+                    struct ibv_mr* mr_read = ibv_reg_mr(g_rdma_cli_conns[i].cm_id->qp->pd,
+                        wals_bdev->read_buffer.buf,
+                        wals_bdev->buffer_blockcnt * wals_bdev->buffer_blocklen,
                         IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
 
-                    if (ibv_mr == NULL) {
-                        SPDK_ERRLOG("failed to reg mr\n");
+                    if (mr_read == NULL) {
+                        SPDK_ERRLOG("failed to reg mr read\n");
                         g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
                         break;
                     }
-                    g_rdma_cli_conns[i].mr = ibv_mr;
+                    g_rdma_cli_conns[i].mr_read = mr_read;
+
+                    struct ibv_mr* mr_write = ibv_reg_mr(g_rdma_cli_conns[i].cm_id->qp->pd,
+                        wals_bdev->buffer,
+                        wals_bdev->buffer_blockcnt * wals_bdev->buffer_blocklen,
+                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
+
+                    if (mr_write == NULL) {
+                        SPDK_ERRLOG("failed to reg mr write\n");
+                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        break;
+                    }
+                    g_rdma_cli_conns[i].mr_write = mr_write;
                     
+                    struct ibv_mr* mr_handshake = ibv_reg_mr(g_rdma_cli_conns[i].cm_id->qp->pd,
+                        g_rdma_handshakes,
+                        sizeof(g_rdma_handshakes),
+                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
+
+                    if (mr_handshake == NULL) {
+                        SPDK_ERRLOG("failed to reg mr handshake\n");
+                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        break;
+                    }
+                    g_rdma_cli_conns[i].mr_handshake = mr_handshake;
+
                     struct ibv_recv_wr wr, *bad_wr = NULL;
                     struct ibv_sge sge;
 
-                    struct rdma_handshake* handshake = g_rdma_cli_conns[i].malloc_buf + g_rdma_cli_conns[i].disk.blockcnt * g_rdma_cli_conns[i].disk.blocklen;
-                    struct rdma_handshake* remote_handshake = handshake + 1;
-                    handshake->base_addr = g_rdma_cli_conns[i].malloc_buf;
-                    handshake->rkey = ibv_mr->rkey;
-                    handshake->block_cnt = g_rdma_cli_conns[i].disk.blockcnt;
-                    handshake->block_size = g_rdma_cli_conns[i].disk.blocklen;
+                    struct rdma_handshake* handshake = &g_rdma_handshakes[NUM_TARGETS];
+                    struct rdma_handshake* remote_handshake = &g_rdma_handshakes[i];
+                    handshake->base_addr = &g_rdma_handshakes[0];
+                    handshake->rkey = mr_handshake->rkey;
+                    // TODO: server should provide this value
+                    handshake->block_cnt = LOG_BLOCKCNT;
+                    handshake->block_size = wals_bdev->buffer_blocklen;
 
-                    wr.wr_id = (uintptr_t)1;
+                    wr.wr_id = (uintptr_t)i;
                     wr.next = NULL;
                     wr.sg_list = &sge;
                     wr.num_sge = 1;
 
                     sge.addr = (uint64_t)remote_handshake;
                     sge.length = sizeof(struct rdma_handshake);
-                    sge.lkey = ibv_mr->lkey;
-                    g_rdma_cli_conns[i].remote_handshake = remote_handshake;
+                    sge.lkey = mr_handshake->lkey;
 
                     rc = ibv_post_recv(g_rdma_cli_conns[i].cm_id->qp, &wr, &bad_wr);
                     if (rc != 0) {
@@ -467,13 +564,27 @@ rdma_cli_connection_poller(void* ctx) {
                     }
                     g_rdma_cli_conns[i].cq = NULL;
 
-                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr);
+                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_read);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
                         g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
                         return SPDK_POLLER_BUSY;
                     }
-                    g_rdma_cli_conns[i].mr = NULL;
+                    g_rdma_cli_conns[i].mr_read = NULL;
+                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_write);
+                    if (rc != 0) {
+                        SPDK_ERRLOG("failed to dereg mr\n");
+                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        return SPDK_POLLER_BUSY;
+                    }
+                    g_rdma_cli_conns[i].mr_write = NULL;
+                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_handshake);
+                    if (rc != 0) {
+                        SPDK_ERRLOG("failed to dereg mr\n");
+                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        return SPDK_POLLER_BUSY;
+                    }
+                    g_rdma_cli_conns[i].mr_handshake = NULL;
 
                     g_rdma_cli_conns[i].status = RDMA_CLI_INITIALIZED;
                 }
@@ -484,7 +595,7 @@ rdma_cli_connection_poller(void* ctx) {
             }
             case RDMA_CLI_CONNECTING:
             {
-                struct rdma_handshake* handshake = g_rdma_cli_conns[i].remote_handshake - 1;
+                struct rdma_handshake* handshake = &g_rdma_handshakes[NUM_TARGETS];
                 int rc;
                 struct rdma_cm_event* connect_event;
                 struct ibv_send_wr send_wr, *bad_send_wr = NULL;
@@ -533,13 +644,27 @@ rdma_cli_connection_poller(void* ctx) {
                     }
                     g_rdma_cli_conns[i].cq = NULL;
 
-                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr);
+                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_read);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
                         g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
-                        break;
+                        return SPDK_POLLER_BUSY;
                     }
-                    g_rdma_cli_conns[i].mr = NULL;
+                    g_rdma_cli_conns[i].mr_read = NULL;
+                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_write);
+                    if (rc != 0) {
+                        SPDK_ERRLOG("failed to dereg mr\n");
+                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        return SPDK_POLLER_BUSY;
+                    }
+                    g_rdma_cli_conns[i].mr_write = NULL;
+                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_handshake);
+                    if (rc != 0) {
+                        SPDK_ERRLOG("failed to dereg mr\n");
+                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        return SPDK_POLLER_BUSY;
+                    }
+                    g_rdma_cli_conns[i].mr_handshake = NULL;
 
                     g_rdma_cli_conns[i].status = RDMA_CLI_INITIALIZED;
                     break;
@@ -558,7 +683,7 @@ rdma_cli_connection_poller(void* ctx) {
 
                 memset(&send_wr, 0, sizeof(send_wr));
 
-                send_wr.wr_id = 2;
+                send_wr.wr_id = NUM_TARGETS + i;
                 send_wr.opcode = IBV_WR_SEND;
                 send_wr.sg_list = &send_sge;
                 send_wr.num_sge = 1;
@@ -566,7 +691,7 @@ rdma_cli_connection_poller(void* ctx) {
 
                 send_sge.addr = (uint64_t)handshake;
                 send_sge.length = sizeof(struct rdma_handshake);
-                send_sge.lkey = g_rdma_cli_conns[i].mr->lkey;
+                send_sge.lkey = g_rdma_cli_conns[i].mr_handshake->lkey;
 
                 rc = ibv_post_send(g_rdma_cli_conns[i].cm_id->qp, &send_wr, &bad_send_wr);
                 if (rc != 0) {
@@ -579,7 +704,8 @@ rdma_cli_connection_poller(void* ctx) {
             case RDMA_CLI_ESTABLISHED:
             {
                 struct ibv_wc wc;
-                struct rdma_handshake* handshake = g_rdma_cli_conns[i].remote_handshake - 1;
+                struct rdma_handshake* handshake = &g_rdma_handshakes[NUM_TARGETS];
+                struct rdma_handshake* remote_handshake = &g_rdma_handshakes[i];
                 int cnt = ibv_poll_cq(g_rdma_cli_conns[i].cq, 1, &wc);
                 if (cnt < 0) {
                     SPDK_ERRLOG("ibv_poll_cq failed\n");
@@ -595,24 +721,30 @@ rdma_cli_connection_poller(void* ctx) {
                     return SPDK_POLLER_IDLE;
                 }
 
-                if (wc.wr_id == 1) {
+                if (wc.wr_id < NUM_TARGETS) {
                     // recv complete
                     SPDK_NOTICELOG("received remote addr %p rkey %d block_cnt %ld block_size %ld\n",
-                        g_rdma_cli_conns[i].remote_handshake->base_addr,
-                        g_rdma_cli_conns[i].remote_handshake->rkey,
-                        g_rdma_cli_conns[i].remote_handshake->block_cnt,
-                        g_rdma_cli_conns[i].remote_handshake->block_size);
+                        remote_handshake->base_addr,
+                        remote_handshake->rkey,
+                        remote_handshake->block_cnt,
+                        remote_handshake->block_size);
                     
-                    if (g_rdma_cli_conns[i].remote_handshake->block_cnt != handshake->block_cnt ||
-                        g_rdma_cli_conns[i].remote_handshake->block_size != handshake->block_size) {
+                    // TODO: remove block cnt check
+                    if (remote_handshake->block_cnt != handshake->block_cnt ||
+                        remote_handshake->block_size != handshake->block_size) {
                         SPDK_ERRLOG("buffer config handshake mismatch\n");
-                        return -EINVAL;
+                        return SPDK_POLLER_BUSY;
                     }
                     SPDK_NOTICELOG("rdma handshake complete\n");
                     g_rdma_cli_conns[i].status = RDMA_CLI_CONNECTED;
+                    // TODO: should set slice log_blockcnt to proper value provided by remote handshake
                 }
-                else if (wc.wr_id == 2) {
+                else if (wc.wr_id < 2 * NUM_TARGETS) {
+                    // send cpl
                     SPDK_NOTICELOG("send req complete\n");
+                }
+                else {
+                    SPDK_ERRLOG("Should not complete wrid = %ld\n", wc.wr_id);
                 }
                 break;
             }
@@ -621,7 +753,6 @@ rdma_cli_connection_poller(void* ctx) {
                 SPDK_NOTICELOG("In error state. Cannot recover by now\n");
                 break;
             }
-
         }
 	}
 
@@ -639,4 +770,4 @@ static struct wals_target_module g_rdma_cli_module = {
 
 TARGET_MODULE_REGISTER(&g_rdma_cli_module)
 
-SPDK_LOG_REGISTER_COMPONENT(bdev_wals_rdma_cli)
+SPDK_LOG_REGISTER_COMPONENT(bdev_wals_cli)
