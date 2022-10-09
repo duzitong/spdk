@@ -1630,6 +1630,7 @@ wals_bdev_cleaner(void *ctx)
         update[i] = x;
     }
 
+	x = x->level[0].forward;
 	if (!wals_bdev_is_valid_entry(
 		wals_bdev_get_targets_log_head_min(&wals_bdev->slices[tmp->ele->begin / wals_bdev->slice_blockcnt]),
 		x->ele)) {
