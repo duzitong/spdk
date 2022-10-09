@@ -1632,7 +1632,7 @@ wals_bdev_cleaner(void *ctx)
 
 	x = x->level[0].forward;
 	if (!wals_bdev_is_valid_entry(
-		wals_bdev_get_targets_log_head_min(&wals_bdev->slices[tmp->ele->begin / wals_bdev->slice_blockcnt]),
+		wals_bdev_get_targets_log_head_min(&wals_bdev->slices[x->ele->begin / wals_bdev->slice_blockcnt]),
 		x->ele)) {
 		for (j = 0; j < x->height; j++) {
 			update[j]->level[j].forward = x->level[j].forward;
