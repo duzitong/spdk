@@ -153,7 +153,7 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 			SPDK_NOTICELOG("register read pollers\n");
 			// TODO: call module to register read pollers
 			wals_bdev->log_head_update_poller = SPDK_POLLER_REGISTER(wals_bdev_log_head_update, wals_bdev, 5);
-			wals_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wals_bdev_cleaner, wals_bdev, 10);
+			wals_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wals_bdev_cleaner, wals_bdev, 1);
 			wals_bdev->stat_poller = SPDK_POLLER_REGISTER(wals_bdev_stat_report, wals_bdev, 30*1000*1000);
 
 			wals_bdev->read_thread = spdk_get_thread();
