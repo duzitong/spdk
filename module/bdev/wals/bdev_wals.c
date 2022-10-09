@@ -97,7 +97,6 @@ static int	wals_bdev_start(struct wals_bdev *bdev);
 static void	wals_bdev_stop(struct wals_bdev *bdev);
 static int	wals_bdev_init(void);
 static bool wals_bdev_is_valid_entry(struct wals_log_position after, struct bstat *bstat);
-static int wals_bdev_submit_pending_writes(void *ctx);
 static int wals_bdev_log_head_update(void *ctx);
 static int wals_bdev_cleaner(void *ctx);
 static int wals_bdev_stat_report(void *ctx);
@@ -140,7 +139,6 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 		if (!wals_bdev->write_thread_set) {
 			SPDK_NOTICELOG("register write pollers\n");
 			// TODO: call module to register write pollers
-			wals_bdev->pending_writes_poller = SPDK_POLLER_REGISTER(wals_bdev_submit_pending_writes, wals_bdev, 0);
 
 			wals_bdev->write_thread = spdk_get_thread();
 			if (!wals_bdev->read_thread_set) {
@@ -173,7 +171,6 @@ wals_bdev_unregister_write_pollers(void *arg)
 	struct wals_bdev	*wals_bdev = arg;
 
 	// TODO: call module to unregister
-	spdk_poller_unregister(&wals_bdev->pending_writes_poller);
 	
 	wals_bdev->write_thread = NULL;
 	wals_bdev->write_thread_set = false;
@@ -654,6 +651,14 @@ wals_bdev_write_complete_deferred_success(void *arg)
 }
 
 static void
+wals_bdev_write_complete_deferred_failure(void *arg)
+{
+	struct wals_bdev_io *wals_io = arg;
+	wals_io->orig_io->free_deferred = true;
+	spdk_bdev_io_complete(wals_io->orig_io, SPDK_BDEV_IO_STATUS_FAILED);
+}
+
+static void
 wals_bdev_write_complete_quorum(void *arg)
 {
 	struct wals_bdev_io *wals_io = arg;
@@ -731,6 +736,12 @@ wals_target_write_complete(struct wals_bdev_io *wals_io, bool success)
 			SPDK_ERRLOG("Write failure to quorum targets on slice %ld.\n", wals_io->slice_index);
 			wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
 		}
+
+		if (wals_io->targets_completed == NUM_TARGETS) {
+			wals_bdev_write_complete_all(wals_io);
+		}
+
+		return;
 	}
 
 	if (wals_io->targets_completed - wals_io->targets_failed == QUORUM_TARGETS) {
@@ -853,17 +864,11 @@ wals_bdev_submit_write_request(void *arg)
 	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
 	slice = &wals_bdev->slices[wals_io->slice_index];
 
-	if (!TAILQ_EMPTY(&slice->pending_writes)) {
-		SPDK_DEBUGLOG(bdev_wals, "queue bdev io submit due to there are pending writes.\n");
-		TAILQ_INSERT_TAIL(&slice->pending_writes, wals_io, pending_write_next);
-		return;
-	}
-
 	// check slice space
 	if (!wals_bdev_update_tail(bdev_io->u.bdev.num_blocks + METADATA_BLOCKS,
 								slice->tail, slice->log_blockcnt, slice->head, &slice_tail)) {
 		SPDK_DEBUGLOG(bdev_wals, "queue bdev io submit due to no enough space left on slice log.\n");
-		TAILQ_INSERT_TAIL(&slice->pending_writes, wals_io, pending_write_next);
+		spdk_thread_send_msg(spdk_get_thread(), wals_bdev_submit_write_request, wals_io);
 		return;
 	}
 
@@ -871,7 +876,7 @@ wals_bdev_submit_write_request(void *arg)
 	if (!wals_bdev_update_tail(bdev_io->u.bdev.num_blocks + METADATA_BLOCKS, 
 								wals_bdev->buffer_tail, wals_bdev->buffer_blockcnt, wals_bdev->buffer_head, &buffer_tail)) {
 		SPDK_DEBUGLOG(bdev_wals, "queue bdev io submit due to no enough space left on buffer.\n");
-		TAILQ_INSERT_TAIL(&slice->pending_writes, wals_io, pending_write_next);
+		spdk_thread_send_msg(spdk_get_thread(), wals_bdev_submit_write_request, wals_io);
 		return;
 	}
 
@@ -1505,7 +1510,6 @@ wals_bdev_start(struct wals_bdev *wals_bdev)
 	wals_bdev->bslfn = bslfnCreate(wals_bdev->bsl_node_pool, wals_bdev->bstat_pool);
 
 	for (i = 0; i < wals_bdev->slicecnt; i++) {
-		TAILQ_INIT(&wals_bdev->slices[i].pending_writes);
 		LIST_INIT(&wals_bdev->slices[i].outstanding_read_afters);
 	}
 
@@ -1548,43 +1552,6 @@ wals_bdev_examine(struct spdk_bdev *bdev)
 	// TODO: let target module to examine
 
 	spdk_bdev_module_examine_done(&g_wals_if);
-}
-
-static int
-wals_bdev_submit_pending_writes(void *ctx)
-{
-	struct wals_bdev *wals_bdev = ctx;
-	struct wals_bdev_io	*wals_io;
-	struct spdk_bdev_io *bdev_io;
-	struct wals_slice *slice;
-	struct wals_log_position buffer_tail, slice_tail;
-	uint64_t i, cnt = 0;
-
-	for (i = 0; i < wals_bdev->slicecnt; i++) {
-		slice = &wals_bdev->slices[i];
-		if (!TAILQ_EMPTY(&slice->pending_writes)) {
-			wals_io = TAILQ_FIRST(&slice->pending_writes);
-			bdev_io = spdk_bdev_io_from_ctx(wals_io);
-			// check slice space
-			if (!wals_bdev_update_tail(bdev_io->u.bdev.num_blocks + METADATA_BLOCKS,
-										slice->tail, slice->log_blockcnt, slice->head, &slice_tail)) {
-				SPDK_DEBUGLOG(bdev_wals, "waiting bdev io submit due to no enough space left on slice log.\n");
-				continue;
-			}
-
-			// check buffer space
-			if (!wals_bdev_update_tail(bdev_io->u.bdev.num_blocks + METADATA_BLOCKS, 
-										wals_bdev->buffer_tail, wals_bdev->buffer_blockcnt, wals_bdev->buffer_head, &buffer_tail)) {
-				SPDK_DEBUGLOG(bdev_wals, "waiting bdev io submit due to no enough space left on buffer.\n");
-				continue;
-			}
-			_wals_bdev_submit_write_request(wals_io, slice_tail, buffer_tail);
-			TAILQ_REMOVE(&slice->pending_writes, wals_io, pending_write_next);
-			cnt++;
-		}
-	}
-
-	return cnt > 0 ? SPDK_POLLER_BUSY : SPDK_POLLER_IDLE;
 }
 
 static int 

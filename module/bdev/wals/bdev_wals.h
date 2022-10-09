@@ -147,9 +147,6 @@ struct wals_slice {
 
 	struct wals_target			*targets[NUM_TARGETS];
 
-	/* pending writes due to no enough space on log device or buffer */
-	TAILQ_HEAD(, wals_bdev_io)	pending_writes;
-
 	/* list of outstanding read_afters */
 	LIST_HEAD(, wals_read_after) outstanding_read_afters;
 
@@ -214,9 +211,6 @@ struct wals_bdev_io {
 	int		targets_failed;
 
 	int		targets_completed;
-
-	/* link next for pending writes */
-	TAILQ_ENTRY(wals_bdev_io)	pending_write_next;
 };
 
 /*
@@ -294,9 +288,6 @@ struct wals_bdev {
 
 	/* mutex to set thread and pollers */
 	pthread_mutex_t			mutex;
-
-	/* poller to complete pending writes */
-	struct spdk_poller		*pending_writes_poller;
 
 	/* poller to update log head */
 	struct spdk_poller		*log_head_update_poller;
