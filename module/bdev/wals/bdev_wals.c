@@ -671,8 +671,10 @@ wals_bdev_write_complete_quorum(void *arg)
 		msg = spdk_mempool_get(wals_bdev->index_msg_pool);
 		count++;
 		if (count % 100000000 == 0) {
-			SPDK_NOTICELOG("waiting msg %p\n", wals_io);
-			break; 
+			SPDK_NOTICELOG("waiting msg %p, %ld+%ld\n", wals_io, metadata->core_offset, metadata->length);
+		}
+		if (count % 1000000000 == 0) {
+			break;
 		}
 	}
 	SPDK_DEBUGLOG(bdev_wals, "(%ld)msg got for io %p\n", spdk_thread_get_id(spdk_get_thread()), wals_io);
