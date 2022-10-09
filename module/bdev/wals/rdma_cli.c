@@ -42,6 +42,7 @@ struct rdma_cli_connection {
     struct addrinfo* server_addr;
     struct ibv_wc wc_buf[WC_BATCH_SIZE];
     enum rdma_cli_status status;
+    uint64_t reject_cnt;
     TAILQ_HEAD(, wals_cli_slice) slices;
 };
 
@@ -65,7 +66,8 @@ struct nvmf_cli_connection g_nvmf_cli_conns[NUM_TARGETS];
 
 struct rdma_handshake g_rdma_handshakes[NUM_TARGETS + 1];
 
-struct spdk_poller* connection_poller;
+struct spdk_poller* g_rdma_connection_poller;
+struct spdk_poller* g_nvmf_connection_poller;
 
 struct wals_cli_slice {
     struct wals_bdev* wals_bdev;
@@ -79,6 +81,7 @@ struct wals_cli_slice {
 };
 
 static int rdma_cli_connection_poller(void* ctx);
+static int nvmf_cli_connection_poller(void* ctx);
 
 static bool
 nvmf_cli_probe_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
@@ -212,8 +215,8 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                 g_rdma_cli_conns[i].status = RDMA_CLI_INITIALIZED;
 
                 // only need one poller for connecting the qps
-                if (connection_poller == NULL) {
-                    connection_poller = SPDK_POLLER_REGISTER(rdma_cli_connection_poller, wals_bdev, 5 * 1000);
+                if (g_rdma_connection_poller == NULL) {
+                    g_rdma_connection_poller = SPDK_POLLER_REGISTER(rdma_cli_connection_poller, wals_bdev, 5 * 1000);
                 }
 
                 break;
@@ -273,6 +276,12 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                     return NULL;
                 }
 
+                g_nvmf_cli_conns[i].status = NVMF_CLI_INITIALIZED;
+
+                if (g_nvmf_connection_poller == NULL) {
+                    g_nvmf_connection_poller = SPDK_POLLER_REGISTER(nvmf_cli_connection_poller, wals_bdev, 5 * 1000);
+                }
+
             }
         }
     }
@@ -327,6 +336,32 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
     // TODO
     wals_target_write_complete(wals_io, true);
     return 0;
+}
+
+// same logic as the poller in examples/nvme/reconnect.c
+// assume that the namespace and io qpair don't need recreation.
+static int 
+nvmf_cli_connection_poller(void* ctx) {
+    // TODO: do I need pthread_setcancelstate?
+    int rc;
+    for (int i = 0; i < NUM_TARGETS; i++) {
+        if (g_nvmf_cli_conns[i].status != NVMF_CLI_INITIALIZED) {
+            continue;
+        }
+
+        rc = spdk_nvme_ctrlr_process_admin_completions(g_nvmf_cli_conns[i].ctrlr);
+        if (rc == -ENXIO) {
+            // assume that the transport id doesn't change
+            rc = spdk_nvme_ctrlr_reset(g_nvmf_cli_conns[i].ctrlr);
+            if (rc != 0) {
+                SPDK_WARNLOG("Cannot reset nvmf ctrlr %d: %d\n", i, rc);
+            }
+            else {
+                SPDK_NOTICELOG("Nvmf ctrlr %d reset successfully\n", i);
+            }
+        }
+    }
+    return SPDK_POLLER_BUSY;
 }
 
 static int 
@@ -421,8 +456,8 @@ rdma_cli_connection_poller(void* ctx) {
                     struct ibv_context* ibv_context = g_rdma_cli_conns[i].cm_id->verbs;
                     struct ibv_device_attr device_attr = {};
                     ibv_query_device(ibv_context, &device_attr);
-                    SPDK_NOTICELOG("max wr sge = %d, max wr num = %d, max cqe = %d, max qp = %d\n",
-                        device_attr.max_sge, device_attr.max_qp_wr, device_attr.max_cqe, device_attr.max_qp);
+                    // SPDK_NOTICELOG("max wr sge = %d, max wr num = %d, max cqe = %d, max qp = %d\n",
+                    //     device_attr.max_sge, device_attr.max_qp_wr, device_attr.max_cqe, device_attr.max_qp);
                     struct ibv_cq* ibv_cq = ibv_create_cq(ibv_context, 256, NULL, NULL, 0);
                     if (ibv_cq == NULL) {
                         SPDK_ERRLOG("Failed to create cq\n");
@@ -630,7 +665,10 @@ rdma_cli_connection_poller(void* ctx) {
                 }
 
                 if (connect_event->event == RDMA_CM_EVENT_REJECTED) {
-                    SPDK_NOTICELOG("Rejected. Try again...\n");
+                    g_rdma_cli_conns[i].reject_cnt++;
+                    if (g_rdma_cli_conns[i].reject_cnt % 100 == 1) {
+                        SPDK_NOTICELOG("Rejected %ld. Try again...\n", g_rdma_cli_conns[i].reject_cnt);
+                    }
                     // remote not ready yet
                     // destroy all rdma resources and try again
                     rdma_destroy_qp(g_rdma_cli_conns[i].cm_id);
@@ -769,6 +807,21 @@ rdma_cli_connection_poller(void* ctx) {
 	}
 
 	return SPDK_POLLER_BUSY;
+}
+
+static int
+rdma_cq_poller(void* ctx) {
+    return SPDK_POLLER_IDLE;
+}
+
+static int
+nvmf_cq_poller(void* ctx) {
+    return SPDK_POLLER_IDLE;
+}
+
+static int 
+pending_io_timeout_poller(void* ctx) {
+    return SPDK_POLLER_IDLE;
 }
 
 static struct wals_target_module g_rdma_cli_module = {
