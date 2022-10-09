@@ -662,6 +662,11 @@ wals_bdev_write_complete_quorum(void *arg)
 	struct wals_index_msg *msg = spdk_mempool_get(wals_bdev->index_msg_pool);
 	int rc, count = 0;
 
+	if (spdk_get_thread() != wals_bdev->write_thread)
+	{
+		SPDK_ERRLOG("???\n");
+	}
+
 	while (!msg) {
 		msg = spdk_mempool_get(wals_bdev->index_msg_pool);
 		count++;
@@ -677,7 +682,7 @@ wals_bdev_write_complete_quorum(void *arg)
 	msg->offset = metadata->next_offset - metadata->length;
 	msg->round = metadata->round;
 	msg->wals_bdev = wals_bdev;
-	SPDK_NOTICELOG("msg begin, end\n", spdk_thread_get_id(spdk_get_thread()), wals_io);
+	SPDK_NOTICELOG("msg begin: %ld, end: %ld\n", msg->begin, msg->end);
 	
 	do {
 		rc = spdk_thread_send_msg(wals_bdev->read_thread, wals_bdev_insert_read_index, msg);
