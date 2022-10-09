@@ -642,7 +642,7 @@ wals_bdev_insert_read_index(void *arg)
 	
 	bslInsert(msg->wals_bdev->bsl, msg->begin, msg->end, bstat, msg->wals_bdev->bslfn);
 	spdk_mempool_put(msg->wals_bdev->index_msg_pool, msg);
-	SPDK_NOTICELOG("(%ld) msg returned\n", spdk_thread_get_id(spdk_get_thread()));
+	SPDK_DEBUGLOG(bdev_wals, "(%ld) msg returned\n", spdk_thread_get_id(spdk_get_thread()));
 }
 
 static void
@@ -675,14 +675,14 @@ wals_bdev_write_complete_quorum(void *arg)
 			break; 
 		}
 	}
-	SPDK_NOTICELOG("(%ld)msg got for io %p\n", spdk_thread_get_id(spdk_get_thread()), wals_io);
+	SPDK_DEBUGLOG(bdev_wals, "(%ld)msg got for io %p\n", spdk_thread_get_id(spdk_get_thread()), wals_io);
 	
 	msg->begin = metadata->core_offset;
 	msg->end = metadata->core_offset + metadata->length - 1;
 	msg->offset = metadata->next_offset - metadata->length;
 	msg->round = metadata->round;
 	msg->wals_bdev = wals_bdev;
-	SPDK_NOTICELOG("msg begin: %ld, end: %ld\n", msg->begin, msg->end);
+	SPDK_DEBUGLOG(bdev_wals, "msg begin: %ld, end: %ld\n", msg->begin, msg->end);
 	
 	do {
 		rc = spdk_thread_send_msg(wals_bdev->read_thread, wals_bdev_insert_read_index, msg);
