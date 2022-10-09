@@ -665,8 +665,9 @@ wals_bdev_write_complete_quorum(void *arg)
 	while (!msg) {
 		msg = spdk_mempool_get(wals_bdev->index_msg_pool);
 		count++;
-		if (count % 100000 == 0) {
-			SPDK_NOTICELOG("waiting msg\n");
+		if (count % 100000000 == 0) {
+			SPDK_NOTICELOG("waiting msg %p\n", wals_io);
+			break; 
 		}
 	}
 	SPDK_NOTICELOG("(%ld)msg got for io %p\n", spdk_thread_get_id(spdk_get_thread()), wals_io);
@@ -676,6 +677,8 @@ wals_bdev_write_complete_quorum(void *arg)
 	msg->offset = metadata->next_offset - metadata->length;
 	msg->round = metadata->round;
 	msg->wals_bdev = wals_bdev;
+	SPDK_NOTICELOG("msg begin, end\n", spdk_thread_get_id(spdk_get_thread()), wals_io);
+	
 	do {
 		rc = spdk_thread_send_msg(wals_bdev->read_thread, wals_bdev_insert_read_index, msg);
 	} while (rc != 0);
@@ -1452,6 +1455,7 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 	wals_bdev->buffer_blocklen = wals_cfg->blocklen;
 	wals_bdev->buffer_blockcnt = wals_cfg->buffer_blockcnt;
 
+	// TODO: log_blockcnt into a write poller
 	for (i = 0; i < wals_cfg->slicecnt; i++) {
 		wals_bdev->slices[i].log_blockcnt = UINT64_MAX;
 		for (j = 0; j < NUM_TARGETS; j++) {
