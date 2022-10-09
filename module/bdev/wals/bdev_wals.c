@@ -662,16 +662,12 @@ wals_bdev_write_complete_quorum(void *arg)
 	struct wals_index_msg *msg = spdk_mempool_get(wals_bdev->index_msg_pool);
 	int rc, count = 0;
 
-	if (spdk_get_thread() != wals_bdev->write_thread)
-	{
-		SPDK_ERRLOG("???\n");
-	}
-
 	while (!msg) {
 		msg = spdk_mempool_get(wals_bdev->index_msg_pool);
 		count++;
 		if (count % 100000000 == 0) {
 			SPDK_NOTICELOG("waiting msg %p, %ld+%ld\n", wals_io, metadata->core_offset, metadata->length);
+			SPDK_NOTICELOG("read thread last tsc %ld\n", spdk_thread_get_last_tsc(wals_bdev->read_thread));
 		}
 		if (count % 1000000000 == 0) {
 			break;
