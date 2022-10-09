@@ -1609,8 +1609,8 @@ static int
 wals_bdev_cleaner(void *ctx)
 {
 	struct wals_bdev *wals_bdev = ctx;
-	int i, j, count = 0, total;
-	bskiplistNode *update[BSKIPLIST_MAXLEVEL], *x, *tmp;
+	int i, j, total;
+	bskiplistNode *update[BSKIPLIST_MAXLEVEL], *x;
 	long rand = random();
 
 	// clean the index
@@ -1630,28 +1630,15 @@ wals_bdev_cleaner(void *ctx)
         update[i] = x;
     }
 
-	// try removal for level times.
-	for (i = 0; i < wals_bdev->bsl->level; i++) {
-		tmp = x->level[0].forward;
-		if (tmp) {
-			if (wals_bdev_is_valid_entry(
-				wals_bdev_get_targets_log_head_min(&wals_bdev->slices[tmp->ele->begin / wals_bdev->slice_blockcnt]),
-				tmp->ele)) {
-				for (j = 0; j < tmp->height; j++) {
-					update[j] = tmp;
-				}
-			} else {
-				for (j = 0; j < tmp->height; j++) {
-					update[j]->level[j].forward = tmp->level[j].forward;
-					tmp->level[j].forward = NULL;
-				}
-				wals_bdev->bslfn->tail->level[0].forward = tmp;
-				wals_bdev->bslfn->tail = tmp;
-				count++;
-			}
-		} else {
-			break;
+	if (!wals_bdev_is_valid_entry(
+		wals_bdev_get_targets_log_head_min(&wals_bdev->slices[tmp->ele->begin / wals_bdev->slice_blockcnt]),
+		x->ele)) {
+		for (j = 0; j < x->height; j++) {
+			update[j]->level[j].forward = x->level[j].forward;
+			x->level[j].forward = NULL;
 		}
+		wals_bdev->bslfn->tail->level[0].forward = x;
+		wals_bdev->bslfn->tail = x;
 	}
 
 	total = bslfnFree(wals_bdev->bslfn, 10);
