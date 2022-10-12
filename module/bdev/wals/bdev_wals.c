@@ -576,10 +576,17 @@ static void
 wals_bdev_insert_read_index(void *arg)
 {
 	struct wals_index_msg *msg = arg;
-	struct bstat *bstat = bstatBdevCreate(msg->begin, msg->end, msg->round, msg->offset, msg->wals_bdev->bstat_pool);
+	struct wals_bdev *wals_bdev = msg->wals_bdev;
+	struct bstat *bstat;
+
+	while (spdk_mempool_count(wals_bdev->bsl_node_pool) <= 1 || spdk_mempool_count(wals_bdev->bstat_pool) == 0) {
+		wals_bdev_cleaner(wals_bdev);
+	}
+
+	bstat = bstatBdevCreate(msg->begin, msg->end, msg->round, msg->offset, wals_bdev->bstat_pool);
 	
-	bslInsert(msg->wals_bdev->bsl, msg->begin, msg->end, bstat, msg->wals_bdev->bslfn);
-	spdk_mempool_put(msg->wals_bdev->index_msg_pool, msg);
+	bslInsert(wals_bdev->bsl, msg->begin, msg->end, bstat, wals_bdev->bslfn);
+	spdk_mempool_put(wals_bdev->index_msg_pool, msg);
 	SPDK_DEBUGLOG(bdev_wals, "(%ld) msg returned\n", spdk_thread_get_id(spdk_get_thread()));
 }
 
@@ -634,7 +641,7 @@ wals_bdev_write_complete_quorum(void *arg)
 	} else {
 		wals_bdev_write_complete_deferred_success(wals_io);
 	}
-	dma_heap_put_page(wals_bdev->write_heap ,wals_io->dma_page);
+	dma_heap_put_page(wals_bdev->write_heap, wals_io->dma_page);
 }
 
 static void
