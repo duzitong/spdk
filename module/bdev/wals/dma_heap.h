@@ -34,10 +34,10 @@ struct dma_heap {
     size_t data_size;
     size_t md_size;
 
-    TAILQ_HEAD(dma_page_ring, dma_page) buf_512;
-    TAILQ_HEAD(dma_page_ring, dma_page) buf_4k;
-    TAILQ_HEAD(dma_page_ring, dma_page) buf_8k;
-    TAILQ_HEAD(dma_page_ring, dma_page) buf_64k;
+    TAILQ_HEAD(, dma_page) buf_512;
+    TAILQ_HEAD(, dma_page) buf_4k;
+    TAILQ_HEAD(, dma_page) buf_8k;
+    TAILQ_HEAD(, dma_page) buf_64k;
 };
 
 struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, size_t align);

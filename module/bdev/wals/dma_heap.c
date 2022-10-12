@@ -14,8 +14,7 @@ struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, size_t align)
     struct dma_heap *heap = calloc(1, sizeof(*heap));
     struct dma_page *page;
     void *ptr;
-    size_t total_size;
-    int i;
+    size_t total_size, i;
 
     total_size = dma_heap_total_size(data_size, md_size);
     heap->buf = spdk_dma_zmalloc(total_size, align, NULL);
@@ -61,6 +60,8 @@ struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, size_t align)
         TAILQ_INSERT_TAIL(&heap->buf_64k, page, link);
         ptr+= SIZE_64K + md_size;
     }
+
+    return heap;
 }
 
 void* dma_heap_get_buf(struct dma_heap *heap)
@@ -102,27 +103,24 @@ struct dma_page* dma_heap_get_page(struct dma_heap *heap, size_t size)
     if (size <= SIZE_64K) {
         return _dma_heap_get_page(heap->buf_64k);
     }
-}
 
-static void _dma_heap_put_page(struct dma_page_ring *ring, struct dma_page *page)
-{
-    TAILQ_INSERT_TAIL(ring, page, link);
+    return NULL;
 }
 
 void dma_heap_put_page(struct dma_heap *heap, struct dma_page *page)
 {
     switch (page->data_size) {
         case SIZE_512:
-            _dma_heap_put_page(heap->buf_512, page);
+            TAILQ_INSERT_TAIL(heap->buf_512, page, link);
             break;
         case SIZE_4K:
-            _dma_heap_put_page(heap->buf_4k, page);
+            TAILQ_INSERT_TAIL(heap->buf_4k, page, link);
             break;
         case SIZE_8K:
-            _dma_heap_put_page(heap->buf_8k, page);
+            TAILQ_INSERT_TAIL(heap->buf_8k, page, link);
             break;
         case SIZE_64K:
-            _dma_heap_put_page(heap->buf_64k, page);
+            TAILQ_INSERT_TAIL(heap->buf_64k, page, link);
             break;
         default:
             // should not happen
