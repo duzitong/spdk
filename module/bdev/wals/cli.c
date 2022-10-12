@@ -13,6 +13,8 @@
 
 #define WC_BATCH_SIZE 32
 // TODO: make it configurable; server should decide it?
+// need another async API to tell parent bdev about the 
+// block size; hard-code now.
 #define LOG_BLOCKCNT 131072
 
 enum rdma_cli_status {
@@ -33,6 +35,7 @@ enum nvmf_cli_status {
 };
 
 struct rdma_cli_connection {
+    int id;
     struct rdma_event_channel* channel;
     struct rdma_cm_id* cm_id;
     struct ibv_cq* cq;
@@ -198,10 +201,12 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
         for (int i = 0; i < NUM_TARGETS; i++) {
             if (g_rdma_cli_conns[i].status == RDMA_CLI_UNINITIALIZED) {
                 // this slot is empty. use it
+                SPDK_NOTICELOG("Using empty RDMA connection slot %d\n", i);
                 cli_slice->rdma_conn = &g_rdma_cli_conns[i];
                 TAILQ_INIT(&g_rdma_cli_conns[i].slices);
                 TAILQ_INSERT_TAIL(&g_rdma_cli_conns[i].slices, cli_slice, tailq);
 
+                g_rdma_cli_conns[i].id = i;
                 g_rdma_cli_conns[i].server_addr = addr_res;
                 struct rdma_event_channel* channel = rdma_create_event_channel();
                 g_rdma_cli_conns[i].channel = channel;
@@ -246,6 +251,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
     if (cli_slice->nvmf_conn == NULL) {
         for (int i = 0; i < NUM_TARGETS; i++) {
             if (g_nvmf_cli_conns[i].status == NVMF_CLI_UNINITIALIZED) {
+                SPDK_NOTICELOG("Using empty NVMf connection slot %d\n", i);
                 cli_slice->nvmf_conn = &g_nvmf_cli_conns[i];
                 spdk_nvme_trid_populate_transport(&g_nvmf_cli_conns[i].transport_id,
                     SPDK_NVME_TRANSPORT_RDMA);
@@ -281,6 +287,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                 if (g_nvmf_connection_poller == NULL) {
                     g_nvmf_connection_poller = SPDK_POLLER_REGISTER(nvmf_cli_connection_poller, wals_bdev, 5 * 1000);
                 }
+                break;
 
             }
         }
@@ -317,8 +324,51 @@ cli_stop(struct wals_target *target, struct wals_bdev *wals_bdev)
 static int
 cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
-    // TODO
-    wals_target_read_complete(wals_io, true);
+    // BUG: the reconnection poller must be in the same thread as the IO thread, 
+    // otherwise it may secretly try to reconnect and free the RDMA resources, causing 
+    // segfault. It is not solvable without a lock.
+    int rc;
+    struct wals_cli_slice* slice = target->private_info;
+    if (slice->rdma_conn->status != RDMA_CLI_CONNECTED) {
+        if (wals_io->metadata->seq <= 10) {
+            // HACK: the bdev sends some unimportant IOs after the initialization,
+            // but the RDMA handshake may be pending.
+            wals_target_read_complete(wals_io, true);
+        }
+        else {
+            wals_target_read_complete(wals_io, false);
+        }
+        return 0;
+    }
+
+    struct ibv_send_wr wr, *bad_wr = NULL;
+    struct ibv_sge sge;
+    memset(&wr, 0, sizeof(wr));
+    wr.wr_id = (uint64_t)wals_io;
+    wr.next = NULL;
+    // TODO: inline?
+    wr.send_flags = IBV_SEND_SIGNALED;
+    wr.opcode = IBV_WR_RDMA_READ;
+    wr.num_sge = 1;
+    wr.sg_list = &sge;
+    wr.wr.rdma.remote_addr = g_rdma_handshakes[slice->rdma_conn->id].base_addr + offset * slice->wals_bdev->buffer_blocklen;
+    wr.wr.rdma.rkey = g_rdma_handshakes[slice->rdma_conn->id].rkey;
+
+    sge.addr = (uint64_t)data;
+    sge.length = cnt * slice->wals_bdev->buffer_blocklen;
+    sge.lkey = slice->rdma_conn->mr_read->lkey;
+    rc = ibv_post_send(slice->rdma_conn->cm_id->qp, &wr, &bad_wr);
+    if (rc != 0) {
+        SPDK_ERRLOG("RDMA read failed with errno = %d\n", rc);
+        SPDK_NOTICELOG("Local: %p %d; Remote: %p %d; Len = %d\n",
+            (void*)sge.addr, sge.lkey, (void*)wr.wr.rdma.remote_addr, wr.wr.rdma.rkey,
+            sge.length);
+        wals_target_read_complete(wals_io, false);
+    }
+    else {
+        wals_target_read_complete(wals_io, true);
+    }
+
     return 0;
 }
 
@@ -351,14 +401,15 @@ nvmf_cli_connection_poller(void* ctx) {
 
         rc = spdk_nvme_ctrlr_process_admin_completions(g_nvmf_cli_conns[i].ctrlr);
         if (rc == -ENXIO) {
+            // nvmf already has poller to reset the ctrlr.
             // assume that the transport id doesn't change
-            rc = spdk_nvme_ctrlr_reset(g_nvmf_cli_conns[i].ctrlr);
-            if (rc != 0) {
-                SPDK_WARNLOG("Cannot reset nvmf ctrlr %d: %d\n", i, rc);
-            }
-            else {
-                SPDK_NOTICELOG("Nvmf ctrlr %d reset successfully\n", i);
-            }
+            // rc = spdk_nvme_ctrlr_reset(g_nvmf_cli_conns[i].ctrlr);
+            // if (rc != 0) {
+            //     SPDK_WARNLOG("Cannot reset nvmf ctrlr %d: %d\n", i, rc);
+            // }
+            // else {
+            //     SPDK_NOTICELOG("Nvmf ctrlr %d reset successfully\n", i);
+            // }
         }
     }
     return SPDK_POLLER_BUSY;
@@ -825,7 +876,7 @@ pending_io_timeout_poller(void* ctx) {
 }
 
 static struct wals_target_module g_rdma_cli_module = {
-	.name = "rdma_cli",
+	.name = "cli",
 	.start = cli_start,
 	.stop = cli_stop,
     .submit_log_read_request = cli_submit_log_read_request,
