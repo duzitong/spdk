@@ -129,22 +129,43 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 
 	pthread_mutex_lock(&wals_bdev->mutex);
 	SPDK_NOTICELOG("Core mask of current thread: 0x%s\n", spdk_cpuset_fmt(set));
+
+	/*
+	 * When bdev is created, gpt will exaime this bdev, it issues a request and then close the bdev.
+	 * Then, destroy_cb will be called. write thread will be set to NULL.
+	 * test/bdevio does following steps:
+	 *   1. create test bdev on core 0. At this moment, wals bdev needs to serve read request for gpt exaimine.
+	 *   2. issue requests on its io_thread, typically, it's core 2. wals_bdev_create_cb will be called only on this core.
+	 * Then, if the write thread is reset to NULL, write requests cannot be handled.
+	 * So, we do a hack here to remain write thread when wals bdev destroy_cb is called very soon.
+	 */
+	if (wals_bdev->ch_count == 0) {
+		wals_bdev->ch_create_tsc = spdk_get_ticks();	
+	}
+
 	for (lcore = 0; lcore < SPDK_CPUSET_SIZE; lcore++) {
 		if (spdk_cpuset_get_cpu(set, lcore)) {
 			break;
 		}
 	}
 
-	if (lcore == wals_bdev->write_lcore) {
+	if (lcore == wals_bdev->write_lcore && wals_bdev->write_thread == NULL) {
 		SPDK_NOTICELOG("register write pollers\n");
 		// TODO: call module to register write pollers
 
 		wals_bdev->write_thread = spdk_get_thread();
+
+		/*
+		 * When bdev is created, gpt will exaime this bdev, it issues some read requests.
+		 * At this moment, if there's no read_thread to handle the request, bdev cannot be started.
+		 * Thus, add a hack here for this.
+		 * Afterwards, read thread will be set to the thread on read core.
+		 */
 		if (!wals_bdev->read_thread) {
 			wals_bdev->read_thread = wals_bdev->write_thread;
 		}
 	}
-	if (lcore == wals_bdev->read_lcore) {
+	if (lcore == wals_bdev->read_lcore && wals_bdev->read_thread == NULL) {
 		SPDK_NOTICELOG("register read pollers\n");
 		// TODO: call module to register read pollers
 
@@ -206,7 +227,8 @@ wals_bdev_destroy_cb(void *io_device, void *ctx_buf)
 
 	pthread_mutex_lock(&wals_bdev->mutex);
 	wals_bdev->ch_count--;
-	if (wals_bdev->ch_count == 0) {
+	if ((spdk_get_ticks - wals_bdev->ch_create_tsc > spdk_get_ticks_hz() / 1000 / 1000) // > 1us
+		&& wals_bdev->ch_count == 0) {
 		if (wals_bdev->write_thread != spdk_get_thread()) {
 			spdk_thread_send_msg(wals_bdev->write_thread,
 					     wals_bdev_unregister_write_pollers, wals_bdev);

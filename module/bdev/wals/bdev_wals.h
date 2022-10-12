@@ -340,6 +340,8 @@ struct wals_bdev {
 	struct bskiplistFreeNodes *bslfn;
 
 	struct wals_target_module	*module;
+
+	uint64_t		ch_create_tsc;
 };
 
 struct wals_slice_config {
