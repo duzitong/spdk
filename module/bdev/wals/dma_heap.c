@@ -111,16 +111,16 @@ void dma_heap_put_page(struct dma_heap *heap, struct dma_page *page)
 {
     switch (page->data_size) {
         case SIZE_512:
-            TAILQ_INSERT_TAIL(heap->buf_512, page, link);
+            TAILQ_INSERT_TAIL(&heap->buf_512, page, link);
             break;
         case SIZE_4K:
-            TAILQ_INSERT_TAIL(heap->buf_4k, page, link);
+            TAILQ_INSERT_TAIL(&heap->buf_4k, page, link);
             break;
         case SIZE_8K:
-            TAILQ_INSERT_TAIL(heap->buf_8k, page, link);
+            TAILQ_INSERT_TAIL(&heap->buf_8k, page, link);
             break;
         case SIZE_64K:
-            TAILQ_INSERT_TAIL(heap->buf_64k, page, link);
+            TAILQ_INSERT_TAIL(&heap->buf_64k, page, link);
             break;
         default:
             // should not happen
