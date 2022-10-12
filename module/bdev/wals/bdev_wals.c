@@ -140,6 +140,9 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 		// TODO: call module to register write pollers
 
 		wals_bdev->write_thread = spdk_get_thread();
+		if (!wals_bdev->read_thread) {
+			wals_bdev->read_thread = wals_bdev->write_thread;
+		}
 	}
 	if (lcore == wals_bdev->read_lcore) {
 		SPDK_NOTICELOG("register read pollers\n");
