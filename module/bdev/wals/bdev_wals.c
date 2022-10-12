@@ -140,14 +140,11 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 		// TODO: call module to register write pollers
 
 		wals_bdev->write_thread = spdk_get_thread();
-		if (!wals_bdev->read_thread_set) {
-			wals_bdev->read_thread = wals_bdev->write_thread;
-		}
 	}
 	if (lcore == wals_bdev->read_lcore) {
 		SPDK_NOTICELOG("register read pollers\n");
 		// TODO: call module to register read pollers
-		
+
 		wals_bdev->log_head_update_poller = SPDK_POLLER_REGISTER(wals_bdev_log_head_update, wals_bdev, 5);
 		wals_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wals_bdev_cleaner, wals_bdev, 1);
 		wals_bdev->stat_poller = SPDK_POLLER_REGISTER(wals_bdev_stat_report, wals_bdev, 30*1000*1000);
@@ -169,7 +166,6 @@ wals_bdev_unregister_write_pollers(void *arg)
 	// TODO: call module to unregister
 	
 	wals_bdev->write_thread = NULL;
-	wals_bdev->write_thread_set = false;
 }
 
 static void
@@ -183,7 +179,6 @@ wals_bdev_unregister_read_pollers(void *arg)
 	spdk_poller_unregister(&wals_bdev->stat_poller);
 	
 	wals_bdev->read_thread = NULL;
-	wals_bdev->read_thread_set = false;
 }
 
 /*

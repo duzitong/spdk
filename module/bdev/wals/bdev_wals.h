@@ -446,6 +446,7 @@ typedef void (*wals_bdev_destruct_cb)(void *cb_ctx, int rc);
 int wals_bdev_config_add(const char *wals_name, const char *module_name,
 			struct rpc_bdev_wals_slice *slices, uint64_t slicecnt,
 			uint64_t blocklen, uint64_t blockcnt, uint64_t buffer_blockcnt,
+			uint32_t write_lcore, uint32_t read_lcore,
 			struct wals_bdev_config **_wals_cfg);
 int wals_bdev_create(struct wals_bdev_config *wals_cfg);
 int wals_bdev_start_all(struct wals_bdev_config *wal_cfg);
