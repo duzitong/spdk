@@ -230,7 +230,7 @@ wals_bdev_destroy_cb(void *io_device, void *ctx_buf)
 	pthread_mutex_lock(&wals_bdev->mutex);
 	wals_bdev->ch_count--;
 	SPDK_NOTICELOG("Ticks from creation: %ld\n", spdk_get_ticks() - wals_bdev->ch_create_tsc);
-	if ((spdk_get_ticks() - wals_bdev->ch_create_tsc > spdk_get_ticks_hz() / 1000 / 1000) // > 1us
+	if ((spdk_get_ticks() - wals_bdev->ch_create_tsc > spdk_get_ticks_hz() / 1000) // > 1ms, it's a good MAGIC time threshold.
 		&& wals_bdev->ch_count == 0) {
 		if (wals_bdev->write_thread != spdk_get_thread()) {
 			spdk_thread_send_msg(wals_bdev->write_thread,
