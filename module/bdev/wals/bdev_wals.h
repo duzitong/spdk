@@ -46,6 +46,7 @@
 #include "spdk/trace.h"
 #include "spdk_internal/trace_defs.h"
 #include "../wal/bsl.h"
+#include "dma_heap.h"
 
 #define METADATA_VERSION		10086	// XD
 #define METADATA_BLOCKS			1
@@ -204,7 +205,7 @@ struct wals_bdev_io {
 
 	struct wals_read_after	*read_after;
 
-	struct wals_io_read_buffer	*read_buf;
+	struct dma_page	*dma_page;
 
 	uint64_t	slice_index;
 
@@ -314,12 +315,10 @@ struct wals_bdev {
 	/* number of blocks of the buffer */
 	uint64_t			buffer_blockcnt;
 
-	wals_log_position	buffer_tail;
-
-	wals_log_position	buffer_head;
+	struct dma_heap		*write_heap;
 
 	/* buffer for reads, with size of write buffer for now */
-	struct wals_bdev_read_buffer	read_buffer;
+	struct dma_heap		*read_heap;
 
 	/* bsl node mempool */
 	struct spdk_mempool		*bsl_node_pool;
