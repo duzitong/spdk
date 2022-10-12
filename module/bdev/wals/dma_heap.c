@@ -2,11 +2,11 @@
 
 static size_t dma_heap_total_size(size_t data_size, size_t md_size)
 {
-    return (data_size >> 2) << 2 + 
+    return ((data_size >> 2) << 2) + 
         ((data_size >> 2) / SIZE_512 
         + (data_size >> 2) / SIZE_4K 
         + (data_size >> 2) / SIZE_8K 
-        + (data_size >> 2) / SIZE_64K) * md_size
+        + (data_size >> 2) / SIZE_64K) * md_size;
 }
 
 struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, size_t align)
@@ -111,7 +111,7 @@ static void _dma_heap_put_page(struct dma_page_ring *ring, struct dma_page *page
 
 void dma_heap_put_page(struct dma_heap *heap, struct dma_page *page)
 {
-    switch (page->size) {
+    switch (page->data_size) {
         case SIZE_512:
             _dma_heap_put_page(heap->buf_512, page);
             break;
