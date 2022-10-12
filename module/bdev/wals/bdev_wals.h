@@ -281,8 +281,12 @@ struct wals_bdev {
 	/* count of open channels */
 	uint32_t			ch_count;
 
+	uint32_t				write_lcore;
+
 	/* write thread */
 	struct spdk_thread		*write_thread;
+
+	uint32_t				read_lcore;
 
 	/* read thread */
 	struct spdk_thread		*read_thread;
@@ -336,10 +340,6 @@ struct wals_bdev {
 	struct bskiplistFreeNodes *bslfn;
 
 	struct wals_target_module	*module;
-
-	volatile bool				write_thread_set;
-
-	volatile bool				read_thread_set;
 };
 
 struct wals_slice_config {
@@ -362,6 +362,10 @@ struct wals_bdev_config {
 	uint64_t					slice_blockcnt;
 
 	uint64_t					buffer_blockcnt;
+
+	uint32_t					write_lcore;
+
+	uint32_t					read_lcore;
 
 	char						*module_name;
 

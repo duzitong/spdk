@@ -135,28 +135,24 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 		}
 	}
 
-	if (lcore % 2 == 0) {
-		if (!wals_bdev->write_thread_set) {
-			SPDK_NOTICELOG("register write pollers\n");
-			// TODO: call module to register write pollers
+	if (lcore == wals_bdev->write_lcore) {
+		SPDK_NOTICELOG("register write pollers\n");
+		// TODO: call module to register write pollers
 
-			wals_bdev->write_thread = spdk_get_thread();
-			if (!wals_bdev->read_thread_set) {
-				wals_bdev->read_thread = wals_bdev->write_thread;
-			}
-			wals_bdev->write_thread_set = true;
-		}
-	} else {
+		wals_bdev->write_thread = spdk_get_thread();
 		if (!wals_bdev->read_thread_set) {
-			SPDK_NOTICELOG("register read pollers\n");
-			// TODO: call module to register read pollers
-			wals_bdev->log_head_update_poller = SPDK_POLLER_REGISTER(wals_bdev_log_head_update, wals_bdev, 5);
-			wals_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wals_bdev_cleaner, wals_bdev, 1);
-			wals_bdev->stat_poller = SPDK_POLLER_REGISTER(wals_bdev_stat_report, wals_bdev, 30*1000*1000);
-
-			wals_bdev->read_thread = spdk_get_thread();
-			wals_bdev->read_thread_set = true;
+			wals_bdev->read_thread = wals_bdev->write_thread;
 		}
+	}
+	if (lcore == wals_bdev->read_lcore) {
+		SPDK_NOTICELOG("register read pollers\n");
+		// TODO: call module to register read pollers
+		
+		wals_bdev->log_head_update_poller = SPDK_POLLER_REGISTER(wals_bdev_log_head_update, wals_bdev, 5);
+		wals_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wals_bdev_cleaner, wals_bdev, 1);
+		wals_bdev->stat_poller = SPDK_POLLER_REGISTER(wals_bdev_stat_report, wals_bdev, 30*1000*1000);
+
+		wals_bdev->read_thread = spdk_get_thread();
 	}
 
 	wals_bdev->ch_count++;
@@ -182,6 +178,7 @@ wals_bdev_unregister_read_pollers(void *arg)
 	struct wals_bdev	*wals_bdev = arg;
 
 	// TODO: call module to unregister
+	spdk_poller_unregister(&wals_bdev->log_head_update_poller);
 	spdk_poller_unregister(&wals_bdev->cleaner_poller);
 	spdk_poller_unregister(&wals_bdev->stat_poller);
 	
@@ -1098,6 +1095,7 @@ int
 wals_bdev_config_add(const char *wals_name, const char *module_name,
 			struct rpc_bdev_wals_slice *slices, uint64_t slicecnt,
 			uint64_t blocklen, uint64_t slice_blockcnt, uint64_t buffer_blockcnt,
+			uint32_t write_lcore, uint32_t read_lcore,
 			struct wals_bdev_config **_wals_cfg)
 {
 	struct wals_bdev_config *wals_cfg;
@@ -1134,6 +1132,9 @@ wals_bdev_config_add(const char *wals_name, const char *module_name,
 	wals_cfg->blocklen = blocklen;
 	wals_cfg->slice_blockcnt = slice_blockcnt;
 	wals_cfg->buffer_blockcnt = buffer_blockcnt;
+
+	wals_cfg->write_lcore = write_lcore;
+	wals_cfg->read_lcore = read_lcore;
 
 	wals_cfg->slicecnt = slicecnt;
 	wals_cfg->slices = calloc(slicecnt, sizeof(struct wals_slice_config));
@@ -1261,6 +1262,9 @@ wals_bdev_create(struct wals_bdev_config *wals_cfg)
 
 	wals_bdev->slicecnt = wals_cfg->slicecnt;
 	wals_bdev->slices = calloc(wals_bdev->slicecnt, sizeof(struct wals_slice));
+
+	wals_bdev->write_lcore = wals_cfg->write_lcore;
+	wals_bdev->read_lcore = wals_cfg->read_lcore;
 
 	wals_bdev->state = WALS_BDEV_STATE_CONFIGURING;
 	wals_bdev->config = wals_cfg;
