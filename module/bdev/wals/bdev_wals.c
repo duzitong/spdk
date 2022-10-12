@@ -634,7 +634,7 @@ wals_bdev_write_complete_quorum(void *arg)
 	} else {
 		wals_bdev_write_complete_deferred_success(wals_io);
 	}
-	dma_heap_put_page(wals_io->dma_page);
+	dma_heap_put_page(wals_bdev->write_heap ,wals_io->dma_page);
 }
 
 static void
