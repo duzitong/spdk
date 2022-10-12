@@ -1451,8 +1451,8 @@ wals_bdev_start(struct wals_bdev *wals_bdev)
 	mempool_size = wals_bdev->bdev.blockcnt >> 8;
 	mempool_size = spdk_align64pow2(mempool_size);
 
-	wals_bdev->bstat_pool = spdk_mempool_create("WALS_BSTAT_POOL", mempool_size, sizeof(bstat), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
-	wals_bdev->bsl_node_pool = spdk_mempool_create("WALS_BSL_NODE_POOL", mempool_size, sizeof(bskiplistNode), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
+	wals_bdev->bstat_pool = spdk_mempool_create("WALS_BSTAT_POOL", mempool_size, sizeof(bstat), 0, SPDK_ENV_SOCKET_ID_ANY);
+	wals_bdev->bsl_node_pool = spdk_mempool_create("WALS_BSL_NODE_POOL", mempool_size, sizeof(bskiplistNode), 0, SPDK_ENV_SOCKET_ID_ANY);
 	wals_bdev->index_msg_pool = spdk_mempool_create("WALS_INDEX_MSG_POOL", 128, sizeof(struct wals_index_msg), 0, SPDK_ENV_SOCKET_ID_ANY);
 
 	wals_bdev->bsl = bslCreate(wals_bdev->bsl_node_pool, wals_bdev->bstat_pool);
