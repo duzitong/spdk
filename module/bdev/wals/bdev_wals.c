@@ -186,6 +186,7 @@ static void
 wals_bdev_unregister_write_pollers(void *arg)
 {
 	struct wals_bdev	*wals_bdev = arg;
+	SPDK_NOTICELOG("Unregister write pollers\n");
 
 	// TODO: call module to unregister
 	
@@ -196,6 +197,7 @@ static void
 wals_bdev_unregister_read_pollers(void *arg)
 {
 	struct wals_bdev	*wals_bdev = arg;
+	SPDK_NOTICELOG("Unregister read pollers\n");
 
 	// TODO: call module to unregister
 	spdk_poller_unregister(&wals_bdev->log_head_update_poller);
