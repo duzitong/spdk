@@ -416,6 +416,8 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 	int i;
 	void *copy = dma_page_get_buf(wals_io->dma_page);
 	struct wals_slice *slice;
+	
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_COMP_R_T, 0, 0, (uintptr_t)wals_io);
 
 	wals_io->remaining_read_requests--;
 	wals_io->status = success && wals_io->status >= 0
@@ -427,6 +429,9 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 	}
 
 	if (wals_io->remaining_read_requests == 0) {
+
+		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_COMP_R_A, 0, 0, (uintptr_t)wals_io);
+
 		if (wals_io->status == SPDK_BDEV_IO_STATUS_SUCCESS) {
 			for (i = 0; i < orig_io->u.bdev.iovcnt; i++) {
 				memcpy(orig_io->u.bdev.iovs[i].iov_base, copy, (size_t)orig_io->u.bdev.iovs[i].iov_len);
@@ -442,7 +447,11 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 		dma_heap_put_page(wals_io->wals_bdev->read_heap, wals_io->dma_page);
 
 		wals_bdev_io_complete(wals_io, wals_io->status);
+
+		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_COMP_R_A, 0, 0, (uintptr_t)wals_io);
 	}
+	
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_COMP_R_T, 0, 0, (uintptr_t)wals_io);
 }
 
 /*
@@ -467,6 +476,8 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
     uint64_t    			read_begin, read_end, read_cur, tmp;
 	void					*buf;
 
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_R, 0, 0, (uintptr_t)wals_io);
+
 	SPDK_DEBUGLOG(bdev_wals, "submit read: %ld+%ld\n", bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks);
 
 	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
@@ -488,48 +499,6 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
     read_end = bdev_io->u.bdev.offset_blocks + bdev_io->u.bdev.num_blocks - 1;
 
 	bn = bslFirstNodeAfterBegin(wals_bdev->bsl, read_begin);
-	while (bn && bn->begin <= read_end && !wals_bdev_is_valid_entry(valid_pos, bn->ele) ) {
-		bn = bn->level[0].forward;
-	}
-
-	if (bn && bn->begin <= read_begin && bn->end >= read_end) {
-		SPDK_DEBUGLOG(bdev_wals, "one entry in log\n");
-		// One entry in someone's log
-		wals_io->remaining_read_requests = 1;
-
-		/*
-		 * TODO: Data on target may corrupt.
-		 * Either submit reads to all targets or try next target on failure returned.
-		 */
-
-		// TODO: pick the best choice
-		target_index = 0;
-		ret = wals_bdev->module->submit_log_read_request(slice->targets[target_index], buf, 
-														bn->ele->l.bdevOffset + read_begin - bn->ele->begin,
-														bdev_io->u.bdev.num_blocks, wals_io);
-		if (spdk_unlikely(ret != 0)) {
-			SPDK_ERRLOG("submit log read request failed to target %d in slice %ld\n", target_index, wals_io->slice_index);
-			wals_target_read_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
-		}
-		return;
-	}
-
-	if (!bn || bn->begin > read_end) {
-		SPDK_DEBUGLOG(bdev_wals, "one entry in core\n");
-		// not found in index
-		wals_io->remaining_read_requests = 1;
-		// TODO: round-robin?
-		target_index = 0;
-		ret = wals_bdev->module->submit_core_read_request(slice->targets[target_index], buf, 
-														bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks, wals_io);
-		if (spdk_unlikely(ret != 0)) {
-			SPDK_ERRLOG("submit core read request failed to target %d in slice %ld\n", target_index, wals_io->slice_index);
-			wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
-		}
-		return;
-	}
-
-	SPDK_DEBUGLOG(bdev_wals, "merged read\n");
 	/*
 	 * Completion in read submit request leads to complete the whole read request every time.
 	 * Add the initial remaining read requests by 1 to avoid this.
@@ -559,8 +528,14 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 			 * TODO: Data on target may corrupt.
 			 * Either submit reads to all targets or try next target on failure returned.
 			 */
+
+			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_R_T, 0, 0, (uintptr_t)wals_io, target_index, 1);
+
 			ret = wals_bdev->module->submit_core_read_request(slice->targets[target_index], buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
 															read_cur, tmp - read_cur + 1, wals_io);
+			
+			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_R_T, 0, 0, (uintptr_t)wals_io, target_index, 1);
+
 			if (spdk_unlikely(ret != 0)) {
 				SPDK_ERRLOG("submit core read request failed to target %d in slice %ld\n", target_index, wals_io->slice_index);
 				wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
@@ -579,8 +554,14 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 			 * TODO: Data on target may corrupt.
 			 * Either submit reads to all targets or try next target on failure returned.
 			 */
+
+			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_R_T, 0, 0, (uintptr_t)wals_io, target_index, 0);
+
 			ret = wals_bdev->module->submit_log_read_request(slice->targets[target_index], buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
 															bn->ele->l.bdevOffset + read_cur - bn->ele->begin, tmp - read_cur + 1, wals_io);
+			
+			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_R_T, 0, 0, (uintptr_t)wals_io, target_index, 0);
+
 			if (spdk_unlikely(ret != 0)) {
 				SPDK_ERRLOG("submit log read request failed to target %d in slice %ld\n", target_index, wals_io->slice_index);
 				wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
@@ -590,6 +571,8 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 			continue;
 		}
 	}
+
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_R, 0, 0, (uintptr_t)wals_io);
 }
 
 static void
@@ -598,6 +581,8 @@ wals_bdev_insert_read_index(void *arg)
 	struct wals_index_msg *msg = arg;
 	struct wals_bdev *wals_bdev = msg->wals_bdev;
 	struct bstat *bstat;
+	
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_INSERT_INDEX, 0, 0, (uintptr_t)wals_bdev);
 
 	while (spdk_mempool_count(wals_bdev->bsl_node_pool) <= 1 || spdk_mempool_count(wals_bdev->bstat_pool) == 0) {
 		wals_bdev_cleaner(wals_bdev);
@@ -608,22 +593,34 @@ wals_bdev_insert_read_index(void *arg)
 	bslInsert(wals_bdev->bsl, msg->begin, msg->end, bstat, wals_bdev->bslfn);
 	spdk_mempool_put(wals_bdev->index_msg_pool, msg);
 	SPDK_DEBUGLOG(bdev_wals, "(%ld) msg returned\n", spdk_thread_get_id(spdk_get_thread()));
+
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_INSERT_INDEX, 0, 0, (uintptr_t)wals_bdev);
 }
 
 static void
 wals_bdev_write_complete_deferred_success(void *arg)
 {
 	struct wals_bdev_io *wals_io = arg;
+	
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_COMP_IO, 0, 0, (uintptr_t)wals_io, 1, 1);
+
 	wals_io->orig_io->free_deferred = true;
 	spdk_bdev_io_complete(wals_io->orig_io, SPDK_BDEV_IO_STATUS_SUCCESS);
+
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_COMP_IO, 0, 0, (uintptr_t)wals_io, 1, 1);
 }
 
 static void
 wals_bdev_write_complete_deferred_failure(void *arg)
 {
 	struct wals_bdev_io *wals_io = arg;
+
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_COMP_IO, 0, 0, (uintptr_t)wals_io, 0, 1);
+
 	wals_io->orig_io->free_deferred = true;
 	spdk_bdev_io_complete(wals_io->orig_io, SPDK_BDEV_IO_STATUS_FAILED);
+
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_COMP_IO, 0, 0, (uintptr_t)wals_io, 0, 1);
 }
 
 static void
@@ -634,6 +631,10 @@ wals_bdev_write_complete_quorum(void *arg)
 	struct wals_metadata *metadata = wals_io->metadata;
 	struct wals_index_msg *msg = spdk_mempool_get(wals_bdev->index_msg_pool);
 	int rc, count = 0;
+	
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_COMP_W_Q, 0, 0, (uintptr_t)wals_io);
+
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_COMP_W_WM, 0, 0, (uintptr_t)wals_io);
 
 	while (!msg) {
 		msg = spdk_mempool_get(wals_bdev->index_msg_pool);
@@ -643,6 +644,9 @@ wals_bdev_write_complete_quorum(void *arg)
 			SPDK_NOTICELOG("read thread last tsc: %ld, now: %ld\n", spdk_thread_get_last_tsc(wals_bdev->read_thread), spdk_get_ticks());
 		}
 	}
+
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_COMP_W_WM, 0, 0, (uintptr_t)wals_io);
+
 	SPDK_DEBUGLOG(bdev_wals, "(%ld)msg got for io %p\n", spdk_thread_get_id(spdk_get_thread()), wals_io);
 	
 	msg->begin = metadata->core_offset;
@@ -662,6 +666,8 @@ wals_bdev_write_complete_quorum(void *arg)
 		wals_bdev_write_complete_deferred_success(wals_io);
 	}
 	dma_heap_put_page(wals_bdev->write_heap, wals_io->dma_page);
+
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_COMP_W_Q, 0, 0, (uintptr_t)wals_io);
 }
 
 static void
@@ -679,17 +685,24 @@ static void
 wals_bdev_write_complete_all(void* arg)
 {
 	struct wals_bdev_io *wals_io = arg;
+
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_COMP_W_A, 0, 0, (uintptr_t)wals_io);
+
 	if (wals_io->orig_thread != spdk_get_thread()) {
 		spdk_thread_send_msg(wals_io->orig_thread, wals_bdev_write_complete_free_deferred, wals_io);
 	} else {
 		wals_bdev_write_complete_free_deferred(wals_io);
 	}
+
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_COMP_W_A, 0, 0, (uintptr_t)wals_io);
 }
 
 // TODO: add timeout
 void
 wals_target_write_complete(struct wals_bdev_io *wals_io, bool success)
 {
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_COMP_W_T, 0, 0, (uintptr_t)wals_io);
+
 	wals_io->targets_completed++;
 
 	if (spdk_unlikely(!success)) {
@@ -716,6 +729,8 @@ wals_target_write_complete(struct wals_bdev_io *wals_io, bool success)
 	if (wals_io->targets_completed == NUM_TARGETS) {
 		wals_bdev_write_complete_all(wals_io);
 	}
+
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_COMP_W_T, 0, 0, (uintptr_t)wals_io);
 }
 
 /*
@@ -756,6 +771,8 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 	void					*ptr, *data;
 	struct iovec			*iovs;
 
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_W_I, 0, 0, (uintptr_t)wals_io);
+
 	ptr = dma_page_get_buf(wals_io->dma_page);
 	metadata = (struct wals_metadata *) ptr;
 	metadata->version = METADATA_VERSION;
@@ -783,7 +800,12 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 	wals_io->targets_failed = 0;
 	wals_io->targets_completed = 0;
 	for (i = 0; i < NUM_TARGETS; i++) {
+		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_W_T, 0, 0, (uintptr_t)wals_io, i);
+
 		ret = wals_bdev->module->submit_log_write_request(slice->targets[i], ptr, slice->tail.offset, bdev_io->u.bdev.num_blocks + METADATA_BLOCKS, wals_io);
+
+		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_W_T, 0, 0, (uintptr_t)wals_io, i);
+
 		if (spdk_unlikely(ret != 0)) {
 			wals_io->targets_failed++;
 			wals_io->targets_completed++;
@@ -800,6 +822,8 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 		// TODO2: write_failure: add invalid position index
 		wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
 	}
+
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_W_I, 0, 0, (uintptr_t)wals_io);
 }
 
 /*
@@ -821,6 +845,8 @@ wals_bdev_submit_write_request(void *arg)
 
 	struct wals_slice		*slice;
 	wals_log_position		slice_tail;
+
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_W, 0, 0, (uintptr_t)wals_io);
 
 	SPDK_DEBUGLOG(bdev_wals, "submit write: %ld+%ld\n", bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks);
 
@@ -844,6 +870,8 @@ wals_bdev_submit_write_request(void *arg)
 	}
 
 	_wals_bdev_submit_write_request(wals_io, slice_tail);
+
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_W, 0, 0, (uintptr_t)wals_io);
 }
 
 // TODO - end
@@ -896,6 +924,8 @@ wals_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 {
 	struct wals_bdev_io *wals_io = (struct wals_bdev_io *)bdev_io->driver_ctx;
 
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_IO, 0, 0, (uintptr_t)wals_io);
+
 	wals_io->wals_ch = spdk_io_channel_get_ctx(ch);
 	wals_io->wals_bdev = wals_io->wals_ch->wals_bdev;
 	wals_io->orig_io = bdev_io;
@@ -931,6 +961,8 @@ wals_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 		wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
 		break;
 	}
+
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_IO, 0, 0, (uintptr_t)wals_io);
 }
 
 /*
@@ -1550,6 +1582,8 @@ wals_bdev_cleaner(void *ctx)
 	bskiplistNode *update[BSKIPLIST_MAXLEVEL], *x;
 	long rand = random();
 
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_CLEAN_INDEX, 0, 0, (uintptr_t)wals_bdev);
+
 	// clean the index
 	for (i = 0; i < 3; i++) {
         rand <<= 4;
@@ -1581,6 +1615,8 @@ wals_bdev_cleaner(void *ctx)
 
 	total = bslfnFree(wals_bdev->bslfn, 10);
 
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_CLEAN_INDEX, 0, 0, (uintptr_t)wals_bdev, total);
+
 	if (total) {
 		return SPDK_POLLER_BUSY;
 	}
@@ -1603,34 +1639,176 @@ SPDK_TRACE_REGISTER_FN(wals_trace, "wals", TRACE_GROUP_WALS)
 {
 	struct spdk_trace_tpoint_opts opts[] = {
 		{
-			"WALS_BSTAT_CREATE_START", TRACE_WALS_BSTAT_CREATE_START,
-			OWNER_WALS, OBJECT_WALS_IO, 1,
-			{}
-		},
-		{
-			"WALS_BSTAT_CREATE_END", TRACE_WALS_BSTAT_CREATE_END,
+			"WALS_S_SUB_IO", TRACE_WALS_S_SUB_IO,
 			OWNER_WALS, OBJECT_WALS_IO, 0,
 			{}
 		},
 		{
-			"WALS_BSL_INSERT_START", TRACE_WALS_BSL_INSERT_START,
-			OWNER_WALS, OBJECT_WALS_IO, 1,
-			{}
-		},
-		{
-			"WALS_BSL_INSERT_END", TRACE_WALS_BSL_INSERT_END,
+			"WALS_F_SUB_IO", TRACE_WALS_F_SUB_IO,
 			OWNER_WALS, OBJECT_WALS_IO, 0,
 			{}
 		},
 		{
-			"WALS_BSL_RAND_START", TRACE_WALS_BSL_RAND_START,
-			OWNER_WALS, OBJECT_WALS_IO, 1,
+			"WALS_S_COMP_IO", TRACE_WALS_S_COMP_IO,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{
+				{ "success", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "deferred", SPDK_TRACE_ARG_TYPE_INT, 8 },
+			}
+		},
+		{
+			"WALS_F_COMP_IO", TRACE_WALS_F_COMP_IO,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{
+				{ "success", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "deferred", SPDK_TRACE_ARG_TYPE_INT, 8 },
+			}
+		},
+		{
+			"WALS_S_SUB_W", TRACE_WALS_S_SUB_W,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
 			{}
 		},
 		{
-			"WALS_BSL_RAND_END", TRACE_WALS_BSL_RAND_END,
+			"WALS_F_SUB_W", TRACE_WALS_F_SUB_W,
 			OWNER_WALS, OBJECT_WALS_IO, 0,
 			{}
+		},
+		{
+			"WALS_S_SUB_W_I", TRACE_WALS_S_SUB_W_I,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_F_SUB_W_I", TRACE_WALS_F_SUB_W_I,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_S_SUB_W_T", TRACE_WALS_S_SUB_W_T,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{
+				{ "target", SPDK_TRACE_ARG_TYPE_INT, 8 },
+			}
+		},
+		{
+			"WALS_F_SUB_W_T", TRACE_WALS_F_SUB_W_T,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{
+				{ "target", SPDK_TRACE_ARG_TYPE_INT, 8 },
+			}
+		},
+		{
+			"WALS_S_COMP_W_T", TRACE_WALS_S_COMP_W_T,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_F_COMP_W_T", TRACE_WALS_F_COMP_W_T,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_S_COMP_W_Q", TRACE_WALS_S_COMP_W_Q,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_F_COMP_W_Q", TRACE_WALS_F_COMP_W_Q,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_S_COMP_W_A", TRACE_WALS_S_COMP_W_A,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_F_COMP_W_A", TRACE_WALS_F_COMP_W_A,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_S_COMP_W_F", TRACE_WALS_S_COMP_W_F,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_F_COMP_W_F", TRACE_WALS_F_COMP_W_F,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_S_COMP_W_WM", TRACE_WALS_S_COMP_W_WM,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_F_COMP_W_WM", TRACE_WALS_F_COMP_W_WM,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_S_SUB_R", TRACE_WALS_S_SUB_R,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_F_SUB_R", TRACE_WALS_F_SUB_R,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_S_SUB_R_T", TRACE_WALS_S_SUB_R_T,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_F_SUB_R_T", TRACE_WALS_F_SUB_R_T,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_S_COMP_R_T", TRACE_WALS_S_COMP_R_T,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_F_COMP_R_T", TRACE_WALS_F_COMP_R_T,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_S_COMP_R_A", TRACE_WALS_S_COMP_R_A,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_F_COMP_R_A", TRACE_WALS_F_COMP_R_A,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{}
+		},
+		{
+			"WALS_S_INSERT_INDEX", TRACE_WALS_S_INSERT_INDEX,
+			OWNER_WALS, OBJECT_WALS_BDEV, 1,
+			{}
+		},
+		{
+			"WALS_F_INSERT_INDEX", TRACE_WALS_F_INSERT_INDEX,
+			OWNER_WALS, OBJECT_WALS_BDEV, 0,
+			{}
+		},
+		{
+			"WALS_S_CLEAN_INDEX", TRACE_WALS_S_CLEAN_INDEX,
+			OWNER_WALS, OBJECT_WALS_BDEV, 1,
+			{}
+		},
+		{
+			"WALS_F_CLEAN_INDEX", TRACE_WALS_F_CLEAN_INDEX,
+			OWNER_WALS, OBJECT_WALS_BDEV, 0,
+			{
+				{ "cleaned", SPDK_TRACE_ARG_TYPE_INT, 8 },
+			}
 		},
 	};
 
