@@ -165,7 +165,7 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 			wals_bdev->read_thread = wals_bdev->write_thread;
 		}
 	}
-	if (lcore == wals_bdev->read_lcore && wals_bdev->read_thread == NULL) {
+	if (lcore == wals_bdev->read_lcore && (wals_bdev->read_thread == NULL || wals_bdev->read_thread == wals_bdev->write_thread)) {
 		SPDK_NOTICELOG("register read pollers\n");
 		// TODO: call module to register read pollers
 
