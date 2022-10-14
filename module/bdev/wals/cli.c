@@ -16,6 +16,8 @@
 // need another async API to tell parent bdev about the 
 // block size; hard-code now.
 #define LOG_BLOCKCNT 131072
+// Should not exceed log_blockcnt
+#define PENDING_IO_MAX_CNT 131072
 
 enum rdma_cli_status {
     RDMA_CLI_UNINITIALIZED,
@@ -34,6 +36,17 @@ enum nvmf_cli_status {
     NVMF_CLI_ERROR,
 };
 
+struct pending_io_context {
+    struct wals_bdev_io* io;
+    uint64_t ticks;
+};
+
+struct pending_io_queue {
+    int head;
+    int tail;
+    struct pending_io_context pending_ios[PENDING_IO_MAX_CNT];
+};
+
 struct rdma_cli_connection {
     int id;
     struct rdma_event_channel* channel;
@@ -44,6 +57,10 @@ struct rdma_cli_connection {
     struct ibv_mr* mr_handshake;
     struct addrinfo* server_addr;
     struct ibv_wc wc_buf[WC_BATCH_SIZE];
+    struct pending_io_queue pending_read_io_queue;
+    struct pending_io_queue pending_write_io_queue;
+    struct pending_io_queue pending_nvmf_read_io_queue;
+
     enum rdma_cli_status status;
     uint64_t reject_cnt;
     TAILQ_HEAD(, wals_cli_slice) slices;
@@ -71,6 +88,8 @@ struct rdma_handshake g_rdma_handshakes[NUM_TARGETS + 1];
 
 struct spdk_poller* g_rdma_connection_poller;
 struct spdk_poller* g_nvmf_connection_poller;
+struct spdk_poller* g_rdma_cq_poller;
+struct spdk_poller* g_nvmf_cq_poller;
 
 struct wals_cli_slice {
     struct wals_bdev* wals_bdev;
@@ -85,6 +104,8 @@ struct wals_cli_slice {
 
 static int rdma_cli_connection_poller(void* ctx);
 static int nvmf_cli_connection_poller(void* ctx);
+static int rdma_cq_poller(void* ctx);
+static int nvmf_cq_poller(void* ctx);
 
 static bool
 nvmf_cli_probe_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
@@ -224,6 +245,11 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                     g_rdma_connection_poller = SPDK_POLLER_REGISTER(rdma_cli_connection_poller, wals_bdev, 5 * 1000);
                 }
 
+                // NOTE: may need different pollers for each qp in the future
+                if (g_rdma_cq_poller == NULL) {
+                    g_rdma_cq_poller = SPDK_POLLER_REGISTER(rdma_cq_poller, wals_bdev, 0);
+                }
+
                 break;
             }
         }
@@ -287,8 +313,11 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                 if (g_nvmf_connection_poller == NULL) {
                     g_nvmf_connection_poller = SPDK_POLLER_REGISTER(nvmf_cli_connection_poller, wals_bdev, 5 * 1000);
                 }
-                break;
 
+                if (g_nvmf_cq_poller == NULL) {
+                    g_nvmf_cq_poller = SPDK_POLLER_REGISTER(nvmf_cq_poller, wals_bdev, 0);
+                }
+                break;
             }
         }
     }
@@ -326,13 +355,15 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
 {
     // BUG: the reconnection poller must be in the same thread as the IO thread, 
     // otherwise it may secretly try to reconnect and free the RDMA resources, causing 
-    // segfault. It is not solvable without a lock.
+    // segfault.
+    // Workaround: make free RDMA resources async; do reconnection and switch it in async
     int rc;
     struct wals_cli_slice* slice = target->private_info;
     if (slice->rdma_conn->status != RDMA_CLI_CONNECTED) {
         if (wals_io->metadata->seq <= 10) {
             // HACK: the bdev sends some unimportant IOs after the initialization,
             // but the RDMA handshake may be pending.
+            SPDK_NOTICELOG("Completing IO without actually sending it\n");
             wals_target_read_complete(wals_io, true);
         }
         else {
@@ -351,7 +382,7 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     wr.opcode = IBV_WR_RDMA_READ;
     wr.num_sge = 1;
     wr.sg_list = &sge;
-    wr.wr.rdma.remote_addr = g_rdma_handshakes[slice->rdma_conn->id].base_addr + offset * slice->wals_bdev->buffer_blocklen;
+    wr.wr.rdma.remote_addr = (uint64_t)g_rdma_handshakes[slice->rdma_conn->id].base_addr + offset * slice->wals_bdev->buffer_blocklen;
     wr.wr.rdma.rkey = g_rdma_handshakes[slice->rdma_conn->id].rkey;
 
     sge.addr = (uint64_t)data;
@@ -365,26 +396,74 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
             sge.length);
         wals_target_read_complete(wals_io, false);
     }
-    else {
-        wals_target_read_complete(wals_io, true);
-    }
 
     return 0;
+}
+
+static void cli_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
+	struct wals_bdev_io *io = ref;
+	if (spdk_nvme_cpl_is_success(cpl)) {
+		// SPDK_NOTICELOG("read successful\n");
+        wals_target_read_complete(io, true);
+	}
+	else {
+		// TODO: if the read failed?
+		SPDK_ERRLOG("nvmf client failed to read from remote SSD\n");
+        wals_target_read_complete(io, false);
+	}
 }
 
 static int
 cli_submit_core_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
     // TODO
-    wals_target_read_complete(wals_io, true);
+    int rc;
+    struct wals_cli_slice* slice = target->private_info;
+    uint64_t multiplier = slice->wals_bdev->bdev.blocklen / spdk_nvme_ns_get_sector_size(slice->nvmf_conn->ns);
+
+    rc = spdk_nvme_ns_cmd_read(slice->nvmf_conn->ns,
+        slice->nvmf_conn->qp,
+        data,
+        slice->nvmf_block_offset + offset * multiplier,
+        cnt * multiplier,
+        cli_read_done,
+        wals_io,
+        0);
+
     return 0;
 }
 
 static int
 cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
-    // TODO
-    wals_target_write_complete(wals_io, true);
+    int rc;
+    struct wals_cli_slice* slice = target->private_info;
+
+	struct ibv_send_wr wr, *bad_wr = NULL;
+	struct ibv_sge sge;
+	memset(&wr, 0, sizeof(wr));
+	wr.wr_id = (uint64_t)wals_io;
+	wr.next = NULL;
+	// TODO: inline?
+	wr.send_flags = IBV_SEND_SIGNALED;
+	wr.opcode = IBV_WR_RDMA_WRITE;
+	wr.num_sge = 1;
+	wr.sg_list = &sge;
+	wr.wr.rdma.remote_addr = (uint64_t)g_rdma_handshakes[slice->rdma_conn->id].base_addr + offset * wals_io->wals_bdev->buffer_blocklen;
+	wr.wr.rdma.rkey = g_rdma_handshakes[slice->rdma_conn->id].rkey;
+
+	sge.addr = (uint64_t)data;
+	sge.length = cnt * slice->wals_bdev->buffer_blocklen;
+	sge.lkey = slice->rdma_conn->mr_write->lkey;
+
+	rc = ibv_post_send(slice->rdma_conn->cm_id->qp, &wr, &bad_wr);
+	if (rc != 0) {
+		SPDK_ERRLOG("RDMA write failed with errno = %d\n", rc);
+		SPDK_NOTICELOG("Local: %p %d; Remote: %p %d; Len = %d\n",
+			(void*)sge.addr, sge.lkey, (void*)wr.wr.rdma.remote_addr, wr.wr.rdma.rkey,
+			sge.length);
+		wals_target_write_complete(wals_io, false);
+	}
     return 0;
 }
 
@@ -862,11 +941,46 @@ rdma_cli_connection_poller(void* ctx) {
 
 static int
 rdma_cq_poller(void* ctx) {
+    for (int i = 0; i < NUM_TARGETS; i++) {
+        if (g_rdma_cli_conns[i].status == RDMA_CLI_CONNECTED) {
+            int cnt = ibv_poll_cq(g_rdma_cli_conns[i].cq, WC_BATCH_SIZE, &g_rdma_cli_conns[i].wc_buf[0]);
+            if (cnt < 0) {
+				// TODO: what to do when poll cq fails?
+				SPDK_ERRLOG("ibv_poll_cq failed\n");
+            }
+            else {
+                for (int j = 0; j < cnt; j++) {
+                    bool success = true;
+					struct wals_bdev_io* io = (struct wals_bdev_io*)g_rdma_cli_conns[i].wc_buf[j].wr_id;
+					if (g_rdma_cli_conns[i].wc_buf[j].status != IBV_WC_SUCCESS) {
+						SPDK_ERRLOG("IO %p RDMA op %d failed with status %d\n",
+							io,
+							g_rdma_cli_conns[i].wc_buf[j].opcode,
+							g_rdma_cli_conns[i].wc_buf[j].status);
+                        
+                        success = false;
+					}
+
+                    if (g_rdma_cli_conns[i].wc_buf[j].opcode == IBV_WC_RDMA_READ) {
+                        wals_target_read_complete(io, success);
+                    }
+                    else {
+                        wals_target_write_complete(io, success);
+                    }
+                }
+            }
+        }
+    }
     return SPDK_POLLER_IDLE;
 }
 
 static int
 nvmf_cq_poller(void* ctx) {
+    for (int i = 0; i < NUM_TARGETS; i++) {
+        if (g_nvmf_cli_conns[i].status == NVMF_CLI_INITIALIZED) {
+            spdk_nvme_qpair_process_completions(g_nvmf_cli_conns[i].qp, 0);
+        }
+    }
     return SPDK_POLLER_IDLE;
 }
 
