@@ -1812,7 +1812,8 @@ SPDK_TRACE_REGISTER_FN(wals_trace, "wals", TRACE_GROUP_WALS)
 		},
 	};
 
-	spdk_trace_register_owner(OWNER_WALS, 'b');
-	spdk_trace_register_object(OBJECT_WALS_IO, 'i');
+	spdk_trace_register_owner(OWNER_WALS, 'w');
+	spdk_trace_register_object(OBJECT_WALS_IO, 'w');
+	spdk_trace_register_object(OBJECT_WALS_BDEV, 'w');
 	spdk_trace_register_description_ext(opts, SPDK_COUNTOF(opts));
 }
