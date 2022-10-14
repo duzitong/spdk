@@ -46,6 +46,7 @@
 #include "spdk/trace.h"
 #include "spdk_internal/trace_defs.h"
 #include "../wal/bsl.h"
+#include "dma_heap.h"
 
 #define METADATA_VERSION		10086	// XD
 #define METADATA_BLOCKS			1
@@ -55,14 +56,54 @@
 
 #define OWNER_WALS				0x9
 #define OBJECT_WALS_IO			0x9
+#define OBJECT_WALS_BDEV		0xA
 #define TRACE_GROUP_WALS		0xE
 
-#define TRACE_WALS_BSTAT_CREATE_START	SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x10)
-#define TRACE_WALS_BSTAT_CREATE_END		SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x11)
-#define TRACE_WALS_BSL_INSERT_START		SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x12)
-#define TRACE_WALS_BSL_INSERT_END		SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x13)
-#define TRACE_WALS_BSL_RAND_START		SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x14)
-#define TRACE_WALS_BSL_RAND_END			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x15)
+/*
+ * _S: start
+ * _F: finish
+ * _SUB: submit
+ * _COMP: complete
+ * _W: write
+ * _R: read
+ */
+
+#define TRACE_WALS_S_SUB_IO				SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x00)
+#define TRACE_WALS_F_SUB_IO				SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x01)
+#define TRACE_WALS_S_COMP_IO			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x02)
+#define TRACE_WALS_F_COMP_IO			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x03)
+
+#define TRACE_WALS_S_SUB_W				SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x10)
+#define TRACE_WALS_F_SUB_W				SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x11)
+#define TRACE_WALS_S_SUB_W_I			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x12) 	// internal
+#define TRACE_WALS_F_SUB_W_I			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x13)
+#define TRACE_WALS_S_SUB_W_T			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x14)	// target
+#define TRACE_WALS_F_SUB_W_T			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x15)
+#define TRACE_WALS_S_COMP_W_T			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x16)
+#define TRACE_WALS_F_COMP_W_T			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x17)
+#define TRACE_WALS_S_COMP_W_Q			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x18) 	// quorum
+#define TRACE_WALS_F_COMP_W_Q			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x19)
+#define TRACE_WALS_S_COMP_W_A			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x1A)	// all
+#define TRACE_WALS_F_COMP_W_A			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x1B)
+#define TRACE_WALS_S_COMP_W_F			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x1C)	// failed
+#define TRACE_WALS_F_COMP_W_F			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x1D)
+#define TRACE_WALS_S_COMP_W_WM			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x1E)	// wait msg
+#define TRACE_WALS_F_COMP_W_WM			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x1F)
+
+#define TRACE_WALS_S_SUB_R				SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x20)
+#define TRACE_WALS_F_SUB_R				SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x21)
+#define TRACE_WALS_S_SUB_R_T			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x22)	// target
+#define TRACE_WALS_F_SUB_R_T			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x23)
+#define TRACE_WALS_S_COMP_R_T			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x24)
+#define TRACE_WALS_F_COMP_R_T			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x25)
+#define TRACE_WALS_S_COMP_R_A			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x26)	// all
+#define TRACE_WALS_F_COMP_R_A			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x27)
+
+#define TRACE_WALS_S_INSERT_INDEX		SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x30)	// insert index
+#define TRACE_WALS_F_INSERT_INDEX		SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x31)
+#define TRACE_WALS_S_CLEAN_INDEX		SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x32)	// clean index
+#define TRACE_WALS_F_CLEAN_INDEX		SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x33)
+
 
 /*
  * WALS state describes the state of the wals bdev. This wals bdev can be either in
@@ -147,9 +188,6 @@ struct wals_slice {
 
 	struct wals_target			*targets[NUM_TARGETS];
 
-	/* pending writes due to no enough space on log device or buffer */
-	TAILQ_HEAD(, wals_bdev_io)	pending_writes;
-
 	/* list of outstanding read_afters */
 	LIST_HEAD(, wals_read_after) outstanding_read_afters;
 
@@ -207,16 +245,13 @@ struct wals_bdev_io {
 
 	struct wals_read_after	*read_after;
 
-	struct wals_io_read_buffer	*read_buf;
+	struct dma_page	*dma_page;
 
 	uint64_t	slice_index;
 
 	int		targets_failed;
 
 	int		targets_completed;
-
-	/* link next for pending writes */
-	TAILQ_ENTRY(wals_bdev_io)	tailq;
 };
 
 /*
@@ -286,17 +321,18 @@ struct wals_bdev {
 	/* count of open channels */
 	uint32_t			ch_count;
 
+	uint32_t				write_lcore;
+
 	/* write thread */
 	struct spdk_thread		*write_thread;
+
+	uint32_t				read_lcore;
 
 	/* read thread */
 	struct spdk_thread		*read_thread;
 
 	/* mutex to set thread and pollers */
 	pthread_mutex_t			mutex;
-
-	/* poller to complete pending writes */
-	struct spdk_poller		*pending_writes_poller;
 
 	/* poller to update log head */
 	struct spdk_poller		*log_head_update_poller;
@@ -323,12 +359,10 @@ struct wals_bdev {
 	/* number of blocks of the buffer */
 	uint64_t			buffer_blockcnt;
 
-	wals_log_position	buffer_tail;
-
-	wals_log_position	buffer_head;
+	struct dma_heap		*write_heap;
 
 	/* buffer for reads, with size of write buffer for now */
-	struct wals_bdev_read_buffer	read_buffer;
+	struct dma_heap		*read_heap;
 
 	/* bsl node mempool */
 	struct spdk_mempool		*bsl_node_pool;
@@ -347,9 +381,7 @@ struct wals_bdev {
 
 	struct wals_target_module	*module;
 
-	volatile bool				write_thread_set;
-
-	volatile bool				read_thread_set;
+	uint64_t		ch_create_tsc;
 };
 
 struct wals_slice_config {
@@ -372,6 +404,10 @@ struct wals_bdev_config {
 	uint64_t					slice_blockcnt;
 
 	uint64_t					buffer_blockcnt;
+
+	uint32_t					write_lcore;
+
+	uint32_t					read_lcore;
 
 	char						*module_name;
 
@@ -452,6 +488,7 @@ typedef void (*wals_bdev_destruct_cb)(void *cb_ctx, int rc);
 int wals_bdev_config_add(const char *wals_name, const char *module_name,
 			struct rpc_bdev_wals_slice *slices, uint64_t slicecnt,
 			uint64_t blocklen, uint64_t blockcnt, uint64_t buffer_blockcnt,
+			uint32_t write_lcore, uint32_t read_lcore,
 			struct wals_bdev_config **_wals_cfg);
 int wals_bdev_create(struct wals_bdev_config *wals_cfg);
 int wals_bdev_start_all(struct wals_bdev_config *wal_cfg);

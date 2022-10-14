@@ -1949,6 +1949,10 @@ _spdk_bdev_free_io(struct spdk_bdev_io *bdev_io)
 
 	ch = bdev_io->internal.ch->shared_resource->mgmt_ch;
 
+	if (!ch) {
+		return;
+	}
+
 	if (bdev_io->internal.buf != NULL) {
 		bdev_io_put_buf(bdev_io);
 	}

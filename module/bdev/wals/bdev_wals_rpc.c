@@ -208,6 +208,10 @@ struct rpc_bdev_wals_create {
 	uint64_t		slice_blockcnt;
 
 	uint64_t		buffer_blockcnt;
+
+	uint32_t		write_lcore;
+
+	uint32_t		read_lcore;
 };
 
 static const struct spdk_json_object_decoder rpc_bdev_wals_create_decoders[] = {
@@ -217,6 +221,8 @@ static const struct spdk_json_object_decoder rpc_bdev_wals_create_decoders[] = {
 	{"blocklen", offsetof(struct rpc_bdev_wals_create, blocklen), spdk_json_decode_uint64},
 	{"slice_blockcnt", offsetof(struct rpc_bdev_wals_create, slice_blockcnt), spdk_json_decode_uint64},
 	{"buffer_blockcnt", offsetof(struct rpc_bdev_wals_create, buffer_blockcnt), spdk_json_decode_uint64},
+	{"write_lcore", offsetof(struct rpc_bdev_wals_create, write_lcore), spdk_json_decode_uint32},
+	{"read_lcore", offsetof(struct rpc_bdev_wals_create, read_lcore), spdk_json_decode_uint32},
 };
 
 /*
@@ -273,10 +279,18 @@ rpc_bdev_wals_create(struct spdk_jsonrpc_request *request,
 		goto cleanup;
 	}
 
+	if (req.write_lcore == req.read_lcore) {
+		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
+						 "write lcore and read lcore must be different");
+		goto cleanup;
+	}
+
 	SPDK_ENV_FOREACH_CORE(i) {
-		if (i % 2 == 0) {
+		if (i == req.write_lcore) {
 			write_available = true;
-		} else {
+		}
+		
+		if (i == req.read_lcore) {
 			read_available = true;
 		}
 	}
@@ -287,7 +301,11 @@ rpc_bdev_wals_create(struct spdk_jsonrpc_request *request,
 		goto cleanup;
 	}
 
-	rc = wals_bdev_config_add(req.name, req.module, req.slices.slices, req.slices.num_slices, req.blocklen, req.slice_blockcnt, req.buffer_blockcnt, &wals_cfg);
+	rc = wals_bdev_config_add(req.name, req.module, 
+							req.slices.slices, req.slices.num_slices,
+							req.blocklen, req.slice_blockcnt, req.buffer_blockcnt,
+							req.write_lcore, req.read_lcore,
+							&wals_cfg);
 	if (rc != 0) {
 		spdk_jsonrpc_send_error_response_fmt(request, rc,
 						     "Failed to add wals bdev config %s: %s",

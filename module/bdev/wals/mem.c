@@ -47,7 +47,7 @@ mem_stop(struct wals_target *target, struct wals_bdev *wals_bdev)
 static int
 mem_submit_log_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
-    SPDK_NOTICELOG("log read: %ld+%ld\n", offset, cnt);
+    SPDK_DEBUGLOG(bdev_wals_mem, "log read: %ld+%ld\n", offset, cnt);
     struct wals_mem_target *mem_target = target->private_info;
     memcpy(data, mem_target->log_buf + offset * mem_target->blocklen, cnt * mem_target->blocklen);
 
@@ -58,7 +58,7 @@ mem_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
 static int
 mem_submit_core_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
-    SPDK_NOTICELOG("core read: %ld+%ld\n", offset, cnt);
+    SPDK_DEBUGLOG(bdev_wals_mem, "core read: %ld+%ld\n", offset, cnt);
     struct wals_mem_target *mem_target = target->private_info;
     memcpy(data, mem_target->core_buf + offset * mem_target->blocklen, cnt * mem_target->blocklen);
 
@@ -69,19 +69,19 @@ mem_submit_core_read_request(struct wals_target* target, void *data, uint64_t of
 static int
 mem_submit_log_write_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
-    SPDK_NOTICELOG("log write: %ld+%ld\n", offset, cnt);
+    SPDK_DEBUGLOG(bdev_wals_mem, "log write: %ld+%ld\n", offset, cnt);
     struct wals_mem_target *mem_target = target->private_info;
     memcpy(mem_target->log_buf + offset * mem_target->blocklen, data, cnt * mem_target->blocklen);
 
     struct wals_metadata *metadata = data;
-    SPDK_NOTICELOG("core write: %ld+%ld\n", metadata->core_offset, metadata->length);
+    SPDK_DEBUGLOG(bdev_wals_mem, "core write: %ld+%ld\n", metadata->core_offset, metadata->length);
     memcpy(mem_target->core_buf + metadata->core_offset * mem_target->blocklen, data + METADATA_BLOCKS * mem_target->blocklen, metadata->length * mem_target->blocklen);
 
     if (offset < target->head.offset) {
         target->head.round++;
     }
     target->head.offset = offset+cnt;
-    SPDK_NOTICELOG("target head updated: %ld(%ld)\n", target->head.offset, target->head.round);
+    SPDK_DEBUGLOG(bdev_wals_mem, "target head updated: %ld(%ld)\n", target->head.offset, target->head.round);
     wals_target_write_complete(wals_io, true);
     return 0;
 }
