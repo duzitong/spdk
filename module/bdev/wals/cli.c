@@ -617,8 +617,8 @@ rdma_cli_connection_poller(void* ctx) {
                     }
 
                     struct ibv_mr* mr_read = ibv_reg_mr(g_rdma_cli_conns[i].cm_id->qp->pd,
-                        wals_bdev->read_buffer.buf,
-                        wals_bdev->buffer_blockcnt * wals_bdev->buffer_blocklen,
+                        wals_bdev->read_heap->buf,
+                        wals_bdev->read_heap->buf_size,
                         IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
 
                     if (mr_read == NULL) {
@@ -629,8 +629,8 @@ rdma_cli_connection_poller(void* ctx) {
                     g_rdma_cli_conns[i].mr_read = mr_read;
 
                     struct ibv_mr* mr_write = ibv_reg_mr(g_rdma_cli_conns[i].cm_id->qp->pd,
-                        wals_bdev->buffer,
-                        wals_bdev->buffer_blockcnt * wals_bdev->buffer_blocklen,
+                        wals_bdev->write_heap->buf,
+                        wals_bdev->write_heap->buf_size,
                         IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
 
                     if (mr_write == NULL) {
