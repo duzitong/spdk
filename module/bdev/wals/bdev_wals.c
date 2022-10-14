@@ -1640,7 +1640,7 @@ SPDK_TRACE_REGISTER_FN(wals_trace, "wals", TRACE_GROUP_WALS)
 	struct spdk_trace_tpoint_opts opts[] = {
 		{
 			"WALS_S_SUB_IO", TRACE_WALS_S_SUB_IO,
-			OWNER_WALS, OBJECT_WALS_IO, 0,
+			OWNER_WALS, OBJECT_WALS_IO, 1,
 			{}
 		},
 		{
@@ -1813,7 +1813,7 @@ SPDK_TRACE_REGISTER_FN(wals_trace, "wals", TRACE_GROUP_WALS)
 	};
 
 	spdk_trace_register_owner(OWNER_WALS, 'w');
-	spdk_trace_register_object(OBJECT_WALS_IO, 'w');
-	spdk_trace_register_object(OBJECT_WALS_BDEV, 'w');
+	spdk_trace_register_object(OBJECT_WALS_IO, 'i');
+	spdk_trace_register_object(OBJECT_WALS_BDEV, 'b');
 	spdk_trace_register_description_ext(opts, SPDK_COUNTOF(opts));
 }
