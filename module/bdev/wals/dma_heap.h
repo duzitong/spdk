@@ -3,7 +3,7 @@
  * It's required to alloc different dma heap on different cores.
  * 
  * Memory is seperated into several buffer regions.
- * | buf_512 | buf_4k | buf_8k | buf_64k |
+ * | page_512 | page_4k | page_8k | page_32k | page_64k | page_128k | page_512k | page_1024k |
  * 
  * Queues are used for each region to record the remaining buffers.
  */
@@ -40,14 +40,14 @@ struct dma_heap {
     size_t data_size;
     size_t md_size;
 
-    TAILQ_HEAD(, dma_page) buf_512;
-    TAILQ_HEAD(, dma_page) buf_4k;
-    TAILQ_HEAD(, dma_page) buf_8k;
-    TAILQ_HEAD(, dma_page) buf_32k;
-    TAILQ_HEAD(, dma_page) buf_64k;
-    TAILQ_HEAD(, dma_page) buf_128k;
-    TAILQ_HEAD(, dma_page) buf_512k;
-    TAILQ_HEAD(, dma_page) buf_1024k;
+    TAILQ_HEAD(, dma_page) page_512;
+    TAILQ_HEAD(, dma_page) page_4k;
+    TAILQ_HEAD(, dma_page) page_8k;
+    TAILQ_HEAD(, dma_page) page_32k;
+    TAILQ_HEAD(, dma_page) page_64k;
+    TAILQ_HEAD(, dma_page) page_128k;
+    TAILQ_HEAD(, dma_page) page_512k;
+    TAILQ_HEAD(, dma_page) page_1024k;
 };
 
 struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, size_t align);
