@@ -252,6 +252,8 @@ struct wals_bdev_io {
 	int		targets_failed;
 
 	int		targets_completed;
+
+	bool	io_completed;
 };
 
 /*
@@ -351,8 +353,6 @@ struct wals_bdev {
 
 	struct wals_slice	*slices;
 
-	void				*buffer;
-
 	/* buffer block length */
 	uint64_t			buffer_blocklen;
 
@@ -446,6 +446,8 @@ struct wals_index_msg {
 	uint64_t			round;
 
 	uint64_t			offset;
+
+	bool				failed;
 
 	struct wals_bdev	*wals_bdev;
 };
