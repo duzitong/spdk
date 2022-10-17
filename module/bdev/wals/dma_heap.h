@@ -21,8 +21,8 @@
 #define SIZE_32K            32768
 #define SIZE_64K            65536
 #define SIZE_128K           131072
-#define SIZE_512K           524288
-#define SIZE_1024K          1048576
+#define SIZE_1M             1048576
+#define SIZE_4M             4194304
 
 struct dma_page {
     void *buf;
@@ -46,8 +46,8 @@ struct dma_heap {
     TAILQ_HEAD(, dma_page) page_32k;
     TAILQ_HEAD(, dma_page) page_64k;
     TAILQ_HEAD(, dma_page) page_128k;
-    TAILQ_HEAD(, dma_page) page_512k;
-    TAILQ_HEAD(, dma_page) page_1024k;
+    TAILQ_HEAD(, dma_page) page_1m;
+    TAILQ_HEAD(, dma_page) page_4m;
 };
 
 struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, size_t align);
