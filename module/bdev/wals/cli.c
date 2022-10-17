@@ -250,6 +250,10 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                     g_rdma_cq_poller = SPDK_POLLER_REGISTER(rdma_cq_poller, wals_bdev, 0);
                 }
 
+                while (g_rdma_cli_conns[i].status != RDMA_CLI_CONNECTED) {
+                    rdma_cli_connection_poller(wals_bdev);
+                }
+
                 break;
             }
         }
@@ -482,13 +486,13 @@ nvmf_cli_connection_poller(void* ctx) {
         if (rc == -ENXIO) {
             // nvmf already has poller to reset the ctrlr.
             // assume that the transport id doesn't change
-            // rc = spdk_nvme_ctrlr_reset(g_nvmf_cli_conns[i].ctrlr);
-            // if (rc != 0) {
-            //     SPDK_WARNLOG("Cannot reset nvmf ctrlr %d: %d\n", i, rc);
-            // }
-            // else {
-            //     SPDK_NOTICELOG("Nvmf ctrlr %d reset successfully\n", i);
-            // }
+            rc = spdk_nvme_ctrlr_reset(g_nvmf_cli_conns[i].ctrlr);
+            if (rc != 0) {
+                SPDK_WARNLOG("Cannot reset nvmf ctrlr %d: %d\n", i, rc);
+            }
+            else {
+                SPDK_NOTICELOG("Nvmf ctrlr %d reset successfully\n", i);
+            }
         }
     }
     return SPDK_POLLER_BUSY;

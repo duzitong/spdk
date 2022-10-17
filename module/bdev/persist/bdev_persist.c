@@ -98,7 +98,23 @@ struct persist_disk {
 	TAILQ_ENTRY(persist_disk)	link;
 };
 
-struct wal_metadata {
+// struct wal_metadata {
+// 	uint64_t	version;
+	
+// 	uint64_t	seq;
+
+// 	uint64_t	next_offset;
+
+// 	uint64_t	length;
+
+// 	uint64_t	core_offset;
+
+// 	uint64_t	core_length;
+
+// 	uint64_t	round;
+// };
+
+struct wals_metadata {
 	uint64_t	version;
 	
 	uint64_t	seq;
@@ -108,8 +124,6 @@ struct wal_metadata {
 	uint64_t	length;
 
 	uint64_t	core_offset;
-
-	uint64_t	core_length;
 
 	uint64_t	round;
 };
@@ -523,12 +537,12 @@ persist_destage_poller(void *ctx)
 	pdisk->destage_context.remaining = 0;
 
 	while (true) {
-		struct wal_metadata* metadata = pdisk->malloc_buf + pdisk->destage_info->destage_head * pdisk->disk.blocklen;
+		struct wals_metadata* metadata = pdisk->malloc_buf + pdisk->destage_info->destage_head * pdisk->disk.blocklen;
 		// if we get unlucky (lucky?), then the next block may be the one for the last
 		// round.
 		if (metadata->version != PERSIST_METADATA_VERSION
 			|| metadata->seq < pdisk->prev_seq) {
-			struct wal_metadata* next_round_metadata = pdisk->malloc_buf;
+			struct wals_metadata* next_round_metadata = pdisk->malloc_buf;
 			if (next_round_metadata->round == pdisk->destage_info->destage_round) {
 				// head not in next round yet
 				// it means that no IOs have arrived
@@ -582,7 +596,7 @@ persist_destage_poller(void *ctx)
 			pdisk->qpair,
 			payload,
 			metadata->core_offset,
-			metadata->core_length,
+			metadata->length,
 			bdev_persist_destage_done,
 			pdisk,
 			0);

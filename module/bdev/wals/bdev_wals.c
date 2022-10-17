@@ -1467,6 +1467,12 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 	wals_bdev->buffer_blocklen = wals_cfg->blocklen;
 	wals_bdev->buffer_blockcnt = wals_cfg->buffer_blockcnt;
 
+	rc = wals_bdev_start(wals_bdev);
+	if (rc) {
+		SPDK_ERRLOG("Failed to start WALS bdev '%s'.\n", wals_cfg->name);
+		return rc;
+	}
+
 	// TODO: log_blockcnt into a write poller
 	for (i = 0; i < wals_cfg->slicecnt; i++) {
 		wals_bdev->slices[i].log_blockcnt = UINT64_MAX;
@@ -1480,12 +1486,6 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 				wals_bdev->slices[i].log_blockcnt = wals_bdev->slices[i].targets[j]->log_blockcnt;
 			}
 		}
-	}
-
-	rc = wals_bdev_start(wals_bdev);
-	if (rc) {
-		SPDK_ERRLOG("Failed to start WALS bdev '%s'.\n", wals_cfg->name);
-		return rc;
 	}
 
 	rc = wals_bdev_configure(wals_bdev);
