@@ -485,7 +485,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	
 	wals_io->dma_page = dma_heap_get_page(wals_bdev->read_heap, bdev_io->u.bdev.num_blocks * wals_bdev->buffer_blocklen);
 	if (!wals_io->dma_page) {
-		SPDK_NOTICELOG("No sufficient read buffer");
+		SPDK_NOTICELOG("No sufficient read buffer, size: %ld", bdev_io->u.bdev.num_blocks * wals_bdev->buffer_blocklen);
 		wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_NOMEM);
 		return;
 	}
