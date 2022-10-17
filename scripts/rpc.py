@@ -2090,7 +2090,9 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                   blocklen=int(args.blocklen),
                                   slice_blockcnt=int(args.slice_blockcnt),
                                   buffer_blockcnt=int(args.buffer_blockcnt),
-                                  slices=json.loads(args.slices)))
+                                  slices=json.loads(args.slices),
+                                  write_lcore=int(args.write_lcore),
+                                  read_lcore=int(args.read_lcore)))
     p = subparsers.add_parser('bdev_wals_create', aliases=['construct_wals_bdev'],
                               help='Create new wals bdev')
     p.add_argument('-n', '--name', help='wals bdev name', required=True)
@@ -2099,6 +2101,8 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     p.add_argument('--slice-blockcnt', help='slice block count', required=True)
     p.add_argument('--buffer-blockcnt', help='buffer block count', required=True)
     p.add_argument('-s', '--slices', help='json string of slices, e.g. [[{"address":"192.168.0.1", "port":4420, "nqn":"1"},{"address":"192.168.0.2", "port":4420, "nqn":"2"},{"address":"192.168.0.3", "port":4420, "nqn":"3"},{"address":"192.168.0.4", "port":4420, "nqn":"4"}]]', required=True)
+    p.add_argument('--write-lcore', help='logic core of the write thread', required=True)
+    p.add_argument('--read-lcore', help='logic core of the read thread', required=True)
     p.set_defaults(func=bdev_wals_create)
 
     def bdev_wals_delete(args):

@@ -354,6 +354,13 @@ cli_stop(struct wals_target *target, struct wals_bdev *wals_bdev)
 
 }
 
+static bool is_io_within_memory_region(void* data, uint64_t cnt, uint64_t blocklen, struct ibv_mr* mr) {
+    return (data >= mr->addr
+        && data < mr->addr + mr->length
+        && data + cnt * blocklen >= mr->addr
+        && data + cnt * blocklen < mr->addr + mr->length);
+}
+
 static int
 cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
@@ -363,18 +370,18 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     // Workaround: make free RDMA resources async; do reconnection and switch it in async
     int rc;
     struct wals_cli_slice* slice = target->private_info;
-    if (slice->rdma_conn->status != RDMA_CLI_CONNECTED) {
-        if (wals_io->metadata->seq <= 10) {
-            // HACK: the bdev sends some unimportant IOs after the initialization,
-            // but the RDMA handshake may be pending.
-            SPDK_NOTICELOG("Completing IO without actually sending it\n");
-            wals_target_read_complete(wals_io, true);
-        }
-        else {
-            wals_target_read_complete(wals_io, false);
-        }
-        return 0;
-    }
+    // if (slice->rdma_conn->status != RDMA_CLI_CONNECTED) {
+    //     if (wals_io->metadata->seq <= 10) {
+    //         // HACK: the bdev sends some unimportant IOs after the initialization,
+    //         // but the RDMA handshake may be pending.
+    //         SPDK_NOTICELOG("Completing IO without actually sending it\n");
+    //         wals_target_read_complete(wals_io, true);
+    //     }
+    //     else {
+    //         wals_target_read_complete(wals_io, false);
+    //     }
+    //     return 0;
+    // }
 
     struct ibv_send_wr wr, *bad_wr = NULL;
     struct ibv_sge sge;
@@ -392,6 +399,8 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     sge.addr = (uint64_t)data;
     sge.length = cnt * slice->wals_bdev->buffer_blocklen;
     sge.lkey = slice->rdma_conn->mr_read->lkey;
+    SPDK_NOTICELOG("READ %p %p %p %p %ld %ld %ld %ld\n", wals_io, data, data + sge.length, wr.wr.rdma.remote_addr,
+        cnt, offset, slice->wals_bdev->buffer_blocklen, sge.lkey);
     rc = ibv_post_send(slice->rdma_conn->cm_id->qp, &wr, &bad_wr);
     if (rc != 0) {
         SPDK_ERRLOG("RDMA read failed with errno = %d\n", rc);
