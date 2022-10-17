@@ -828,13 +828,12 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 
 	ptr = dma_page_get_buf(wals_io->dma_page);
 	metadata = (struct wals_metadata *) ptr;
-	metadata->version = METADATA_VERSION;
+	metadata->version = METADATA_VERSION; // TODO: add CRC
 	metadata->seq = ++slice->seq;
 	metadata->core_offset = bdev_io->u.bdev.offset_blocks;
 	metadata->next_offset = slice_tail.offset;
 	metadata->length = bdev_io->u.bdev.num_blocks;
 	metadata->round = slice->tail.round;
-	// TODO: add metadata CRC
 
 	wals_io->metadata = metadata;
 
@@ -846,8 +845,6 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 		memcpy(data, iovs[i].iov_base, iovs[i].iov_len);
 		data += iovs[i].iov_len;
 	}
-
-	// TODO: add data CRC to metadata
 
 	// call module to submit to all targets
 	wals_io->targets_failed = 0;
@@ -861,7 +858,6 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 
 		if (spdk_unlikely(ret != 0)) {
 			wals_io->targets_failed++;
-			wals_io->targets_completed++;
 			SPDK_ERRLOG("io submit error due to %d for target %d on slice %ld.\n", ret, i, wals_io->slice_index);
 		}
 	}
@@ -1524,6 +1520,12 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 	wals_bdev->buffer_blocklen = wals_cfg->blocklen;
 	wals_bdev->buffer_blockcnt = wals_cfg->buffer_blockcnt;
 
+	rc = wals_bdev_start(wals_bdev);
+	if (rc) {
+		SPDK_ERRLOG("Failed to start WALS bdev '%s'.\n", wals_cfg->name);
+		return rc;
+	}
+
 	// TODO: log_blockcnt into a write poller
 	for (i = 0; i < wals_cfg->slicecnt; i++) {
 		wals_bdev->slices[i].log_blockcnt = UINT64_MAX;
@@ -1537,12 +1539,6 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 				wals_bdev->slices[i].log_blockcnt = wals_bdev->slices[i].targets[j]->log_blockcnt;
 			}
 		}
-	}
-
-	rc = wals_bdev_start(wals_bdev);
-	if (rc) {
-		SPDK_ERRLOG("Failed to start WALS bdev '%s'.\n", wals_cfg->name);
-		return rc;
 	}
 
 	rc = wals_bdev_configure(wals_bdev);
