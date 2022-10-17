@@ -13,10 +13,16 @@
 
 #include "spdk/env.h"
 
+#define SIZE_SHIFT          3
+
 #define SIZE_512            512
 #define SIZE_4K             4096
 #define SIZE_8K             8192
+#define SIZE_32K            32768
 #define SIZE_64K            65536
+#define SIZE_128K           131072
+#define SIZE_512K           524288
+#define SIZE_1024K          1048576
 
 struct dma_page {
     void *buf;
@@ -37,7 +43,11 @@ struct dma_heap {
     TAILQ_HEAD(, dma_page) buf_512;
     TAILQ_HEAD(, dma_page) buf_4k;
     TAILQ_HEAD(, dma_page) buf_8k;
+    TAILQ_HEAD(, dma_page) buf_32k;
     TAILQ_HEAD(, dma_page) buf_64k;
+    TAILQ_HEAD(, dma_page) buf_128k;
+    TAILQ_HEAD(, dma_page) buf_512k;
+    TAILQ_HEAD(, dma_page) buf_1024k;
 };
 
 struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, size_t align);
