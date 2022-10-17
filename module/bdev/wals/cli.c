@@ -383,6 +383,12 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     //     return 0;
     // }
 
+    if (!is_io_within_memory_region(data, cnt, slice->wals_bdev->buffer_blocklen, slice->rdma_conn->mr_read)) {
+        SPDK_ERRLOG("IO out of MR range\n");
+        wals_target_read_complete(wals_io, false);
+        return 0;
+    }
+
     struct ibv_send_wr wr, *bad_wr = NULL;
     struct ibv_sge sge;
     memset(&wr, 0, sizeof(wr));
@@ -399,8 +405,8 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     sge.addr = (uint64_t)data;
     sge.length = cnt * slice->wals_bdev->buffer_blocklen;
     sge.lkey = slice->rdma_conn->mr_read->lkey;
-    SPDK_NOTICELOG("READ %p %p %p %p %ld %ld %ld %ld\n", wals_io, data, data + sge.length, wr.wr.rdma.remote_addr,
-        cnt, offset, slice->wals_bdev->buffer_blocklen, sge.lkey);
+    // SPDK_NOTICELOG("READ %p %p %p %p %ld %ld %ld %ld\n", wals_io, data, data + sge.length, wr.wr.rdma.remote_addr,
+    //     cnt, offset, slice->wals_bdev->buffer_blocklen, sge.lkey);
     rc = ibv_post_send(slice->rdma_conn->cm_id->qp, &wr, &bad_wr);
     if (rc != 0) {
         SPDK_ERRLOG("RDMA read failed with errno = %d\n", rc);
@@ -429,7 +435,6 @@ static void cli_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
 static int
 cli_submit_core_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
-    // TODO
     int rc;
     struct wals_cli_slice* slice = target->private_info;
     uint64_t multiplier = slice->wals_bdev->bdev.blocklen / spdk_nvme_ns_get_sector_size(slice->nvmf_conn->ns);
@@ -452,12 +457,17 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
     int rc;
     struct wals_cli_slice* slice = target->private_info;
 
+    if (!is_io_within_memory_region(data, cnt, slice->wals_bdev->buffer_blocklen, slice->rdma_conn->mr_write)) {
+        SPDK_ERRLOG("IO out of MR range\n");
+        wals_target_read_complete(wals_io, false);
+        return 0;
+    }
+
 	struct ibv_send_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge;
 	memset(&wr, 0, sizeof(wr));
 	wr.wr_id = (uint64_t)wals_io;
 	wr.next = NULL;
-	// TODO: inline?
 	wr.send_flags = IBV_SEND_SIGNALED;
 	wr.opcode = IBV_WR_RDMA_WRITE;
 	wr.num_sge = 1;
@@ -962,7 +972,7 @@ rdma_cq_poller(void* ctx) {
         if (g_rdma_cli_conns[i].status == RDMA_CLI_CONNECTED) {
             int cnt = ibv_poll_cq(g_rdma_cli_conns[i].cq, WC_BATCH_SIZE, &g_rdma_cli_conns[i].wc_buf[0]);
             if (cnt < 0) {
-				// TODO: what to do when poll cq fails?
+                // hopefully the reconnection poller will spot the error and try to reconnect
 				SPDK_ERRLOG("ibv_poll_cq failed\n");
             }
             else {
@@ -970,6 +980,7 @@ rdma_cq_poller(void* ctx) {
                     bool success = true;
 					struct wals_bdev_io* io = (struct wals_bdev_io*)g_rdma_cli_conns[i].wc_buf[j].wr_id;
 					if (g_rdma_cli_conns[i].wc_buf[j].status != IBV_WC_SUCCESS) {
+                        // TODO: should set the qp state to error, or reconnect?
 						SPDK_ERRLOG("IO %p RDMA op %d failed with status %d\n",
 							io,
 							g_rdma_cli_conns[i].wc_buf[j].opcode,

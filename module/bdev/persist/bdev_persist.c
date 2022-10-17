@@ -569,13 +569,13 @@ persist_destage_poller(void *ctx)
 				break;
 			}
 		}
-		SPDK_NOTICELOG("Getting md %ld %ld %ld %ld %ld %ld\n",
-			metadata->version,
-			metadata->seq,
-			metadata->next_offset,
-			metadata->round,
-			metadata->length,
-			metadata->core_offset);
+		// SPDK_NOTICELOG("Getting md %ld %ld %ld %ld %ld %ld\n",
+		// 	metadata->version,
+		// 	metadata->seq,
+		// 	metadata->next_offset,
+		// 	metadata->round,
+		// 	metadata->length,
+		// 	metadata->core_offset);
 
 		// metadata should contain good info from now.
 		// payload is always one block after metadata
