@@ -811,6 +811,9 @@ bdevperf_submit_task(void *arg)
 	}
 
 	job->current_queue_depth++;
+	if (job->current_queue_depth > job->queue_depth) {
+		printf("Error!!!\n");
+	}
 }
 
 static void

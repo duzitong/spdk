@@ -38,7 +38,7 @@ SO_VER := 1
 SO_MINOR := 0
 
 CFLAGS += -I$(SPDK_ROOT_DIR)/lib/bdev/
-C_SRCS = dma_heap.c bdev_wals.c bdev_wals_rpc.c mem.c cli.c
+C_SRCS = dma_heap.c bdev_wals.c bdev_wals_rpc.c mem.c null.c cli.c
 
 LIBNAME = bdev_wals
 

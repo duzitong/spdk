@@ -165,7 +165,7 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 			wals_bdev->read_thread = wals_bdev->write_thread;
 		}
 	}
-	if (lcore == wals_bdev->read_lcore && wals_bdev->read_thread == NULL) {
+	if (lcore == wals_bdev->read_lcore && (wals_bdev->read_thread == NULL || wals_bdev->read_thread == wals_bdev->write_thread)) {
 		SPDK_NOTICELOG("register read pollers\n");
 		// TODO: call module to register read pollers
 
@@ -483,9 +483,9 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
 	slice = &wals_bdev->slices[wals_io->slice_index];
 	
-	wals_io->dma_page = dma_heap_get_page(wals_bdev->read_heap, bdev_io->u.bdev.num_blocks);
+	wals_io->dma_page = dma_heap_get_page(wals_bdev->read_heap, bdev_io->u.bdev.num_blocks * wals_bdev->buffer_blocklen);
 	if (!wals_io->dma_page) {
-		SPDK_NOTICELOG("No sufficient read buffer");
+		SPDK_NOTICELOG("No sufficient read buffer, size: %ld", bdev_io->u.bdev.num_blocks * wals_bdev->buffer_blocklen);
 		wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_NOMEM);
 		return;
 	}
@@ -858,7 +858,7 @@ wals_bdev_submit_write_request(void *arg)
 	}
 
 	// check buffer space
-	wals_io->dma_page = dma_heap_get_page(wals_bdev->write_heap, bdev_io->u.bdev.num_blocks + METADATA_BLOCKS);
+	wals_io->dma_page = dma_heap_get_page(wals_bdev->write_heap, bdev_io->u.bdev.num_blocks * wals_bdev->buffer_blocklen);
 	if (!wals_io->dma_page) {
 		SPDK_DEBUGLOG(bdev_wals, "queue bdev io submit due to no enough space left on buffer.\n");
 		spdk_thread_send_msg(spdk_get_thread(), wals_bdev_submit_write_request, wals_io);
@@ -1636,7 +1636,7 @@ SPDK_TRACE_REGISTER_FN(wals_trace, "wals", TRACE_GROUP_WALS)
 	struct spdk_trace_tpoint_opts opts[] = {
 		{
 			"WALS_S_SUB_IO", TRACE_WALS_S_SUB_IO,
-			OWNER_WALS, OBJECT_WALS_IO, 0,
+			OWNER_WALS, OBJECT_WALS_IO, 1,
 			{}
 		},
 		{
@@ -1808,7 +1808,8 @@ SPDK_TRACE_REGISTER_FN(wals_trace, "wals", TRACE_GROUP_WALS)
 		},
 	};
 
-	spdk_trace_register_owner(OWNER_WALS, 'b');
+	spdk_trace_register_owner(OWNER_WALS, 'w');
 	spdk_trace_register_object(OBJECT_WALS_IO, 'i');
+	spdk_trace_register_object(OBJECT_WALS_BDEV, 'b');
 	spdk_trace_register_description_ext(opts, SPDK_COUNTOF(opts));
 }

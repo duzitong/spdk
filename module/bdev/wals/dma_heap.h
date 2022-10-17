@@ -3,7 +3,7 @@
  * It's required to alloc different dma heap on different cores.
  * 
  * Memory is seperated into several buffer regions.
- * | buf_512 | buf_4k | buf_8k | buf_64k |
+ * | page_512 | page_4k | page_8k | page_32k | page_64k | page_128k | page_512k | page_1024k |
  * 
  * Queues are used for each region to record the remaining buffers.
  */
@@ -13,10 +13,16 @@
 
 #include "spdk/env.h"
 
+#define SIZE_SHIFT          3
+
 #define SIZE_512            512
 #define SIZE_4K             4096
 #define SIZE_8K             8192
+#define SIZE_32K            32768
 #define SIZE_64K            65536
+#define SIZE_128K           131072
+#define SIZE_1M             1048576
+#define SIZE_4M             4194304
 
 struct dma_page {
     void *buf;
@@ -34,10 +40,14 @@ struct dma_heap {
     size_t data_size;
     size_t md_size;
 
-    TAILQ_HEAD(, dma_page) buf_512;
-    TAILQ_HEAD(, dma_page) buf_4k;
-    TAILQ_HEAD(, dma_page) buf_8k;
-    TAILQ_HEAD(, dma_page) buf_64k;
+    TAILQ_HEAD(, dma_page) page_512;
+    TAILQ_HEAD(, dma_page) page_4k;
+    TAILQ_HEAD(, dma_page) page_8k;
+    TAILQ_HEAD(, dma_page) page_32k;
+    TAILQ_HEAD(, dma_page) page_64k;
+    TAILQ_HEAD(, dma_page) page_128k;
+    TAILQ_HEAD(, dma_page) page_1m;
+    TAILQ_HEAD(, dma_page) page_4m;
 };
 
 struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, size_t align);
