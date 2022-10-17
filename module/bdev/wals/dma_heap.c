@@ -33,7 +33,6 @@ struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, size_t align)
     TAILQ_INIT(&heap->page_32k);
     TAILQ_INIT(&heap->page_64k);
     TAILQ_INIT(&heap->page_128k);
-    TAILQ_INIT(&heap->page_512k);
     TAILQ_INIT(&heap->page_1m);
     TAILQ_INIT(&heap->page_4m);
 
