@@ -1628,7 +1628,7 @@ wals_bdev_log_head_update(void *ctx)
 		}
 	}
 
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_UPDATE_HEAD, 0, 0, (uintptr_t)wals_bdev);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_UPDATE_HEAD, 0, 0, (uintptr_t)wals_bdev);
 
 	return cnt > 0 ? SPDK_POLLER_BUSY : SPDK_POLLER_IDLE;
 }
