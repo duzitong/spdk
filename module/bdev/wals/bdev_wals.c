@@ -589,11 +589,16 @@ wals_bdev_insert_read_index(void *arg)
 	struct wals_index_msg *msg = arg;
 	struct wals_bdev *wals_bdev = msg->wals_bdev;
 	struct bstat *bstat;
+	int count = 0;
 	
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_INSERT_INDEX, 0, 0, (uintptr_t)wals_bdev);
 
 	while (spdk_mempool_count(wals_bdev->bsl_node_pool) <= 1 || spdk_mempool_count(wals_bdev->bstat_pool) == 0) {
 		wals_bdev_cleaner(wals_bdev);
+		count++;
+		if (count % 100000000 == 0) {
+			SPDK_NOTICELOG("cleaning index during insert is potentially blocked.\n");
+		}
 	}
 
 	bstat = bstatBdevCreate(msg->begin, msg->end, msg->round, msg->offset, wals_bdev->bstat_pool);
@@ -1613,6 +1618,8 @@ wals_bdev_log_head_update(void *ctx)
 	uint64_t i, cnt = 0;
 	struct wals_slice *slice;
 
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_UPDATE_HEAD, 0, 0, (uintptr_t)wals_bdev);
+
 	for (i = 0; i < wals_bdev->slicecnt; i++) {
 		slice = &wals_bdev->slices[i];
 		if (LIST_EMPTY(&slice->outstanding_read_afters)) {
@@ -1620,6 +1627,8 @@ wals_bdev_log_head_update(void *ctx)
 			cnt++;
 		}
 	}
+
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_UPDATE_HEAD, 0, 0, (uintptr_t)wals_bdev);
 
 	return cnt > 0 ? SPDK_POLLER_BUSY : SPDK_POLLER_IDLE;
 }
@@ -1859,6 +1868,16 @@ SPDK_TRACE_REGISTER_FN(wals_trace, "wals", TRACE_GROUP_WALS)
 			{
 				{ "cleaned", SPDK_TRACE_ARG_TYPE_INT, 8 },
 			}
+		},
+		{
+			"WALS_S_UPDATE_HEAD", TRACE_WALS_S_UPDATE_HEAD,
+			OWNER_WALS, OBJECT_WALS_BDEV, 1,
+			{}
+		},
+		{
+			"WALS_F_UPDATE_HEAD", TRACE_WALS_F_UPDATE_HEAD,
+			OWNER_WALS, OBJECT_WALS_BDEV, 0,
+			{}
 		},
 	};
 

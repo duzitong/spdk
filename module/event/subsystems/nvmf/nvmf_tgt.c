@@ -195,6 +195,7 @@ nvmf_tgt_create_poll_groups(void)
 		snprintf(thread_name, sizeof(thread_name), "nvmf_tgt_poll_group_%u", count++);
 
 		thread = spdk_thread_create(thread_name, g_poll_groups_mask);
+		
 		assert(thread != NULL);
 
 		spdk_thread_send_msg(thread, nvmf_tgt_create_poll_group, NULL);
