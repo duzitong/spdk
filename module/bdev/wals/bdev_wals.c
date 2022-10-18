@@ -828,7 +828,7 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 
 	ptr = dma_page_get_buf(wals_io->dma_page);
 	metadata = (struct wals_metadata *) ptr;
-	metadata->version = METADATA_VERSION; // TODO: add CRC
+	metadata->version = METADATA_VERSION; // TODO: add metadata CRC
 	metadata->seq = ++slice->seq;
 	metadata->core_offset = bdev_io->u.bdev.offset_blocks;
 	metadata->next_offset = slice_tail.offset;
@@ -845,6 +845,7 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 		memcpy(data, iovs[i].iov_base, iovs[i].iov_len);
 		data += iovs[i].iov_len;
 	}
+	// TODO: add data CRC
 
 	// call module to submit to all targets
 	wals_io->targets_failed = 0;
