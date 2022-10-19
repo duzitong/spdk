@@ -42,7 +42,7 @@ struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, size_t align)
         page->buf = ptr;
         page->data_size = SIZE_512;
         page->md_size = md_size;
-        TAILQ_INSERT_TAIL(&heap->page_512, page, link);
+        TAILQ_INSERT_HEAD(&heap->page_512, page, link);
         ptr += SIZE_512 + md_size;
     }
     for (i = 0; i < (data_size >> SIZE_SHIFT) / SIZE_4K; i++) {
@@ -50,7 +50,7 @@ struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, size_t align)
         page->buf = ptr;
         page->data_size = SIZE_4K;
         page->md_size = md_size;
-        TAILQ_INSERT_TAIL(&heap->page_4k, page, link);
+        TAILQ_INSERT_HEAD(&heap->page_4k, page, link);
         ptr+= SIZE_4K + md_size;
     }
     for (i = 0; i < (data_size >> SIZE_SHIFT) / SIZE_8K; i++) {
@@ -58,7 +58,7 @@ struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, size_t align)
         page->buf = ptr;
         page->data_size = SIZE_8K;
         page->md_size = md_size;
-        TAILQ_INSERT_TAIL(&heap->page_8k, page, link);
+        TAILQ_INSERT_HEAD(&heap->page_8k, page, link);
         ptr+= SIZE_8K + md_size;
     }
     for (i = 0; i < (data_size >> SIZE_SHIFT) / SIZE_32K; i++) {
@@ -66,7 +66,7 @@ struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, size_t align)
         page->buf = ptr;
         page->data_size = SIZE_32K;
         page->md_size = md_size;
-        TAILQ_INSERT_TAIL(&heap->page_32k, page, link);
+        TAILQ_INSERT_HEAD(&heap->page_32k, page, link);
         ptr+= SIZE_32K + md_size;
     }
     for (i = 0; i < (data_size >> SIZE_SHIFT) / SIZE_64K; i++) {
@@ -74,7 +74,7 @@ struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, size_t align)
         page->buf = ptr;
         page->data_size = SIZE_64K;
         page->md_size = md_size;
-        TAILQ_INSERT_TAIL(&heap->page_64k, page, link);
+        TAILQ_INSERT_HEAD(&heap->page_64k, page, link);
         ptr+= SIZE_64K + md_size;
     }
     for (i = 0; i < (data_size >> SIZE_SHIFT) / SIZE_128K; i++) {
@@ -82,7 +82,7 @@ struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, size_t align)
         page->buf = ptr;
         page->data_size = SIZE_128K;
         page->md_size = md_size;
-        TAILQ_INSERT_TAIL(&heap->page_128k, page, link);
+        TAILQ_INSERT_HEAD(&heap->page_128k, page, link);
         ptr+= SIZE_128K + md_size;
     }
     for (i = 0; i < (data_size >> SIZE_SHIFT) / SIZE_1M; i++) {
@@ -90,7 +90,7 @@ struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, size_t align)
         page->buf = ptr;
         page->data_size = SIZE_1M;
         page->md_size = md_size;
-        TAILQ_INSERT_TAIL(&heap->page_1m, page, link);
+        TAILQ_INSERT_HEAD(&heap->page_1m, page, link);
         ptr+= SIZE_1M + md_size;
     }
     for (i = 0; i < (data_size >> SIZE_SHIFT) / SIZE_4M; i++) {
@@ -98,7 +98,7 @@ struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, size_t align)
         page->buf = ptr;
         page->data_size = SIZE_4M;
         page->md_size = md_size;
-        TAILQ_INSERT_TAIL(&heap->page_4m, page, link);
+        TAILQ_INSERT_HEAD(&heap->page_4m, page, link);
         ptr+= SIZE_4M + md_size;
     }
 
@@ -198,28 +198,28 @@ void dma_heap_put_page(struct dma_heap *heap, struct dma_page *page)
 {
     switch (page->data_size) {
         case SIZE_512:
-            TAILQ_INSERT_TAIL(&heap->page_512, page, link);
+            TAILQ_INSERT_HEAD(&heap->page_512, page, link);
             break;
         case SIZE_4K:
-            TAILQ_INSERT_TAIL(&heap->page_4k, page, link);
+            TAILQ_INSERT_HEAD(&heap->page_4k, page, link);
             break;
         case SIZE_8K:
-            TAILQ_INSERT_TAIL(&heap->page_8k, page, link);
+            TAILQ_INSERT_HEAD(&heap->page_8k, page, link);
             break;
         case SIZE_32K:
-            TAILQ_INSERT_TAIL(&heap->page_32k, page, link);
+            TAILQ_INSERT_HEAD(&heap->page_32k, page, link);
             break;
         case SIZE_64K:
-            TAILQ_INSERT_TAIL(&heap->page_64k, page, link);
+            TAILQ_INSERT_HEAD(&heap->page_64k, page, link);
             break;
         case SIZE_128K:
-            TAILQ_INSERT_TAIL(&heap->page_128k, page, link);
+            TAILQ_INSERT_HEAD(&heap->page_128k, page, link);
             break;
         case SIZE_1M:
-            TAILQ_INSERT_TAIL(&heap->page_1m, page, link);
+            TAILQ_INSERT_HEAD(&heap->page_1m, page, link);
             break;
         case SIZE_4M:
-            TAILQ_INSERT_TAIL(&heap->page_4m, page, link);
+            TAILQ_INSERT_HEAD(&heap->page_4m, page, link);
             break;
         default:
             // should not happen
