@@ -880,7 +880,10 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 	for (i = 0; i < NUM_TARGETS; i++) {
 		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_W_T, 0, 0, (uintptr_t)wals_io, i);
 
-		ret = wals_bdev->module->submit_log_write_request(slice->targets[i], ptr, slice->tail.offset, bdev_io->u.bdev.num_blocks + METADATA_BLOCKS, wals_io);
+		ret = wals_bdev->module->submit_log_write_request(slice->targets[i], ptr,
+														slice_tail.offset - (bdev_io->u.bdev.num_blocks + METADATA_BLOCKS),
+														bdev_io->u.bdev.num_blocks + METADATA_BLOCKS,
+														wals_io);
 
 		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_W_T, 0, 0, (uintptr_t)wals_io, i);
 

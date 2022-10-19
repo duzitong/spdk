@@ -4,6 +4,7 @@
 #include "spdk/thread.h"
 #include "spdk/string.h"
 #include "spdk/util.h"
+#include "spdk/likely.h"
 
 #include "spdk/log.h"
 
@@ -48,6 +49,10 @@ static int
 null_submit_log_write_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
     SPDK_DEBUGLOG(bdev_wals_null, "log write: %ld+%ld\n", offset, cnt);
+
+    if (spdk_unlikely(offset + cnt > LOG_BUFFER_SIZE)) {
+        SPDK_ERRLOG("ERROR!!! %ld, %ld\n", offset, cnt);
+    }
 
     if (offset < target->head.offset) {
         target->head.round++;
