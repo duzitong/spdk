@@ -498,7 +498,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
     uint64_t    			read_begin, read_end, read_cur, tmp;
 	void					*buf;
 
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_R, 0, 0, (uintptr_t)wals_io);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_R, 0, 0, (uintptr_t)wals_io, spdk_thread_get_id(spdk_get_thread()));
 
 	SPDK_DEBUGLOG(bdev_wals, "submit read: %ld+%ld\n", bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks);
 
@@ -925,7 +925,7 @@ wals_bdev_submit_write_request(void *arg)
 	struct wals_slice		*slice;
 	wals_log_position		slice_tail;
 
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_W, 0, 0, (uintptr_t)wals_io);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_W, 0, 0, (uintptr_t)wals_io, spdk_thread_get_id(spdk_get_thread()));
 
 	SPDK_DEBUGLOG(bdev_wals, "submit write: %ld+%ld\n", bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks);
 
@@ -1007,7 +1007,7 @@ wals_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 {
 	struct wals_bdev_io *wals_io = (struct wals_bdev_io *)bdev_io->driver_ctx;
 
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_IO, 0, 0, (uintptr_t)wals_io);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_IO, 0, 0, (uintptr_t)wals_io, spdk_thread_get_id(spdk_get_thread()));
 
 	wals_io->wals_ch = spdk_io_channel_get_ctx(ch);
 	wals_io->wals_bdev = wals_io->wals_ch->wals_bdev;
@@ -1728,7 +1728,9 @@ SPDK_TRACE_REGISTER_FN(wals_trace, "wals", TRACE_GROUP_WALS)
 		{
 			"WALS_S_SUB_IO", TRACE_WALS_S_SUB_IO,
 			OWNER_WALS, OBJECT_WALS_IO, 1,
-			{}
+			{
+				{ "thread", SPDK_TRACE_ARG_TYPE_INT, 8 },
+			}
 		},
 		{
 			"WALS_F_SUB_IO", TRACE_WALS_F_SUB_IO,
@@ -1754,7 +1756,9 @@ SPDK_TRACE_REGISTER_FN(wals_trace, "wals", TRACE_GROUP_WALS)
 		{
 			"WALS_S_SUB_W", TRACE_WALS_S_SUB_W,
 			OWNER_WALS, OBJECT_WALS_IO, 0,
-			{}
+			{
+				{ "thread", SPDK_TRACE_ARG_TYPE_INT, 8 },
+			}
 		},
 		{
 			"WALS_F_SUB_W", TRACE_WALS_F_SUB_W,
@@ -1841,7 +1845,9 @@ SPDK_TRACE_REGISTER_FN(wals_trace, "wals", TRACE_GROUP_WALS)
 		{
 			"WALS_S_SUB_R", TRACE_WALS_S_SUB_R,
 			OWNER_WALS, OBJECT_WALS_IO, 0,
-			{}
+			{
+				{ "thread", SPDK_TRACE_ARG_TYPE_INT, 8 },
+			}
 		},
 		{
 			"WALS_F_SUB_R", TRACE_WALS_F_SUB_R,
