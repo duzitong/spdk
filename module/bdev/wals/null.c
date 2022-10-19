@@ -4,6 +4,7 @@
 #include "spdk/thread.h"
 #include "spdk/string.h"
 #include "spdk/util.h"
+#include "spdk/likely.h"
 
 #include "spdk/log.h"
 
