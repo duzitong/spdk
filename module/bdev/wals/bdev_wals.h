@@ -295,13 +295,13 @@ struct wals_target_module {
 	int (*register_write_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
 
 	/* unregister write pollers */
-	void (*unregister_write_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
+	int (*unregister_write_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
 
 	/* register read pollers */
 	int (*register_read_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
 
 	/* register read pollers */
-	void (*unregister_read_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
+	int (*unregister_read_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
 
 	TAILQ_ENTRY(wals_target_module) link;
 };
