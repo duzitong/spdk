@@ -1570,6 +1570,7 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 				wals_bdev->slices[i].log_blockcnt = wals_bdev->slices[i].targets[j]->log_blockcnt;
 			}
 		}
+		SPDK_NOTICELOG("log_blockcnt = %ld\n", wals_bdev->slices[i].log_blockcnt);
 	}
 
 	rc = wals_bdev_configure(wals_bdev);

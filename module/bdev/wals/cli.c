@@ -72,8 +72,9 @@ struct rdma_cli_connection {
     struct pending_io_queue pending_write_io_queue;
     struct pending_io_queue pending_nvmf_read_io_queue;
 
-    enum rdma_cli_status status;
+    volatile enum rdma_cli_status status;
     uint64_t reject_cnt;
+    uint64_t io_fail_cnt;
     TAILQ_HEAD(, wals_cli_slice) slices;
 };
 
@@ -429,6 +430,12 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
         return 0;
     }
 
+    if (offset + cnt > LOG_BLOCKCNT) {
+        SPDK_ERRLOG("READ out of remote PMEM range: %ld %ld\n", offset, cnt);
+        wals_target_read_complete(wals_io, false);
+        return 0;
+    }
+
     struct ibv_send_wr wr, *bad_wr = NULL;
     struct ibv_sge sge;
     memset(&wr, 0, sizeof(wr));
@@ -501,7 +508,13 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
 
     if (!is_io_within_memory_region(data, cnt, slice->wals_bdev->buffer_blocklen, slice->rdma_conn->mr_write)) {
         SPDK_ERRLOG("IO out of MR range\n");
-        wals_target_read_complete(wals_io, false);
+        wals_target_write_complete(wals_io, false);
+        return 0;
+    }
+
+    if (offset + cnt > LOG_BLOCKCNT) {
+        SPDK_ERRLOG("Write out of remote PMEM range: %ld %ld\n", offset, cnt);
+        wals_target_write_complete(wals_io, false);
         return 0;
     }
 
@@ -1071,7 +1084,7 @@ static int slice_destage_info_poller(void* ctx) {
                 send_wr.opcode = IBV_WR_RDMA_READ;
                 send_wr.sg_list = &send_sge;
                 send_wr.num_sge = 1;
-                send_wr.send_flags = IBV_SEND_SIGNALED;
+                send_wr.send_flags = 0;
                 send_wr.wr.rdma.remote_addr = (uint64_t)g_rdma_handshakes[cli_slice->rdma_conn->id].base_addr + LOG_BLOCKCNT * cli_slice->wals_bdev->buffer_blocklen;
                 send_wr.wr.rdma.rkey = g_rdma_handshakes[cli_slice->rdma_conn->id].rkey;
 
@@ -1082,7 +1095,7 @@ static int slice_destage_info_poller(void* ctx) {
                 int rc = ibv_post_send(cli_slice->rdma_conn->cm_id->qp, &send_wr, &bad_send_wr);
                 if (rc != 0) {
                     SPDK_ERRLOG("post send failed\n");
-                    break;
+                    continue;
                 }
             }
         } 
@@ -1115,11 +1128,14 @@ rdma_cq_poller(void* ctx) {
 					void* io = (void*)g_rdma_cli_conns[i].wc_buf[j].wr_id;
 					if (g_rdma_cli_conns[i].wc_buf[j].status != IBV_WC_SUCCESS) {
                         // TODO: should set the qp state to error, or reconnect?
-						SPDK_ERRLOG("IO %p RDMA op %d failed with status %d\n",
-							io,
-							g_rdma_cli_conns[i].wc_buf[j].opcode,
-							g_rdma_cli_conns[i].wc_buf[j].status);
+                        if (g_rdma_cli_conns[i].io_fail_cnt % 10000 == 0) {
+                            SPDK_ERRLOG("IO %p RDMA op %d failed with status %d\n",
+                                io,
+                                g_rdma_cli_conns[i].wc_buf[j].opcode,
+                                g_rdma_cli_conns[i].wc_buf[j].status);
+                        }
                         
+                        g_rdma_cli_conns[i].io_fail_cnt++;
                         success = false;
 					}
 
