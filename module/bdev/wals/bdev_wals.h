@@ -258,6 +258,8 @@ struct wals_bdev_io {
 	bool	io_completed;
 };
 
+typedef int (*wals_target_fn)(struct wals_target* target, struct wals_bdev *wals_bdev);
+
 /*
  * WALS target module descriptor
  */
@@ -288,6 +290,18 @@ struct wals_target_module {
 
 	/* Handler for log write requests */
 	int (*submit_log_write_request)(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io);
+
+	/* register write pollers */
+	int (*register_write_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
+
+	/* unregister write pollers */
+	void (*unregister_write_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
+
+	/* register read pollers */
+	int (*register_read_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
+
+	/* register read pollers */
+	void (*unregister_read_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
 
 	TAILQ_ENTRY(wals_target_module) link;
 };

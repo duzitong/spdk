@@ -86,6 +86,30 @@ mem_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
     return 0;
 }
 
+static int
+mem_register_write_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
+{
+    return 0;
+}
+
+static int
+mem_unregister_write_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
+{
+    return 0;
+}
+
+static int
+mem_register_read_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
+{
+    return 0;
+}
+
+static int
+mem_unregister_read_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
+{
+    return 0;
+}
+
 
 static struct wals_target_module g_mem_module = {
 	.name = "mem",
@@ -94,6 +118,10 @@ static struct wals_target_module g_mem_module = {
     .submit_log_read_request = mem_submit_log_read_request,
 	.submit_core_read_request = mem_submit_core_read_request,
 	.submit_log_write_request = mem_submit_log_write_request,
+    .register_write_pollers = mem_register_write_pollers,
+    .unregister_write_pollers = mem_unregister_write_pollers,
+    .register_read_pollers = mem_register_read_pollers,
+    .unregister_read_pollers = mem_unregister_read_pollers,
 };
 TARGET_MODULE_REGISTER(&g_mem_module)
 

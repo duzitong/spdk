@@ -101,6 +101,25 @@ static int wals_bdev_log_head_update(void *ctx);
 static int wals_bdev_cleaner(void *ctx);
 static int wals_bdev_stat_report(void *ctx);
 
+static int
+wals_bdev_foreach_target_call(struct wals_bdev *wals_bdev, wals_target_fn fn, char *name)
+{
+	uint64_t i, j;
+	int rc;
+	
+	for (i = 0; i < wals_bdev->slicecnt; i++) {
+		for (j = 0; j < NUM_TARGETS; j++) {
+			rc = fn(wals_bdev->slices[i].targets[j], wals_bdev);
+			if (rc) {
+				SPDK_ERRLOG("Failed to call %s target '%ld' in slice '%ld'.", name, j, i);
+				return rc;
+			}
+		}
+	}
+
+	return 0;
+}
+
 /*
  * brief:
  * wals_bdev_create_cb function is a cb function for wals bdev which creates the
@@ -151,9 +170,10 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 
 	if (lcore == wals_bdev->write_lcore && wals_bdev->write_thread == NULL) {
 		SPDK_NOTICELOG("register write pollers\n");
-		// TODO: call module to register write pollers
 
 		wals_bdev->write_thread = spdk_get_thread();
+
+		wals_bdev_foreach_target_call(wals_bdev, wals_bdev->module->register_write_pollers, "register_write_pollers");
 
 		/*
 		 * When bdev is created, gpt will exaime this bdev, it issues some read requests.
@@ -167,11 +187,12 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 	}
 	if (lcore == wals_bdev->read_lcore && (wals_bdev->read_thread == NULL || wals_bdev->read_thread == wals_bdev->write_thread)) {
 		SPDK_NOTICELOG("register read pollers\n");
-		// TODO: call module to register read pollers
 
 		wals_bdev->log_head_update_poller = SPDK_POLLER_REGISTER(wals_bdev_log_head_update, wals_bdev, 5);
 		wals_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wals_bdev_cleaner, wals_bdev, 1);
 		wals_bdev->stat_poller = SPDK_POLLER_REGISTER(wals_bdev_stat_report, wals_bdev, 30*1000*1000);
+
+		wals_bdev_foreach_target_call(wals_bdev, wals_bdev->module->register_read_pollers, "register_read_pollers");
 
 		wals_bdev->read_thread = spdk_get_thread();
 	}
@@ -188,7 +209,7 @@ wals_bdev_unregister_write_pollers(void *arg)
 	struct wals_bdev	*wals_bdev = arg;
 	SPDK_NOTICELOG("Unregister write pollers\n");
 
-	// TODO: call module to unregister
+	wals_bdev_foreach_target_call(wals_bdev, wals_bdev->module->unregister_write_pollers, "unregister_write_pollers");
 	
 	wals_bdev->write_thread = NULL;
 }
@@ -199,7 +220,8 @@ wals_bdev_unregister_read_pollers(void *arg)
 	struct wals_bdev	*wals_bdev = arg;
 	SPDK_NOTICELOG("Unregister read pollers\n");
 
-	// TODO: call module to unregister
+	wals_bdev_foreach_target_call(wals_bdev, wals_bdev->module->unregister_read_pollers, "unregister_read_pollers");
+
 	spdk_poller_unregister(&wals_bdev->log_head_update_poller);
 	spdk_poller_unregister(&wals_bdev->cleaner_poller);
 	spdk_poller_unregister(&wals_bdev->stat_poller);
