@@ -239,7 +239,7 @@ struct wals_bdev_io {
 	struct spdk_thread	*orig_thread;
 
 	/* save for completion on orig thread */
-	enum spdk_bdev_io_status status;
+	volatile enum spdk_bdev_io_status status;
 
 	struct wals_metadata	*metadata;
 	

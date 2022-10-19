@@ -956,8 +956,6 @@ wals_bdev_submit_write_request(void *arg)
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_W, 0, 0, (uintptr_t)wals_io, 0, 0);
 }
 
-// TODO - end
-
 /*
  * brief:
  * Callback function to spdk_bdev_io_get_buf.
@@ -1560,7 +1558,6 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 		return rc;
 	}
 
-	// TODO: log_blockcnt into a write poller
 	for (i = 0; i < wals_cfg->slicecnt; i++) {
 		wals_bdev->slices[i].log_blockcnt = UINT64_MAX;
 		for (j = 0; j < NUM_TARGETS; j++) {
