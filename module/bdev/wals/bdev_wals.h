@@ -103,6 +103,8 @@
 #define TRACE_WALS_F_INSERT_INDEX		SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x31)
 #define TRACE_WALS_S_CLEAN_INDEX		SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x32)	// clean index
 #define TRACE_WALS_F_CLEAN_INDEX		SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x33)
+#define TRACE_WALS_S_UPDATE_HEAD		SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x34)	// update log head
+#define TRACE_WALS_F_UPDATE_HEAD		SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x35)
 
 
 /*
@@ -237,7 +239,7 @@ struct wals_bdev_io {
 	struct spdk_thread	*orig_thread;
 
 	/* save for completion on orig thread */
-	enum spdk_bdev_io_status status;
+	volatile enum spdk_bdev_io_status status;
 
 	struct wals_metadata	*metadata;
 	
@@ -252,7 +254,11 @@ struct wals_bdev_io {
 	int		targets_failed;
 
 	int		targets_completed;
+
+	bool	io_completed;
 };
+
+typedef int (*wals_target_fn)(struct wals_target* target, struct wals_bdev *wals_bdev);
 
 /*
  * WALS target module descriptor
@@ -284,6 +290,18 @@ struct wals_target_module {
 
 	/* Handler for log write requests */
 	int (*submit_log_write_request)(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io);
+
+	/* register write pollers */
+	int (*register_write_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
+
+	/* unregister write pollers */
+	int (*unregister_write_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
+
+	/* register read pollers */
+	int (*register_read_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
+
+	/* register read pollers */
+	int (*unregister_read_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
 
 	TAILQ_ENTRY(wals_target_module) link;
 };
@@ -350,8 +368,6 @@ struct wals_bdev {
 	uint64_t			slice_blockcnt;
 
 	struct wals_slice	*slices;
-
-	void				*buffer;
 
 	/* buffer block length */
 	uint64_t			buffer_blocklen;
@@ -446,6 +462,8 @@ struct wals_index_msg {
 	uint64_t			round;
 
 	uint64_t			offset;
+
+	bool				failed;
 
 	struct wals_bdev	*wals_bdev;
 };

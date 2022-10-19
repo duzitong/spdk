@@ -17,6 +17,7 @@ typedef struct bstat {
     long begin, end;
     locationType type;
     long unsigned int round;
+    bool failed;
     union location {
         long unsigned int bdevOffset;
         void *memPointer;

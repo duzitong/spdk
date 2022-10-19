@@ -119,7 +119,7 @@ struct dma_page* dma_heap_get_page(struct dma_heap *heap, size_t size)
 {
     struct dma_page *page;
 
-    if (size <= SIZE_512) {
+    if (size >> SIZE_512_SHIFT) {
         if (TAILQ_EMPTY(&heap->page_512)) {
             return NULL;
         }
@@ -128,7 +128,7 @@ struct dma_page* dma_heap_get_page(struct dma_heap *heap, size_t size)
         return page;
     }
 
-    if (size <= SIZE_4K) {
+    if (size >> SIZE_4K_SHIFT) {
         if (TAILQ_EMPTY(&heap->page_4k)) {
             return NULL;
         }
@@ -137,7 +137,7 @@ struct dma_page* dma_heap_get_page(struct dma_heap *heap, size_t size)
         return page;
     }
 
-    if (size <= SIZE_8K) {
+    if (size >> SIZE_8K_SHIFT) {
         if (TAILQ_EMPTY(&heap->page_8k)) {
             return NULL;
         }
@@ -146,7 +146,7 @@ struct dma_page* dma_heap_get_page(struct dma_heap *heap, size_t size)
         return page;
     }
 
-    if (size <= SIZE_32K) {
+    if (size >> SIZE_32K_SHIFT) {
         if (TAILQ_EMPTY(&heap->page_32k)) {
             return NULL;
         }
@@ -155,7 +155,7 @@ struct dma_page* dma_heap_get_page(struct dma_heap *heap, size_t size)
         return page;
     }
 
-    if (size <= SIZE_64K) {
+    if (size >> SIZE_64K_SHIFT) {
         if (TAILQ_EMPTY(&heap->page_64k)) {
             return NULL;
         }
@@ -164,7 +164,7 @@ struct dma_page* dma_heap_get_page(struct dma_heap *heap, size_t size)
         return page;
     }
 
-    if (size <= SIZE_128K) {
+    if (size >> SIZE_128K_SHIFT) {
         if (TAILQ_EMPTY(&heap->page_128k)) {
             return NULL;
         }
@@ -173,7 +173,7 @@ struct dma_page* dma_heap_get_page(struct dma_heap *heap, size_t size)
         return page;
     }
     
-    if (size <= SIZE_1M) {
+    if (size >> SIZE_1M_SHIFT) {
         if (TAILQ_EMPTY(&heap->page_1m)) {
             return NULL;
         }
@@ -182,7 +182,7 @@ struct dma_page* dma_heap_get_page(struct dma_heap *heap, size_t size)
         return page;
     }  
 
-    if (size <= SIZE_4M) {
+    if (size >> SIZE_4M_SHIFT) {
         if (TAILQ_EMPTY(&heap->page_4m)) {
             return NULL;
         }

@@ -16,13 +16,21 @@
 #define SIZE_SHIFT          3
 
 #define SIZE_512            512
+#define SIZE_512_SHIFT      9
 #define SIZE_4K             4096
+#define SIZE_4K_SHIFT       12
 #define SIZE_8K             8192
+#define SIZE_8K_SHIFT       13
 #define SIZE_32K            32768
+#define SIZE_32K_SHIFT      15
 #define SIZE_64K            65536
+#define SIZE_64K_SHIFT      16
 #define SIZE_128K           131072
+#define SIZE_128K_SHIFT     17
 #define SIZE_1M             1048576
+#define SIZE_1M_SHIFT       20
 #define SIZE_4M             4194304
+#define SIZE_4M_SHIFT       22
 
 struct dma_page {
     void *buf;

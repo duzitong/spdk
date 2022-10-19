@@ -58,6 +58,30 @@ null_submit_log_write_request(struct wals_target* target, void *data, uint64_t o
     return 0;
 }
 
+static int
+null_register_write_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
+{
+    return 0;
+}
+
+static int
+null_unregister_write_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
+{
+    return 0;
+}
+
+static int
+null_register_read_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
+{
+    return 0;
+}
+
+static int
+null_unregister_read_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
+{
+    return 0;
+}
+
 
 static struct wals_target_module g_null_module = {
 	.name = "null",
@@ -66,6 +90,10 @@ static struct wals_target_module g_null_module = {
     .submit_log_read_request = null_submit_log_read_request,
 	.submit_core_read_request = null_submit_core_read_request,
 	.submit_log_write_request = null_submit_log_write_request,
+    .register_write_pollers = null_register_write_pollers,
+    .unregister_write_pollers = null_unregister_write_pollers,
+    .register_read_pollers = null_register_read_pollers,
+    .unregister_read_pollers = null_unregister_read_pollers,
 };
 TARGET_MODULE_REGISTER(&g_null_module)
 

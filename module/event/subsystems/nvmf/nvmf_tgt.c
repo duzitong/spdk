@@ -184,6 +184,7 @@ nvmf_tgt_create_poll_groups(void)
 	uint32_t cpu, count = 0;
 	char thread_name[32];
 	struct spdk_thread *thread;
+	struct spdk_cpuset tmp_cpumask = {};
 
 	g_tgt_init_thread = spdk_get_thread();
 	assert(g_tgt_init_thread != NULL);
@@ -192,9 +193,12 @@ nvmf_tgt_create_poll_groups(void)
 		if (g_poll_groups_mask && !spdk_cpuset_get_cpu(g_poll_groups_mask, cpu)) {
 			continue;
 		}
+		spdk_cpuset_zero(&tmp_cpumask);
+		spdk_cpuset_set_cpu(&tmp_cpumask, cpu, true);
 		snprintf(thread_name, sizeof(thread_name), "nvmf_tgt_poll_group_%u", count++);
 
-		thread = spdk_thread_create(thread_name, g_poll_groups_mask);
+		thread = spdk_thread_create(thread_name, &tmp_cpumask);
+		
 		assert(thread != NULL);
 
 		spdk_thread_send_msg(thread, nvmf_tgt_create_poll_group, NULL);
