@@ -912,6 +912,9 @@ wals_bdev_submit_write_request(void *arg)
 								slice->tail, slice->log_blockcnt, slice->head, &slice_tail)) {
 		SPDK_DEBUGLOG(bdev_wals, "queue bdev io submit due to no enough space left on slice log.\n");
 		spdk_thread_send_msg(spdk_get_thread(), wals_bdev_submit_write_request, wals_io);
+		
+		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_W, 0, 0, (uintptr_t)wals_io, 1, 0);
+
 		return;
 	}
 
@@ -920,12 +923,15 @@ wals_bdev_submit_write_request(void *arg)
 	if (!wals_io->dma_page) {
 		SPDK_DEBUGLOG(bdev_wals, "queue bdev io submit due to no enough space left on buffer.\n");
 		spdk_thread_send_msg(spdk_get_thread(), wals_bdev_submit_write_request, wals_io);
+
+		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_W, 0, 0, (uintptr_t)wals_io, 0, 1);
+
 		return;
 	}
 
 	_wals_bdev_submit_write_request(wals_io, slice_tail);
 
-	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_W, 0, 0, (uintptr_t)wals_io);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_W, 0, 0, (uintptr_t)wals_io, 0, 0);
 }
 
 // TODO - end
@@ -1731,7 +1737,10 @@ SPDK_TRACE_REGISTER_FN(wals_trace, "wals", TRACE_GROUP_WALS)
 		{
 			"WALS_F_SUB_W", TRACE_WALS_F_SUB_W,
 			OWNER_WALS, OBJECT_WALS_IO, 0,
-			{}
+			{
+				{ "slicefull", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "bufferfull", SPDK_TRACE_ARG_TYPE_INT, 8 },
+			}
 		},
 		{
 			"WALS_S_SUB_W_I", TRACE_WALS_S_SUB_W_I,
