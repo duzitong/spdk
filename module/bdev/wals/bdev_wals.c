@@ -935,7 +935,7 @@ wals_bdev_submit_write_request(void *arg)
 	// check slice space
 	if (!wals_bdev_update_tail(bdev_io->u.bdev.num_blocks + METADATA_BLOCKS,
 								slice->tail, slice->log_blockcnt, slice->head, &slice_tail)) {
-		SPDK_NOTICELOG("queue bdev io submit due to no enough space left on slice log. head: %ld tail: %ld round: %ld\n", slice->head.offset, slice->tail.offset, slice->head.round);
+		SPDK_NOTICELOG("queue bdev io submit due to no enough space left on slice log. head: (%ld,%ld) tail: (%ld,%ld)\n", slice->head.offset, slice->head.round, slice->tail.offset, slice->tail.round);
 		spdk_thread_send_msg(spdk_get_thread(), wals_bdev_submit_write_request, wals_io);
 		
 		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_W, 0, 0, (uintptr_t)wals_io, 1, 0);

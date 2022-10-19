@@ -550,7 +550,7 @@ persist_destage_poller(void *ctx)
 				break;
 			}
 			else if (next_round_metadata->round == pdisk->destage_info->destage_round + 1) {
-				SPDK_DEBUGLOG(bdev_persist, "Go back to block '0' during move.\n");
+				SPDK_NOTICELOG("Go back to block '0' during move.\n");
 				metadata = next_round_metadata;
 				if (metadata->version != PERSIST_METADATA_VERSION) {
 					// should not happen even before any IO comes, because of the round

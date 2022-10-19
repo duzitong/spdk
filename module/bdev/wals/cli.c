@@ -1094,7 +1094,7 @@ static int slice_destage_info_poller(void* ctx) {
 
                 int rc = ibv_post_send(cli_slice->rdma_conn->cm_id->qp, &send_wr, &bad_send_wr);
                 if (rc != 0) {
-                    SPDK_ERRLOG("post send failed\n");
+                    // SPDK_ERRLOG("post send failed\n");
                     continue;
                 }
             }
