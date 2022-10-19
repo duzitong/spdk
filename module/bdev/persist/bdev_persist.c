@@ -128,10 +128,10 @@ struct wals_metadata {
 	uint64_t	round;
 };
 
-// TODO: merge with wal_log_info
-struct destage_info {
+static struct destage_info {
 	uint64_t destage_head;
 	uint64_t destage_round;
+	uint32_t checksum;
 };
 
 struct persist_io {
@@ -811,17 +811,13 @@ static int persist_rdma_poller(void* ctx) {
 					buffer_len,
 					buffer_len / 1048576);
 
-				pdisk->malloc_buf = spdk_zmalloc(buffer_len,
+				pdisk->malloc_buf = spdk_zmalloc(buffer_len + pdisk->remote_handshake->block_size,
 					2 * 1024 * 1024,
 					NULL,
 					SPDK_ENV_LCORE_ID_ANY,
 					SPDK_MALLOC_DMA);
 				
-				pdisk->destage_info = spdk_zmalloc(pdisk->remote_handshake->block_size,
-					2 * 1024 * 1024,
-					NULL,
-					SPDK_ENV_LCORE_ID_ANY,
-					SPDK_MALLOC_DMA);
+				pdisk->destage_info = pdisk->malloc_buf + buffer_len;
 
 				ibv_mr_circular = ibv_reg_mr(
 					pdisk->pd,
@@ -860,10 +856,8 @@ static int persist_rdma_poller(void* ctx) {
 
 				if (!pdisk->attach_disk) {
 					SPDK_NOTICELOG("In pure memory mode, set the destage info to (-1, -1)\n");
-					struct destage_info* dst = pdisk->malloc_buf + 
-						pdisk->remote_handshake->block_size * (pdisk->remote_handshake->block_cnt - 1);
-					dst->destage_head = -1;
-					dst->destage_round = -1;
+					pdisk->destage_info->destage_head = -1;
+					pdisk->destage_info->destage_round = -1;
 				}
 			}
 			else if (wc.wr_id == 2) {

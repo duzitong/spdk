@@ -18,6 +18,9 @@
 #define LOG_BLOCKCNT 131072
 // Should not exceed log_blockcnt
 #define PENDING_IO_MAX_CNT 131072
+#define MAX_SLICES 256
+// currently a fake one, to make sure that it fully RDMA reads the struct
+#define DESTAGE_INFO_CHECKSUM 666
 
 enum rdma_cli_status {
     RDMA_CLI_UNINITIALIZED,
@@ -34,6 +37,13 @@ enum nvmf_cli_status {
     NVMF_CLI_UNINITIALIZED,
     NVMF_CLI_INITIALIZED,
     NVMF_CLI_ERROR,
+};
+
+// TODO: share the same header file
+static struct destage_info {
+	uint64_t destage_head;
+	uint64_t destage_round;
+	uint32_t checksum;
 };
 
 struct pending_io_context {
@@ -55,6 +65,7 @@ struct rdma_cli_connection {
     struct ibv_mr* mr_read;
     struct ibv_mr* mr_write;
     struct ibv_mr* mr_handshake;
+    struct ibv_mr* mr_destage_info;
     struct addrinfo* server_addr;
     struct ibv_wc wc_buf[WC_BATCH_SIZE];
     struct pending_io_queue pending_read_io_queue;
@@ -90,22 +101,35 @@ struct spdk_poller* g_rdma_connection_poller;
 struct spdk_poller* g_nvmf_connection_poller;
 struct spdk_poller* g_rdma_cq_poller;
 struct spdk_poller* g_nvmf_cq_poller;
+struct spdk_poller* g_destage_info_poller;
+
+int g_num_slices = 0;
+
+TAILQ_HEAD(, wals_cli_slice) g_slices;
+struct destage_info g_destage_info[MAX_SLICES];
 
 struct wals_cli_slice {
+    int id;
     struct wals_bdev* wals_bdev;
+    // can use CONTAINEROF?
+    struct wals_target* wals_target;
     struct rdma_cli_connection* rdma_conn;
     struct nvmf_cli_connection* nvmf_conn;
     // if connected to the same ssd, then they need to share the same qp.
     uint64_t nvmf_block_offset;
 
-	/* link next for pending writes */
-	TAILQ_ENTRY(wals_cli_slice)	tailq;
+	/* link next for rdma connections */
+	TAILQ_ENTRY(wals_cli_slice)	tailq_rdma;
+
+	/* link next for all slices connections */
+	TAILQ_ENTRY(wals_cli_slice)	tailq_all_slices;
 };
 
 static int rdma_cli_connection_poller(void* ctx);
 static int nvmf_cli_connection_poller(void* ctx);
 static int rdma_cq_poller(void* ctx);
 static int nvmf_cq_poller(void* ctx);
+static int slice_destage_info_poller(void* ctx);
 
 static bool
 nvmf_cli_probe_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
@@ -179,6 +203,16 @@ nvmf_cli_remove_cb(void *cb_ctx, struct spdk_nvme_ctrlr *ctrlr)
 static struct wals_target*
 cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct wals_slice *slice)
 {
+    if (g_num_slices == 0) {
+        // BUG: if the first slice registration failed, it will be called twice
+        TAILQ_INIT(&g_slices);
+
+        for (int i = 0; i < MAX_SLICES; i++) {
+            g_destage_info[i].checksum = DESTAGE_INFO_CHECKSUM;
+        }
+
+        g_destage_info_poller = SPDK_POLLER_REGISTER(slice_destage_info_poller, NULL, 20);
+    }
     if (wals_bdev->buffer_blocklen != wals_bdev->bdev.blocklen) {
         SPDK_ERRLOG("Only support buffer blocklen == bdev blocklen\n");
         return NULL;
@@ -190,6 +224,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
     struct wals_cli_slice *cli_slice = calloc(1, sizeof(struct wals_cli_slice));
 
     cli_slice->wals_bdev = wals_bdev;
+    cli_slice->wals_target = target;
 
 	struct sockaddr_in addr;
 	struct addrinfo hints = {};
@@ -211,7 +246,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                 && cur_addr->sin_port == addr.sin_port) {
                 SPDK_NOTICELOG("Already created rdma connection.\n");
                 cli_slice->rdma_conn = &g_rdma_cli_conns[i];
-                TAILQ_INSERT_TAIL(&g_rdma_cli_conns[i].slices, cli_slice, tailq);
+                TAILQ_INSERT_TAIL(&g_rdma_cli_conns[i].slices, cli_slice, tailq_rdma);
                 break;
             }
         }
@@ -225,7 +260,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                 SPDK_NOTICELOG("Using empty RDMA connection slot %d\n", i);
                 cli_slice->rdma_conn = &g_rdma_cli_conns[i];
                 TAILQ_INIT(&g_rdma_cli_conns[i].slices);
-                TAILQ_INSERT_TAIL(&g_rdma_cli_conns[i].slices, cli_slice, tailq);
+                TAILQ_INSERT_TAIL(&g_rdma_cli_conns[i].slices, cli_slice, tailq_rdma);
 
                 g_rdma_cli_conns[i].id = i;
                 g_rdma_cli_conns[i].server_addr = addr_res;
@@ -344,6 +379,11 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
     target->log_blockcnt = LOG_BLOCKCNT;
     target->private_info = cli_slice;
 
+    cli_slice->id = g_num_slices;
+    g_num_slices++;
+
+    TAILQ_INSERT_TAIL(&g_slices, cli_slice, tailq_all_slices);
+
     return target;
 }
 
@@ -407,6 +447,8 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     sge.lkey = slice->rdma_conn->mr_read->lkey;
     // SPDK_NOTICELOG("READ %p %p %p %p %ld %ld %ld %ld\n", wals_io, data, data + sge.length, wr.wr.rdma.remote_addr,
     //     cnt, offset, slice->wals_bdev->buffer_blocklen, sge.lkey);
+
+    
     rc = ibv_post_send(slice->rdma_conn->cm_id->qp, &wr, &bad_wr);
     if (rc != 0) {
         SPDK_ERRLOG("RDMA read failed with errno = %d\n", rc);
@@ -679,6 +721,18 @@ rdma_cli_connection_poller(void* ctx) {
                     }
                     g_rdma_cli_conns[i].mr_handshake = mr_handshake;
 
+                    struct ibv_mr* mr_destage_info = ibv_reg_mr(g_rdma_cli_conns[i].cm_id->qp->pd,
+                        g_destage_info,
+                        sizeof(g_destage_info),
+                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
+
+                    if (mr_destage_info == NULL) {
+                        SPDK_ERRLOG("failed to reg mr handshake\n");
+                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        break;
+                    }
+                    g_rdma_cli_conns[i].mr_destage_info = mr_destage_info;
+
                     struct ibv_recv_wr wr, *bad_wr = NULL;
                     struct ibv_sge sge;
 
@@ -789,6 +843,13 @@ rdma_cli_connection_poller(void* ctx) {
                         break;
                     }
                     g_rdma_cli_conns[i].mr_handshake = NULL;
+                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_destage_info);
+                    if (rc != 0) {
+                        SPDK_ERRLOG("failed to dereg mr\n");
+                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        break;
+                    }
+                    g_rdma_cli_conns[i].mr_destage_info = NULL;
 
                     g_rdma_cli_conns[i].status = RDMA_CLI_INITIALIZED;
                 }
@@ -802,8 +863,6 @@ rdma_cli_connection_poller(void* ctx) {
                 struct rdma_handshake* handshake = &g_rdma_handshakes[NUM_TARGETS];
                 int rc;
                 struct rdma_cm_event* connect_event;
-                struct ibv_send_wr send_wr, *bad_send_wr = NULL;
-                struct ibv_sge send_sge;
                 rc = rdma_get_cm_event(g_rdma_cli_conns[i].channel, &connect_event);
                 if (rc != 0) {
                     if (errno == EAGAIN) {
@@ -872,6 +931,13 @@ rdma_cli_connection_poller(void* ctx) {
                         break;
                     }
                     g_rdma_cli_conns[i].mr_handshake = NULL;
+                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_destage_info);
+                    if (rc != 0) {
+                        SPDK_ERRLOG("failed to dereg mr\n");
+                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        break;
+                    }
+                    g_rdma_cli_conns[i].mr_destage_info = NULL;
 
                     g_rdma_cli_conns[i].status = RDMA_CLI_INITIALIZED;
                     break;
@@ -888,6 +954,8 @@ rdma_cli_connection_poller(void* ctx) {
                     handshake->block_cnt,
                     handshake->block_size);
 
+                struct ibv_send_wr send_wr, *bad_send_wr = NULL;
+                struct ibv_sge send_sge;
                 memset(&send_wr, 0, sizeof(send_wr));
 
                 send_wr.wr_id = NUM_TARGETS + i;
@@ -966,6 +1034,48 @@ rdma_cli_connection_poller(void* ctx) {
 	return SPDK_POLLER_BUSY;
 }
 
+static int slice_destage_info_poller(void* ctx) {
+    struct wals_cli_slice* cli_slice;
+    TAILQ_FOREACH(cli_slice, &g_slices, tailq_all_slices) {
+        if (g_destage_info[cli_slice->id].checksum == DESTAGE_INFO_CHECKSUM) {
+            if (cli_slice->rdma_conn->status == RDMA_CLI_CONNECTED) {
+                struct ibv_send_wr send_wr, *bad_send_wr = NULL;
+                struct ibv_sge send_sge;
+                memset(&send_wr, 0, sizeof(send_wr));
+
+                send_wr.wr_id = 0;
+                send_wr.opcode = IBV_WR_RDMA_READ;
+                send_wr.sg_list = &send_sge;
+                send_wr.num_sge = 1;
+                send_wr.send_flags = IBV_SEND_SIGNALED;
+                send_wr.wr.rdma.remote_addr = (uint64_t)g_rdma_handshakes[cli_slice->rdma_conn->id].base_addr + LOG_BLOCKCNT * cli_slice->wals_bdev->buffer_blocklen;
+                send_wr.wr.rdma.rkey = g_rdma_handshakes[cli_slice->rdma_conn->id].rkey;
+
+                send_sge.addr = (uint64_t)&g_destage_info[cli_slice->id];
+                send_sge.length = sizeof(struct destage_info);
+                send_sge.lkey = cli_slice->rdma_conn->mr_destage_info->lkey;
+
+                int rc = ibv_post_send(cli_slice->rdma_conn->cm_id->qp, &send_wr, &bad_send_wr);
+                if (rc != 0) {
+                    SPDK_ERRLOG("post send failed\n");
+                    break;
+                }
+            }
+        } 
+        else if (g_destage_info[cli_slice->id].checksum == 0) {
+            // RDMA read is successful
+            // update and set the checksum back
+            cli_slice->wals_target->head.offset = g_destage_info[cli_slice->id].destage_head;
+            cli_slice->wals_target->head.round = g_destage_info[cli_slice->id].destage_round;
+            g_destage_info[cli_slice->id].checksum = DESTAGE_INFO_CHECKSUM;
+        }
+        else {
+            SPDK_ERRLOG("Should not happen\n");
+        }
+    }
+    return SPDK_POLLER_BUSY;
+}
+
 static int
 rdma_cq_poller(void* ctx) {
     for (int i = 0; i < NUM_TARGETS; i++) {
@@ -978,7 +1088,7 @@ rdma_cq_poller(void* ctx) {
             else {
                 for (int j = 0; j < cnt; j++) {
                     bool success = true;
-					struct wals_bdev_io* io = (struct wals_bdev_io*)g_rdma_cli_conns[i].wc_buf[j].wr_id;
+					void* io = (void*)g_rdma_cli_conns[i].wc_buf[j].wr_id;
 					if (g_rdma_cli_conns[i].wc_buf[j].status != IBV_WC_SUCCESS) {
                         // TODO: should set the qp state to error, or reconnect?
 						SPDK_ERRLOG("IO %p RDMA op %d failed with status %d\n",
@@ -988,6 +1098,12 @@ rdma_cq_poller(void* ctx) {
                         
                         success = false;
 					}
+
+                    if (g_rdma_cli_conns[i].wc_buf[j].wr_id == 0) {
+                        // special case: the wr is for reading destage info.
+                        // do nothing
+                        continue;
+                    }
 
                     if (g_rdma_cli_conns[i].wc_buf[j].opcode == IBV_WC_RDMA_READ) {
                         wals_target_read_complete(io, success);
