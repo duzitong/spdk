@@ -860,7 +860,7 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 	metadata->core_offset = bdev_io->u.bdev.offset_blocks;
 	metadata->next_offset = slice_tail.offset;
 	metadata->length = bdev_io->u.bdev.num_blocks;
-	metadata->round = slice->tail.round;
+	metadata->round = slice_tail.round;
 
 	wals_io->metadata = metadata;
 
