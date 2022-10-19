@@ -822,7 +822,7 @@ static int persist_rdma_poller(void* ctx) {
 				ibv_mr_circular = ibv_reg_mr(
 					pdisk->pd,
 					pdisk->malloc_buf,
-					buffer_len,
+					buffer_len + pdisk->remote_handshake->block_size,
 					IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
 
 				pdisk->mr = ibv_mr_circular;
