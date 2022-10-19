@@ -49,6 +49,10 @@ null_submit_log_write_request(struct wals_target* target, void *data, uint64_t o
 {
     SPDK_DEBUGLOG(bdev_wals_null, "log write: %ld+%ld\n", offset, cnt);
 
+    if (spdk_unlikely(offset + cnt > LOG_BUFFER_SIZE)) {
+        SPDK_ERRLOG("ERROR!!! %ld, %ld", offset, cnt);
+    }
+
     if (offset < target->head.offset) {
         target->head.round++;
     }
