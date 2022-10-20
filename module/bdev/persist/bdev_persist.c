@@ -542,13 +542,13 @@ persist_destage_poller(void *ctx)
 				break;
 			}
 		}
-		// SPDK_NOTICELOG("Getting md %ld %ld %ld %ld %ld %ld\n",
-		// 	metadata->version,
-		// 	metadata->seq,
-		// 	metadata->next_offset,
-		// 	metadata->round,
-		// 	metadata->length,
-		// 	metadata->core_offset);
+		SPDK_NOTICELOG("Getting md %ld %ld %ld %ld %ld %ld\n",
+			metadata->version,
+			metadata->seq,
+			metadata->next_offset,
+			metadata->round,
+			metadata->length,
+			metadata->core_offset);
 
 		// metadata should contain good info from now.
 		// payload is always one block after metadata
@@ -607,17 +607,18 @@ persist_destage_poller(void *ctx)
 		}
 	}
 
-	if (old_info.destage_head == pdisk->destage_info->destage_head
-		&& old_info.destage_round == pdisk->destage_info->destage_round) {
-		return SPDK_POLLER_IDLE;
-	}
-	else {
-		// write to the final block of the malloc buffer for client to read
-		void* dst = pdisk->malloc_buf + 
-			pdisk->remote_handshake->block_size * (pdisk->remote_handshake->block_cnt - 1);
-		memcpy(dst, pdisk->destage_info, pdisk->remote_handshake->block_size);
-		return SPDK_POLLER_BUSY;
-	}
+	return SPDK_POLLER_BUSY;
+	// if (old_info.destage_head == pdisk->destage_info->destage_head
+	// 	&& old_info.destage_round == pdisk->destage_info->destage_round) {
+	// 	return SPDK_POLLER_IDLE;
+	// }
+	// else {
+	// 	// write to the final block of the malloc buffer for client to read
+	// 	void* dst = pdisk->malloc_buf + 
+	// 		pdisk->remote_handshake->block_size * (pdisk->remote_handshake->block_cnt - 1);
+	// 	memcpy(dst, pdisk->destage_info, pdisk->remote_handshake->block_size);
+	// 	return SPDK_POLLER_BUSY;
+	// }
 }
 
 static int persist_rdma_poller(void* ctx) {
@@ -832,12 +833,6 @@ static int persist_rdma_poller(void* ctx) {
 					handshake->base_addr,
 					handshake->rkey,
 					buffer_len);
-
-				// if (!pdisk->attach_disk) {
-				// 	SPDK_NOTICELOG("In pure memory mode, set the destage info to (-1, -1)\n");
-				// 	pdisk->destage_info->destage_head = -1;
-				// 	pdisk->destage_info->destage_round = -1;
-				// }
 			}
 			else if (wc.wr_id == 2) {
 				SPDK_NOTICELOG("send req complete\n");
