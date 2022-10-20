@@ -935,7 +935,7 @@ wals_bdev_submit_write_request(void *arg)
 	// check slice space
 	if (!wals_bdev_update_tail(bdev_io->u.bdev.num_blocks + METADATA_BLOCKS,
 								slice->tail, slice->log_blockcnt, slice->head, &slice_tail)) {
-		SPDK_DEBUGLOG(bdev_wals, "queue bdev io submit due to no enough space left on slice log.\n");
+		SPDK_NOTICELOG("queue bdev io submit due to no enough space left on slice log. head: (%ld,%ld) tail: (%ld,%ld)\n", slice->head.offset, slice->head.round, slice->tail.offset, slice->tail.round);
 		spdk_thread_send_msg(spdk_get_thread(), wals_bdev_submit_write_request, wals_io);
 		
 		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_W, 0, 0, (uintptr_t)wals_io, 1, 0);
@@ -946,7 +946,7 @@ wals_bdev_submit_write_request(void *arg)
 	// check buffer space
 	wals_io->dma_page = dma_heap_get_page(wals_bdev->write_heap, bdev_io->u.bdev.num_blocks * wals_bdev->buffer_blocklen);
 	if (!wals_io->dma_page) {
-		SPDK_DEBUGLOG(bdev_wals, "queue bdev io submit due to no enough space left on buffer.\n");
+		SPDK_NOTICELOG("queue bdev io submit due to no enough space left on buffer.\n");
 		spdk_thread_send_msg(spdk_get_thread(), wals_bdev_submit_write_request, wals_io);
 
 		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_W, 0, 0, (uintptr_t)wals_io, 0, 1);
@@ -1573,6 +1573,7 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 				wals_bdev->slices[i].log_blockcnt = wals_bdev->slices[i].targets[j]->log_blockcnt;
 			}
 		}
+		SPDK_NOTICELOG("log_blockcnt = %ld\n", wals_bdev->slices[i].log_blockcnt);
 	}
 
 	rc = wals_bdev_configure(wals_bdev);
@@ -1590,7 +1591,7 @@ wals_bdev_start(struct wals_bdev *wals_bdev)
 	uint64_t mempool_size;
 	uint64_t i;
 
-	mempool_size = wals_bdev->bdev.blockcnt >> 8;
+	mempool_size = wals_bdev->bdev.blockcnt;
 	mempool_size = spdk_align64pow2(mempool_size);
 
 	wals_bdev->bstat_pool = spdk_mempool_create("WALS_BSTAT_POOL", mempool_size, sizeof(bstat), 0, SPDK_ENV_SOCKET_ID_ANY);
