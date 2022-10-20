@@ -56,6 +56,10 @@
 #include <rdma/rdma_cma.h>
 #include <errno.h>
 
+// TODO: make it configurable
+#define PERSIST_MEM_BLOCK_SIZE 512
+#define PERSIST_MEM_BLOCK_CNT (20LL * 1024 * 1024)
+
 struct persist_destage_context {
 	int remaining;
 };
@@ -91,6 +95,7 @@ struct persist_disk {
 	enum persist_rdma_status rdma_status;
 	// if false, then all nvme-related fields are null.
 	bool attach_disk;
+	void* disk_buf;
 	// uint32_t io_queue_head;
 	// uint32_t io_queue_size;
 	// uint64_t* io_queue_offset;
@@ -169,7 +174,6 @@ static struct spdk_bdev_module persist_if = {
 	.module_init = bdev_persist_initialize,
 	.module_fini = bdev_persist_deinitialize,
 	.get_ctx_size = bdev_persist_get_ctx_size,
-
 };
 
 SPDK_BDEV_MODULE_REGISTER(persist, &persist_if)
@@ -303,28 +307,13 @@ bdev_persist_readv(struct persist_disk *pdisk,
 		return;
 	}
 
-	// SPDK_NOTICELOG("read %zu bytes from offset %#" PRIx64 ", iovcnt=%d\n",
-	// 	      lba_count * block_size, lba * block_size, iovcnt);
+	if (pdisk->attach_disk) {
+		pio->iovs = iov;
+		pio->iovcnt = iovcnt;
+		pio->iovpos = 0;
+		pio->iov_offset = 0;
+		int rc;
 
-	pio->iovs = iov;
-	pio->iovcnt = iovcnt;
-	pio->iovpos = 0;
-	pio->iov_offset = 0;
-	int rc;
-
-	// if (iovcnt == 1) {
-	// 	SPDK_NOTICELOG("use simple imple\n");
-	// 	rc = spdk_nvme_ns_cmd_read(pdisk->ns,
-	// 		pdisk->qpair,
-	// 		iov[0].iov_base,
-	// 		lba,
-	// 		lba_count,
-	// 		bdev_persist_read_done,
-	// 		pio,
-	// 		0);
-
-	// }
-	// else {
 		rc = spdk_nvme_ns_cmd_readv(pdisk->ns,
 			pdisk->qpair,
 			lba,
@@ -336,16 +325,21 @@ bdev_persist_readv(struct persist_disk *pdisk,
 			bdev_persist_next_sge
 			);
 
-	// }
-
-
-	if (spdk_unlikely(rc != 0)) {
-		SPDK_ERRLOG("read io failed: %d\n", rc);
-		// spdk_bdev_io_complete(spdk_bdev_io_from_ctx(pio), SPDK_BDEV_IO_STATUS_FAILED);
-		return;
+		if (spdk_unlikely(rc != 0)) {
+			SPDK_ERRLOG("read io failed: %d\n", rc);
+			// spdk_bdev_io_complete(spdk_bdev_io_from_ctx(pio), SPDK_BDEV_IO_STATUS_FAILED);
+			return;
+		}
 	}
-	// SPDK_NOTICELOG("Read ret\n");
-	// spdk_bdev_io_complete(spdk_bdev_io_from_ctx(pio), SPDK_BDEV_IO_STATUS_SUCCESS);
+	else {
+		uint64_t bytes_read = 0;
+		void* start = pdisk->disk_buf + lba * pdisk->disk.blocklen;
+		for (int i = 0; i < iovcnt; i++) {
+			memcpy(iov[i].iov_base, start, iov[i].iov_len);
+			start += iov[i].iov_len;
+		}
+		spdk_bdev_io_complete(spdk_bdev_io_from_ctx(pio), SPDK_BDEV_IO_STATUS_SUCCESS);
+	}
 }
 
 static int _bdev_persist_submit_request(struct spdk_bdev_io *bdev_io)
@@ -355,25 +349,11 @@ static int _bdev_persist_submit_request(struct spdk_bdev_io *bdev_io)
 
 	if (bdev_io->u.bdev.iovs[0].iov_base == NULL) {
 		SPDK_ERRLOG("Received read req where iov_base is null\n");
-		return 0;
+		return -1;
 	}
 
 	switch (bdev_io->type) {
 	case SPDK_BDEV_IO_TYPE_READ:
-		if (bdev_io->u.bdev.iovs[0].iov_base == NULL) {
-			// TODO: in which case will the code enter this branch?
-			// in theory, I would read from disk instead.
-			SPDK_NOTICELOG("Received read req where iov_base is null\n");
-			assert(bdev_io->u.bdev.iovcnt == 1);
-			bdev_io->u.bdev.iovs[0].iov_base =
-				((struct persist_disk *)bdev_io->bdev->ctxt)->malloc_buf +
-				bdev_io->u.bdev.offset_blocks * block_size;
-			bdev_io->u.bdev.iovs[0].iov_len = bdev_io->u.bdev.num_blocks * block_size;
-			spdk_bdev_io_complete(bdev_io,
-					     SPDK_BDEV_IO_STATUS_SUCCESS);
-			return 0;
-		}
-
 		bdev_persist_readv((struct persist_disk *)bdev_io->bdev->ctxt,
 				  (struct persist_io *)bdev_io->driver_ctx,
 				  bdev_io->u.bdev.iovs,
@@ -391,13 +371,6 @@ static int _bdev_persist_submit_request(struct spdk_bdev_io *bdev_io)
 
 static void bdev_persist_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_io)
 {
-	struct persist_disk* bdev = bdev_io->bdev->ctxt;
-	if (spdk_unlikely(!bdev->attach_disk)) {
-		SPDK_WARNLOG("Persist bdev not attached to disk but received IO requests. Should not happen frequently\n");
-		spdk_bdev_io_complete(bdev_io,
-				     SPDK_BDEV_IO_STATUS_SUCCESS);
-	}
-
 	if (_bdev_persist_submit_request(bdev_io) != 0) {
 		spdk_bdev_io_complete(bdev_io,
 				     SPDK_BDEV_IO_STATUS_FAILED);
@@ -591,40 +564,46 @@ persist_destage_poller(void *ctx)
 			pdisk->prev_seq = metadata->seq - 1;
 		}
 
-		rc = spdk_nvme_ns_cmd_write(pdisk->ns,
-			pdisk->qpair,
-			payload,
-			metadata->core_offset,
-			metadata->length,
-			bdev_persist_destage_done,
-			pdisk,
-			0);
-		
-		if (rc != 0) {
-			// TODO: what to do when writing SSD fails?
-			if (spdk_unlikely(rc != -ENOMEM)) {
-				// we expect ENOMEM, as it always happens when client submit 
-				// too many requests.
-				SPDK_ERRLOG("Write SSD failed with rc = %d\n", rc);
+		if (pdisk->attach_disk) {
+			rc = spdk_nvme_ns_cmd_write(pdisk->ns,
+				pdisk->qpair,
+				payload,
+				metadata->core_offset,
+				metadata->length,
+				bdev_persist_destage_done,
+				pdisk,
+				0);
+			
+			if (rc != 0) {
+				// TODO: what to do when writing SSD fails?
+				if (spdk_unlikely(rc != -ENOMEM)) {
+					// we expect ENOMEM, as it always happens when client submit 
+					// too many requests.
+					SPDK_ERRLOG("Write SSD failed with rc = %d\n", rc);
+				}
+				break;
 			}
-			break;
+
+			pdisk->destage_context.remaining++;
 		}
-
-		pdisk->destage_context.remaining++;
-
+		else {
+			memcpy(pdisk->disk_buf + metadata->core_offset * pdisk->disk.blocklen, payload, metadata->length * pdisk->disk.blocklen);
+		}
 		// only updating head pointer
 		// as round only changes when going back to the start of the array
 		pdisk->destage_info->destage_head = metadata->next_offset;
 		pdisk->prev_seq++;
 	}
 
-	// wait for every IO to complete
-	while (pdisk->destage_context.remaining != 0) {
-		// note that it may also complete some read requests, but we don't care.
-		rc = spdk_nvme_qpair_process_completions(pdisk->qpair, 0);
-		if (rc < 0) {
-			SPDK_ERRLOG("qpair failed %d\n", rc);
-			break;
+	if (pdisk->attach_disk) {
+		// wait for every IO to complete
+		while (pdisk->destage_context.remaining != 0) {
+			// note that it may also complete some read requests, but we don't care.
+			rc = spdk_nvme_qpair_process_completions(pdisk->qpair, 0);
+			if (rc < 0) {
+				SPDK_ERRLOG("qpair failed %d\n", rc);
+				break;
+			}
 		}
 	}
 
@@ -854,11 +833,11 @@ static int persist_rdma_poller(void* ctx) {
 					handshake->rkey,
 					buffer_len);
 
-				if (!pdisk->attach_disk) {
-					SPDK_NOTICELOG("In pure memory mode, set the destage info to (-1, -1)\n");
-					pdisk->destage_info->destage_head = -1;
-					pdisk->destage_info->destage_round = -1;
-				}
+				// if (!pdisk->attach_disk) {
+				// 	SPDK_NOTICELOG("In pure memory mode, set the destage info to (-1, -1)\n");
+				// 	pdisk->destage_info->destage_head = -1;
+				// 	pdisk->destage_info->destage_round = -1;
+				// }
 			}
 			else if (wc.wr_id == 2) {
 				SPDK_NOTICELOG("send req complete\n");
@@ -937,8 +916,17 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 	}
 	else {
 		// just some fake data, as it doesn't serve IO requests anyway.
-		pdisk->disk.blockcnt = 1;
-		pdisk->disk.blocklen = 512;
+		pdisk->disk.blockcnt = PERSIST_MEM_BLOCK_CNT;
+		pdisk->disk.blocklen = PERSIST_MEM_BLOCK_SIZE;
+		pdisk->disk_buf = spdk_zmalloc(pdisk->disk.blockcnt * pdisk->disk.blocklen, 
+			2 * 1024 * 1024,
+			NULL,
+			SPDK_ENV_LCORE_ID_ANY,
+			SPDK_MALLOC_DMA);
+		if (pdisk->disk_buf == NULL) {
+			SPDK_ERRLOG("Failed to alloc disk buffer in mem mode\n");
+			return -EINVAL;
+		}
 	}
 
 	pdisk->destage_info = spdk_zmalloc(pdisk->disk.blocklen, 0, 
@@ -1036,12 +1024,12 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 			SPDK_ERRLOG("Failed to register persist nvme poller\n");
 			return -ENOMEM;
 		}
+	}
 
-		pdisk->destage_poller = SPDK_POLLER_REGISTER(persist_destage_poller, pdisk, 0);
-		if (!pdisk->destage_poller) {
-			SPDK_ERRLOG("Failed to register persist destage poller\n");
-			return -ENOMEM;
-		}
+	pdisk->destage_poller = SPDK_POLLER_REGISTER(persist_destage_poller, pdisk, 0);
+	if (!pdisk->destage_poller) {
+		SPDK_ERRLOG("Failed to register persist destage poller\n");
+		return -ENOMEM;
 	}
 
 	rc = spdk_bdev_register(&pdisk->disk);
