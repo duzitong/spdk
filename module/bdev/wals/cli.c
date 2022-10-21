@@ -281,10 +281,6 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                     g_rdma_connection_poller = SPDK_POLLER_REGISTER(rdma_cli_connection_poller, wals_bdev, 5 * 1000);
                 }
 
-                // NOTE: may need different pollers for each qp in the future
-                if (g_rdma_cq_poller == NULL) {
-                    g_rdma_cq_poller = SPDK_POLLER_REGISTER(rdma_cq_poller, wals_bdev, 0);
-                }
 
                 while (g_rdma_cli_conns[i].status != RDMA_CLI_CONNECTED) {
                     rdma_cli_connection_poller(wals_bdev);
@@ -354,9 +350,6 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                     g_nvmf_connection_poller = SPDK_POLLER_REGISTER(nvmf_cli_connection_poller, wals_bdev, 5 * 1000);
                 }
 
-                if (g_nvmf_cq_poller == NULL) {
-                    g_nvmf_cq_poller = SPDK_POLLER_REGISTER(nvmf_cq_poller, wals_bdev, 0);
-                }
                 break;
             }
         }
@@ -518,6 +511,17 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
         return 0;
     }
 
+    // struct wals_metadata* metadata = data;
+    
+    // SPDK_NOTICELOG("Sending md %ld %ld %ld %ld %ld %ld to slice %d\n",
+    //     metadata->version,
+    //     metadata->seq,
+    //     metadata->next_offset,
+    //     metadata->round,
+    //     metadata->length,
+    //     metadata->core_offset,
+    //     slice->id);
+
 	struct ibv_send_wr wr, *bad_wr = NULL;
 	struct ibv_sge sge;
 	memset(&wr, 0, sizeof(wr));
@@ -548,24 +552,37 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
 static int
 cli_register_write_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
 {
+    // NOTE: may need different pollers for each qp in the future
+    if (g_rdma_cq_poller == NULL) {
+        g_rdma_cq_poller = SPDK_POLLER_REGISTER(rdma_cq_poller, wals_bdev, 0);
+    }
     return 0;
 }
 
 static int
 cli_unregister_write_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
 {
+    if (g_rdma_cq_poller != NULL) {
+        spdk_poller_unregister(&g_rdma_cq_poller);
+    }
     return 0;
 }
 
 static int
 cli_register_read_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
 {
+    if (g_nvmf_cq_poller == NULL) {
+        g_nvmf_cq_poller = SPDK_POLLER_REGISTER(nvmf_cq_poller, wals_bdev, 0);
+    }
     return 0;
 }
 
 static int
 cli_unregister_read_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
 {
+    if (g_nvmf_cq_poller != NULL) {
+        spdk_poller_unregister(&g_nvmf_cq_poller);
+    }
     return 0;
 }
 
