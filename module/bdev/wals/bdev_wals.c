@@ -785,10 +785,6 @@ wals_target_write_complete(struct wals_bdev_io *wals_io, bool success)
 
 	wals_io->targets_completed++;
 
-	if (((struct wals_metadata*) wals_io->dma_page->buf)->version != METADATA_VERSION) {
-		SPDK_ERRLOG("???\n");
-	}
-
 	if (spdk_unlikely(!success)) {
 		wals_io->targets_failed++;
 
