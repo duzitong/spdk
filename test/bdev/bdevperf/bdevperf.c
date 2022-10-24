@@ -609,6 +609,10 @@ bdevperf_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 
 	spdk_bdev_free_io(bdev_io);
 
+	if (g_main_thread != job->thread) {
+		job->is_draining = true;
+	}
+
 	/*
 	 * is_draining indicates when time has expired for the test run
 	 * and we are just waiting for the previously submitted I/O
