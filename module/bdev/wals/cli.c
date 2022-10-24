@@ -15,7 +15,7 @@
 // TODO: make it configurable; server should decide it?
 // need another async API to tell parent bdev about the 
 // block size; hard-code now.
-#define LOG_BLOCKCNT 131072
+#define LOG_BLOCKCNT 1310720
 // Should not exceed log_blockcnt
 #define PENDING_IO_MAX_CNT 131072
 #define MAX_SLICES 256
@@ -213,7 +213,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
             g_destage_info[i].checksum = DESTAGE_INFO_CHECKSUM;
         }
 
-        g_destage_info_poller = SPDK_POLLER_REGISTER(slice_destage_info_poller, NULL, 0);
+        g_destage_info_poller = SPDK_POLLER_REGISTER(slice_destage_info_poller, NULL, 5);
     }
     if (wals_bdev->buffer_blocklen != wals_bdev->bdev.blocklen) {
         SPDK_ERRLOG("Only support buffer blocklen == bdev blocklen\n");
