@@ -75,6 +75,7 @@ struct rdma_cli_connection {
     volatile enum rdma_cli_status status;
     uint64_t reject_cnt;
     uint64_t io_fail_cnt;
+    uint64_t reconnect_cnt;
     TAILQ_HEAD(, wals_cli_slice) slices;
 };
 
@@ -797,6 +798,7 @@ rdma_cli_connection_poller(void* ctx) {
                     // TODO: server should provide this value
                     handshake->block_cnt = LOG_BLOCKCNT;
                     handshake->block_size = wals_bdev->buffer_blocklen;
+                    handshake->reconnect_cnt = g_rdma_cli_conns[i].reconnect_cnt;
 
                     wr.wr_id = (uintptr_t)i;
                     wr.next = NULL;
@@ -994,6 +996,7 @@ rdma_cli_connection_poller(void* ctx) {
                     g_rdma_cli_conns[i].mr_destage_info = NULL;
 
                     g_rdma_cli_conns[i].status = RDMA_CLI_INITIALIZED;
+                    g_rdma_cli_conns[i].reconnect_cnt++;
                     break;
                 }
                 else if (connect_event->event != RDMA_CM_EVENT_ESTABLISHED) {

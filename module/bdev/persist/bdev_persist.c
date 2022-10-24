@@ -64,6 +64,11 @@ struct persist_destage_context {
 	int remaining;
 };
 
+enum persist_disk_status {
+	PERSIST_DISK_NORMAL,
+	PERSIST_DISK_IN_RECOVERY,
+};
+
 enum persist_rdma_status {
 	PERSIST_RDMA_CONNECTING,
 	PERSIST_RDMA_ACCEPTED,
@@ -93,6 +98,8 @@ struct persist_disk {
 	struct persist_destage_context destage_context;
 	uint64_t prev_seq;
 	enum persist_rdma_status rdma_status;
+	enum persist_disk_status disk_status;
+	
 	// if false, then all nvme-related fields are null.
 	bool attach_disk;
 	void* disk_buf;
