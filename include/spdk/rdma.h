@@ -26,6 +26,11 @@ struct rdma_handshake {
 	// client tells server about the block size and count
 	uint64_t block_size;
 	uint64_t block_cnt;
+	// the reconnect counter that client believes
+	// if data node receives a number that is greater than itself, 
+	// then it should do fully recovery
+	// TODO: add more fields to support half-recovery
+	uint64_t reconnect_cnt;
 };
 
 #ifdef __cplusplus
