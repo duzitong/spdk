@@ -1435,7 +1435,7 @@ bdevperf_construct_job(struct spdk_bdev *bdev, struct job_config *config,
 	}
 
 	job->thread = thread;
-	job->test_thread = g_construct_job_count == 0;
+	job->test_thread = g_construct_job_count == 1;
 
 	g_construct_job_count++;
 
