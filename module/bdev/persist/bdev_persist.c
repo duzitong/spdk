@@ -841,6 +841,11 @@ static int persist_rdma_poller(void* ctx) {
 					handshake->base_addr,
 					handshake->rkey,
 					buffer_len);
+
+				if (pdisk->remote_handshake->reconnect_cnt > 0) {
+					SPDK_NOTICELOG("The node is reconnected\n");
+					pdisk->disk_status = PERSIST_DISK_IN_RECOVERY;
+				}
 			}
 			else if (wc.wr_id == 2) {
 				SPDK_NOTICELOG("send req complete\n");

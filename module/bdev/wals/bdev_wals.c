@@ -1922,6 +1922,16 @@ SPDK_TRACE_REGISTER_FN(wals_trace, "wals", TRACE_GROUP_WALS)
 			OWNER_WALS, OBJECT_WALS_BDEV, 0,
 			{}
 		},
+		{
+			"WALS_S_RDMA_CQ", TRACE_WALS_S_RDMA_CQ,
+			OWNER_WALS, OBJECT_WALS_BDEV, 1,
+			{}
+		},
+		{
+			"WALS_F_RDMA_CQ", TRACE_WALS_F_RDMA_CQ,
+			OWNER_WALS, OBJECT_WALS_BDEV, 0,
+			{}
+		},
 	};
 
 	spdk_trace_register_owner(OWNER_WALS, 'w');

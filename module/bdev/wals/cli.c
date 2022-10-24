@@ -1135,6 +1135,7 @@ static int slice_destage_info_poller(void* ctx) {
 
 static int
 rdma_cq_poller(void* ctx) {
+    spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_RDMA_CQ, 0, 0, (uintptr_t)ctx);
     for (int i = 0; i < NUM_TARGETS; i++) {
         if (g_rdma_cli_conns[i].status == RDMA_CLI_CONNECTED) {
             int cnt = ibv_poll_cq(g_rdma_cli_conns[i].cq, WC_BATCH_SIZE, &g_rdma_cli_conns[i].wc_buf[0]);
@@ -1165,6 +1166,7 @@ rdma_cq_poller(void* ctx) {
                         continue;
                     }
 
+
                     if (g_rdma_cli_conns[i].wc_buf[j].opcode == IBV_WC_RDMA_READ) {
                         wals_target_read_complete(io, success);
                     }
@@ -1175,6 +1177,7 @@ rdma_cq_poller(void* ctx) {
             }
         }
     }
+    spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_RDMA_CQ, 0, 0, (uintptr_t)ctx);
     return SPDK_POLLER_IDLE;
 }
 
