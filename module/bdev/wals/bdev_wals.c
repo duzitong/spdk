@@ -1764,8 +1764,8 @@ SPDK_TRACE_REGISTER_FN(wals_trace, "wals", TRACE_GROUP_WALS)
 			"WALS_F_SUB_W", TRACE_WALS_F_SUB_W,
 			OWNER_WALS, OBJECT_WALS_IO, 0,
 			{
-				{ "slicefull", SPDK_TRACE_ARG_TYPE_INT, 8 },
-				{ "bufferfull", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "sfull", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "bfull", SPDK_TRACE_ARG_TYPE_INT, 8 },
 			}
 		},
 		{
