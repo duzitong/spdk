@@ -213,7 +213,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
             g_destage_info[i].checksum = DESTAGE_INFO_CHECKSUM;
         }
 
-        g_destage_info_poller = SPDK_POLLER_REGISTER(slice_destage_info_poller, NULL, 20);
+        g_destage_info_poller = SPDK_POLLER_REGISTER(slice_destage_info_poller, NULL, 0);
     }
     if (wals_bdev->buffer_blocklen != wals_bdev->bdev.blocklen) {
         SPDK_ERRLOG("Only support buffer blocklen == bdev blocklen\n");
