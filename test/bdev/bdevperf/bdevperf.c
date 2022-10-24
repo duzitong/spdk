@@ -609,10 +609,6 @@ bdevperf_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 
 	spdk_bdev_free_io(bdev_io);
 
-	if (g_main_thread != job->thread) {
-		job->is_draining = true;
-	}
-
 	/*
 	 * is_draining indicates when time has expired for the test run
 	 * and we are just waiting for the previously submitted I/O
@@ -1043,7 +1039,11 @@ bdevperf_job_run(void *ctx)
 	 * completes, another will be submitted. */
 
 	/* Start a timer to stop this I/O chain when the run is over */
-	job->run_timer = SPDK_POLLER_REGISTER(bdevperf_job_drain, job, g_time_in_usec);
+	if (job->thread == g_main_thread) {
+		job->run_timer = SPDK_POLLER_REGISTER(bdevperf_job_drain, job, g_time_in_usec);
+	} else {
+		job->run_timer = SPDK_POLLER_REGISTER(bdevperf_job_drain, job, 10);
+	}
 	if (job->reset) {
 		job->reset_timer = SPDK_POLLER_REGISTER(reset_job, job,
 							10 * 1000000);
