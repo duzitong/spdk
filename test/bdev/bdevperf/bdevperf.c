@@ -102,6 +102,7 @@ struct bdevperf_job {
 	struct spdk_io_channel		*ch;
 	TAILQ_ENTRY(bdevperf_job)	link;
 	struct spdk_thread		*thread;
+	bool				test_thread;
 
 	const char			*workload_type;
 	int				io_size;
@@ -1039,7 +1040,11 @@ bdevperf_job_run(void *ctx)
 	 * completes, another will be submitted. */
 
 	/* Start a timer to stop this I/O chain when the run is over */
-	job->run_timer = SPDK_POLLER_REGISTER(bdevperf_job_drain, job, g_time_in_usec);
+	if (job->test_thread) {
+		job->run_timer = SPDK_POLLER_REGISTER(bdevperf_job_drain, job, g_time_in_usec);
+	} else {
+		job->run_timer = SPDK_POLLER_REGISTER(bdevperf_job_drain, job, 10);
+	}
 	if (job->reset) {
 		job->reset_timer = SPDK_POLLER_REGISTER(reset_job, job,
 							10 * 1000000);
@@ -1430,6 +1435,7 @@ bdevperf_construct_job(struct spdk_bdev *bdev, struct job_config *config,
 	}
 
 	job->thread = thread;
+	job->test_thread = g_construct_job_count == 1;
 
 	g_construct_job_count++;
 
