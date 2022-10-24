@@ -778,7 +778,6 @@ wals_bdev_write_complete_all(struct wals_bdev_io *wals_io)
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_COMP_W_A, 0, 0, (uintptr_t)wals_io);
 }
 
-// TODO: add timeout
 void
 wals_target_write_complete(struct wals_bdev_io *wals_io, bool success)
 {
