@@ -102,7 +102,7 @@ struct bdevperf_job {
 	struct spdk_io_channel		*ch;
 	TAILQ_ENTRY(bdevperf_job)	link;
 	struct spdk_thread		*thread;
-	bool				test_thread
+	bool				test_thread;
 
 	const char			*workload_type;
 	int				io_size;
