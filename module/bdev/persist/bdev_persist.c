@@ -491,8 +491,6 @@ persist_nvme_poller(void* ctx) {
 	return rc == 0 ? SPDK_POLLER_IDLE : SPDK_POLLER_BUSY;
 }
 
-bool g_tmp = true;
-
 static int
 persist_destage_poller(void *ctx)
 {
@@ -515,17 +513,6 @@ persist_destage_poller(void *ctx)
 		struct wals_metadata* metadata = pdisk->malloc_buf + pdisk->destage_info->destage_head * pdisk->disk.blocklen;
 		// if we get unlucky (lucky?), then the next block may be the one for the last
 		// round.
-
-		if (metadata->version != 0 && g_tmp) {
-			g_tmp = false;
-			SPDK_NOTICELOG("TMP: Getting md %ld %ld %ld %ld %ld %ld\n",
-				metadata->version,
-				metadata->seq,
-				metadata->next_offset,
-				metadata->round,
-				metadata->length,
-				metadata->core_offset);
-		}
 
 		if (metadata->version != PERSIST_METADATA_VERSION
 			|| metadata->seq < pdisk->prev_seq) {
