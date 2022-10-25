@@ -108,13 +108,13 @@
 #define TRACE_WALS_S_RDMA_CQ            SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x36)  // rdma poller
 #define TRACE_WALS_F_RDMA_CQ            SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x37)  // rdma poller
 
-=======
->>>>>>> origin/wals
 
 /*
  * WALS state describes the state of the wals bdev. This wals bdev can be either in
  * configured list or configuring list
  */
+enum wals_bdev_state {
+	/* wals bdev is ready and is seen by upper layers */
 	WALS_BDEV_STATE_ONLINE,
 
 	/*

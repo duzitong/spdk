@@ -213,7 +213,6 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
             g_destage_info[i].checksum = DESTAGE_INFO_CHECKSUM;
         }
 
-        g_destage_info_poller = SPDK_POLLER_REGISTER(slice_destage_info_poller, NULL, 5);
     }
     if (wals_bdev->buffer_blocklen != wals_bdev->bdev.blocklen) {
         SPDK_ERRLOG("Only support buffer blocklen == bdev blocklen\n");
@@ -556,6 +555,9 @@ cli_register_write_pollers(struct wals_target *target, struct wals_bdev *wals_bd
     // NOTE: may need different pollers for each qp in the future
     if (g_rdma_cq_poller == NULL) {
         g_rdma_cq_poller = SPDK_POLLER_REGISTER(rdma_cq_poller, wals_bdev, 0);
+    }
+    if (g_destage_info_poller == NULL) {
+        g_destage_info_poller = SPDK_POLLER_REGISTER(slice_destage_info_poller, NULL, 50);
     }
     return 0;
 }
