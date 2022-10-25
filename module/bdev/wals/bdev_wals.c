@@ -356,10 +356,10 @@ wals_bdev_io_complete(struct wals_bdev_io *wals_io, enum spdk_bdev_io_status sta
 	}
 }
 
-static wals_crc
+wals_crc
 wals_bdev_calc_crc(void *data, size_t len)
 {
-	return spdk_crc32c_update(data, len, 0);
+	return spdk_crc32c_update(data, len, MAGIC_INIT_CRC);
 }
 
 static wals_log_position

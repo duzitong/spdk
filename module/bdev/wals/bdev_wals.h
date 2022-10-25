@@ -50,6 +50,7 @@
 
 #define METADATA_VERSION		10086	// XD
 #define METADATA_BLOCKS			1
+#define MAGIC_INIT_CRC			0x88610086
 
 #define NUM_TARGETS				4
 #define QUORUM_TARGETS			3
@@ -544,6 +545,8 @@ __TARGET_MODULE_REGISTER(__LINE__)(void)					\
     wals_bdev_target_module_list_add(_module);					\
 }
 
+wals_crc
+wals_bdev_calc_crc(void *data, size_t len);
 void
 wals_target_read_complete(struct wals_bdev_io *wals_io, bool success);
 void
