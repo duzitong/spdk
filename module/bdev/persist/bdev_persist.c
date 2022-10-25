@@ -711,7 +711,7 @@ static int persist_rdma_poller(void* ctx) {
 
 			void* handshake_buffer = spdk_zmalloc(2 * sizeof(struct rdma_handshake), 2 * 1024 * 1024, NULL,
 							SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-			struct ibv_mr* ibv_mr_handshake = ibv_reg_mr(connect_event->id->qp->pd,
+			struct ibv_mr* ibv_mr_handshake = ibv_reg_mr(child_cm_id->qp->pd,
 				handshake_buffer,
 				2 * sizeof(struct rdma_handshake),
 				IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);

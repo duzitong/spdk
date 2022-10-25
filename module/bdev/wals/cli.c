@@ -750,7 +750,7 @@ rdma_cli_connection_poller(void* ctx) {
                     }
                     g_rdma_cli_conns[i].mr_read = mr_read;
 
-                    SPDK_NOTICELOG("Registering read buf %p to %p\n", wals_bdev->read_heap->buf, wals_bdev->read_heap->buf + wals_bdev->read_heap->buf_size);
+                    // SPDK_NOTICELOG("Registering read buf %p to %p\n", wals_bdev->read_heap->buf, wals_bdev->read_heap->buf + wals_bdev->read_heap->buf_size);
 
                     struct ibv_mr* mr_write = ibv_reg_mr(g_rdma_cli_conns[i].cm_id->qp->pd,
                         wals_bdev->write_heap->buf,
@@ -764,7 +764,7 @@ rdma_cli_connection_poller(void* ctx) {
                     }
                     g_rdma_cli_conns[i].mr_write = mr_write;
 
-                    SPDK_NOTICELOG("Registering write buf %p to %p\n", wals_bdev->write_heap->buf, wals_bdev->write_heap->buf + wals_bdev->write_heap->buf_size);
+                    // SPDK_NOTICELOG("Registering write buf %p to %p\n", wals_bdev->write_heap->buf, wals_bdev->write_heap->buf + wals_bdev->write_heap->buf_size);
                     
                     struct ibv_mr* mr_handshake = ibv_reg_mr(g_rdma_cli_conns[i].cm_id->qp->pd,
                         g_rdma_handshakes,
