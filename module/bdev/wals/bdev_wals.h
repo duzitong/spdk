@@ -49,7 +49,6 @@
 #include "dma_heap.h"
 
 #define METADATA_VERSION		10086	// XD
-#define METADATA_BLOCKS			1
 #define MAGIC_INIT_CRC			0x88610086
 
 #define NUM_TARGETS				4
