@@ -855,7 +855,8 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 	
 	int						ret, i;
 	struct wals_metadata	*metadata;
-	void					*ptr, *data, *checksum;
+	void					*ptr, *data;
+	wals_crc				*checksum;
 	struct iovec			*iovs;
 	size_t					md_size = offsetof(struct wals_metadata, md_checksum);
 
@@ -884,10 +885,10 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 	}
 	
 	data = ptr + (wals_io->total_num_blocks - bdev_io->u.bdev.num_blocks) * wals_bdev->blocklen;
-	checksum = ptr + offsetof(struct wals_metadata, data_checksum);
+	checksum = (wals_crc *) (ptr + offsetof(struct wals_metadata, data_checksum));
 	for (i = 0; i < bdev_io->u.bdev.num_blocks; i++) {
 		*checksum = wals_bdev_calc_crc(data, wals_bdev->blocklen);
-		checksum += sizeof(wals_crc);
+		checksum++;
 		data += wals_bdev->blocklen;
 	}
 
