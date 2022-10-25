@@ -130,6 +130,8 @@ enum wals_bdev_state {
 	WALS_BDEV_MAX
 };
 
+typedef uint32_t wals_crc;
+
 struct wals_metadata {
 	uint64_t	version;
 	
@@ -142,7 +144,20 @@ struct wals_metadata {
 	uint64_t	core_offset;
 
 	uint64_t	round;
+
+	uint64_t	md_blocknum;
+
+	// new fields add before checksums
+	wals_crc	md_checksum;
+
+	wals_crc	data_checksum[0];
 };
+
+struct wals_checksum_offset {
+	uint64_t	block_offset;
+
+	int			byte_offset;
+}
 
 struct wals_target_info {
 	char		*nqn;
@@ -250,6 +265,8 @@ struct wals_bdev_io {
 
 	uint64_t	slice_index;
 
+	uint64_t	total_num_blocks;
+
 	int		targets_failed;
 
 	int		targets_completed;
@@ -323,9 +340,6 @@ struct wals_bdev {
 	/* pointer to config file entry */
 	struct wals_bdev_config		*config;
 
-	/* block length bit shift for optimized calculation */
-	uint32_t			blocklen_shift;
-
 	/* state of wals bdev */
 	enum wals_bdev_state		state;
 
@@ -368,8 +382,11 @@ struct wals_bdev {
 
 	struct wals_slice	*slices;
 
-	/* buffer block length */
-	uint64_t			buffer_blocklen;
+	/* block length */
+	uint64_t			blocklen;
+
+	/* blocklen shift for fast calculation */
+	int					blocklen_shift;
 
 	/* number of blocks of the buffer */
 	uint64_t			buffer_blockcnt;

@@ -31,7 +31,9 @@
  *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <math.h>
 #include "bdev_wals.h"
+#include "spdk/crc32.h"
 #include "spdk/env.h"
 #include "spdk/thread.h"
 #include "spdk/likely.h"
@@ -354,6 +356,12 @@ wals_bdev_io_complete(struct wals_bdev_io *wals_io, enum spdk_bdev_io_status sta
 	}
 }
 
+static wals_crc
+wals_bdev_calc_crc(void *data, size_t len)
+{
+	return spdk_crc32c_update(data, len, 0);
+}
+
 static wals_log_position
 wals_bdev_get_targets_log_head_min(struct wals_slice *slice)
 {
@@ -505,9 +513,9 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
 	slice = &wals_bdev->slices[wals_io->slice_index];
 	
-	wals_io->dma_page = dma_heap_get_page(wals_bdev->read_heap, bdev_io->u.bdev.num_blocks * wals_bdev->buffer_blocklen);
+	wals_io->dma_page = dma_heap_get_page(wals_bdev->read_heap, bdev_io->u.bdev.num_blocks * wals_bdev->blocklen);
 	if (!wals_io->dma_page) {
-		SPDK_NOTICELOG("No sufficient read buffer, size: %ld", bdev_io->u.bdev.num_blocks * wals_bdev->buffer_blocklen);
+		SPDK_NOTICELOG("No sufficient read buffer, size: %ld", bdev_io->u.bdev.num_blocks * wals_bdev->blocklen);
 		wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_NOMEM);
 		return;
 	}
@@ -847,8 +855,9 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 	
 	int						ret, i;
 	struct wals_metadata	*metadata;
-	void					*ptr, *data;
+	void					*ptr, *data, *checksum;
 	struct iovec			*iovs;
+	size_t					md_size = offsetof(struct wals_metadata, md_checksum);
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_W_I, 0, 0, (uintptr_t)wals_io);
 
@@ -860,18 +869,27 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 	metadata->next_offset = slice_tail.offset;
 	metadata->length = bdev_io->u.bdev.num_blocks;
 	metadata->round = slice_tail.round;
+	metadata->md_blocknum = wals_io->total_num_blocks - bdev_io->u.bdev.num_blocks;
+	metadata->md_checksum = wals_bdev_calc_crc(metadata, md_size);
 
 	wals_io->metadata = metadata;
 
 	// memcpy data
-	data = ptr + METADATA_BLOCKS * wals_bdev->buffer_blocklen;
+	data = ptr + (wals_io->total_num_blocks - bdev_io->u.bdev.num_blocks) * wals_bdev->blocklen;
 	iovs = bdev_io->u.bdev.iovs;
 
 	for (i = 0; i < bdev_io->u.bdev.iovcnt; i++) {
 		memcpy(data, iovs[i].iov_base, iovs[i].iov_len);
 		data += iovs[i].iov_len;
 	}
-	// TODO: add data CRC
+	
+	data = ptr + (wals_io->total_num_blocks - bdev_io->u.bdev.num_blocks) * wals_bdev->blocklen;
+	checksum = ptr + offsetof(struct wals_metadata, data_checksum);
+	for (i = 0; i < bdev_io->u.bdev.num_blocks; i++) {
+		*checksum = wals_bdev_calc_crc(data, wals_bdev->blocklen);
+		checksum += sizeof(wals_crc);
+		data += wals_bdev->blocklen;
+	}
 
 	// call module to submit to all targets
 	wals_io->targets_failed = 0;
@@ -880,8 +898,8 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_W_T, 0, 0, (uintptr_t)wals_io, i);
 
 		ret = wals_bdev->module->submit_log_write_request(slice->targets[i], ptr,
-														slice_tail.offset - (bdev_io->u.bdev.num_blocks + METADATA_BLOCKS),
-														bdev_io->u.bdev.num_blocks + METADATA_BLOCKS,
+														slice_tail.offset - wals_io->total_num_blocks,
+														wals_io->total_num_blocks,
 														wals_io);
 
 		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_W_T, 0, 0, (uintptr_t)wals_io, i);
@@ -924,6 +942,8 @@ wals_bdev_submit_write_request(void *arg)
 	struct wals_slice		*slice;
 	wals_log_position		slice_tail;
 
+	double					md_size = offsetof(struct wals_metadata, data_checksum);
+
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_W, 0, 0, (uintptr_t)wals_io, spdk_thread_get_id(spdk_get_thread()));
 
 	SPDK_DEBUGLOG(bdev_wals, "submit write: %ld+%ld\n", bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks);
@@ -931,8 +951,11 @@ wals_bdev_submit_write_request(void *arg)
 	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
 	slice = &wals_bdev->slices[wals_io->slice_index];
 
+	md_size += bdev_io->u.bdev.num_blocks * sizeof(wals_crc);
+	wals_io->total_num_blocks = ceil(md_size / wals_bdev->blocklen) + bdev_io->u.bdev.num_blocks;
+
 	// check slice space
-	if (!wals_bdev_update_tail(bdev_io->u.bdev.num_blocks + METADATA_BLOCKS,
+	if (!wals_bdev_update_tail(wals_io->total_num_blocks,
 								slice->tail, slice->log_blockcnt, slice->head, &slice_tail)) {
 		SPDK_NOTICELOG("queue bdev io submit due to no enough space left on slice log. head: (%ld,%ld) tail: (%ld,%ld)\n", slice->head.offset, slice->head.round, slice->tail.offset, slice->tail.round);
 		spdk_thread_send_msg(spdk_get_thread(), wals_bdev_submit_write_request, wals_io);
@@ -943,7 +966,7 @@ wals_bdev_submit_write_request(void *arg)
 	}
 
 	// check buffer space
-	wals_io->dma_page = dma_heap_get_page(wals_bdev->write_heap, bdev_io->u.bdev.num_blocks * wals_bdev->buffer_blocklen);
+	wals_io->dma_page = dma_heap_get_page(wals_bdev->write_heap, bdev_io->u.bdev.num_blocks * wals_bdev->blocklen);
 	if (!wals_io->dma_page) {
 		SPDK_NOTICELOG("queue bdev io submit due to no enough space left on buffer.\n");
 		spdk_thread_send_msg(spdk_get_thread(), wals_bdev_submit_write_request, wals_io);
@@ -1451,7 +1474,6 @@ wals_bdev_configure(struct wals_bdev *wals_bdev)
 
 	assert(wals_bdev->state == WALS_BDEV_STATE_CONFIGURING);
 
-	wals_bdev->blocklen_shift = 0; // TODO: set when log and core have different blocklen
 	wals_bdev_gen = &wals_bdev->bdev;
 
 	wals_bdev->state = WALS_BDEV_STATE_ONLINE;
@@ -1551,7 +1573,8 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 	wals_bdev->bdev.optimal_io_boundary = wals_cfg->slice_blockcnt;
 	wals_bdev->bdev.split_on_optimal_io_boundary = true;
 	wals_bdev->slice_blockcnt = wals_cfg->slice_blockcnt;
-	wals_bdev->buffer_blocklen = wals_cfg->blocklen;
+	wals_bdev->blocklen = wals_cfg->blocklen;
+	wals_bdev->blocklen_shift = spdk_align64pow2(wals_bdev->blocklen);
 	wals_bdev->buffer_blockcnt = wals_cfg->buffer_blockcnt;
 
 	rc = wals_bdev_start(wals_bdev);
@@ -1604,8 +1627,8 @@ wals_bdev_start(struct wals_bdev *wals_bdev)
 		LIST_INIT(&wals_bdev->slices[i].outstanding_read_afters);
 	}
 
-	wals_bdev->write_heap = dma_heap_alloc(wals_bdev->buffer_blockcnt * wals_bdev->buffer_blocklen, METADATA_BLOCKS * wals_bdev->buffer_blocklen, 2 * 1024 * 1024);
-	wals_bdev->read_heap = dma_heap_alloc(wals_bdev->buffer_blockcnt * wals_bdev->buffer_blocklen, 0, 2 * 1024 * 1024);
+	wals_bdev->write_heap = dma_heap_alloc(wals_bdev->buffer_blockcnt * wals_bdev->blocklen, offsetof(struct wals_metadata, data_checksum), sizeof(wals_crc), wals_bdev->blocklen_shift);
+	wals_bdev->read_heap = dma_heap_alloc(wals_bdev->buffer_blockcnt * wals_bdev->blocklen, 0, 0, wals_bdev->blocklen_shift);
 
 	// TODO: recover
 
