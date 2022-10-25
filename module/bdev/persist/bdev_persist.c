@@ -639,6 +639,7 @@ static int persist_rdma_poller(void* ctx) {
 				SPDK_ERRLOG("rdma_create_id failed\n");
 				return 1;
 			}
+			SPDK_NOTICELOG("6\n");
 			pdisk->parent_cm_id = cm_id;
 			struct sockaddr_in addr;
 			memcpy(&addr, pdisk->server_addr->ai_addr, sizeof(addr));
@@ -647,6 +648,7 @@ static int persist_rdma_poller(void* ctx) {
 				SPDK_ERRLOG("rdma bind addr failed\n");
 				return 1;
 			}
+			SPDK_NOTICELOG("7\n");
 			rc = rdma_listen(cm_id, 3);
 			if (rc != 0) {
 				SPDK_ERRLOG("rdma listen failed\n");
@@ -893,14 +895,16 @@ static int persist_rdma_poller(void* ctx) {
 					pdisk->rdma_status = PERSIST_RDMA_ERROR;
 					break;
 				}
+				SPDK_NOTICELOG("1\n");
 
-				rc = rdma_destroy_id(pdisk->cm_id);
-				if (rc != 0) {
-					SPDK_ERRLOG("cannot destroy id\n");
-					pdisk->rdma_status = PERSIST_RDMA_ERROR;
-					break;
-				}
-				pdisk->cm_id = NULL;
+				// rc = rdma_destroy_id(pdisk->cm_id);
+				// if (rc != 0) {
+				// 	SPDK_ERRLOG("cannot destroy id\n");
+				// 	pdisk->rdma_status = PERSIST_RDMA_ERROR;
+				// 	break;
+				// }
+				// pdisk->cm_id = NULL;
+				// SPDK_NOTICELOG("2\n");
 
 				rc = rdma_destroy_id(pdisk->parent_cm_id);
 				if (rc != 0) {
@@ -909,6 +913,7 @@ static int persist_rdma_poller(void* ctx) {
 					break;
 				}
 				pdisk->parent_cm_id = NULL;
+				SPDK_NOTICELOG("3\n");
 
 				rc = ibv_destroy_cq(pdisk->cq);
 				if (rc != 0) {
@@ -917,6 +922,7 @@ static int persist_rdma_poller(void* ctx) {
 					break;
 				}
 				pdisk->cq = NULL;
+				SPDK_NOTICELOG("4\n");
 
 				rc = ibv_dereg_mr(pdisk->mr);
 				if (rc != 0) {
@@ -932,6 +938,7 @@ static int persist_rdma_poller(void* ctx) {
 					break;
 				}
 				pdisk->mr_handshake = NULL;
+				SPDK_NOTICELOG("5\n");
 
 				pdisk->rdma_status = PERSIST_RDMA_INITIALIZED;
 			}
