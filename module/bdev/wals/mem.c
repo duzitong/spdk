@@ -62,6 +62,8 @@ mem_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
             wals_target_read_complete(wals_io, false);
             return 0;
         }
+        buf += mem_target->blocklen;
+        checksum++;
     }
 
     wals_target_read_complete(wals_io, true);

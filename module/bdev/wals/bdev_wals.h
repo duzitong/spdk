@@ -156,7 +156,7 @@ struct wals_metadata {
 struct wals_checksum_offset {
 	uint64_t	block_offset;
 
-	int			byte_offset;
+	uint64_t	byte_offset;
 };
 
 struct wals_target_info {
