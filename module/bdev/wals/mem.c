@@ -19,6 +19,8 @@ struct wals_mem_target {
     struct wals_slice   *slice;
 };
 
+uint64_t g_offset;
+
 static struct wals_target* 
 mem_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct wals_slice *slice)
 {
@@ -53,6 +55,13 @@ mem_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     wals_crc *checksum = (wals_crc *) (mem_target->log_buf + checksum_offset.block_offset * mem_target->blocklen + checksum_offset.byte_offset);
     void *buf = mem_target->log_buf + offset * mem_target->blocklen;
     wals_crc calc_checksum;
+
+    if (g_offset == offset) {
+        wals_target_read_complete(wals_io, false);
+        return 0;
+    }
+
+    g_offset = offset;
 
     memcpy(data, buf, cnt * mem_target->blocklen);
 
