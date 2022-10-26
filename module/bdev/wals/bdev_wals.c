@@ -505,6 +505,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	struct bskiplistNode	*bn;
     uint64_t    			read_begin, read_end, read_cur, tmp;
 	void					*buf;
+	struct wals_checksum_offset	checksum_offset;
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_R, 0, 0, (uintptr_t)wals_io, spdk_thread_get_id(spdk_get_thread()));
 
@@ -587,15 +588,13 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 				break;
 			}
 
-			/*
-			 * TODO: Data on target may corrupt.
-			 * Either submit reads to all targets or try next target on failure returned.
-			 */
+			checksum_offset.block_offset = bn->ele->mdOffset;
+			checksum_offset.byte_offset = offsetof(struct wals_metadata, data_checksum) + (read_cur - bn->ele->begin) * sizeof(wals_crc);
 
 			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_R_T, 0, 0, (uintptr_t)wals_io, target_index, 0);
 
 			ret = wals_bdev->module->submit_log_read_request(slice->targets[target_index], buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
-															bn->ele->l.bdevOffset + read_cur - bn->ele->begin, tmp - read_cur + 1, wals_io);
+															bn->ele->l.bdevOffset + read_cur - bn->ele->begin, tmp - read_cur + 1, checksum_offset, wals_io);
 			
 			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_R_T, 0, 0, (uintptr_t)wals_io, target_index, 0);
 
@@ -633,6 +632,7 @@ wals_bdev_insert_read_index(void *arg)
 
 	bstat = bstatBdevCreate(msg->begin, msg->end, msg->round, msg->offset, wals_bdev->bstat_pool);
 	bstat->failed = msg->failed;
+	bstat->mdOffset = msg->md_offset;
 	
 	bslInsert(wals_bdev->bsl, msg->begin, msg->end, bstat, wals_bdev->bslfn);
 	spdk_mempool_put(wals_bdev->index_msg_pool, msg);
@@ -695,6 +695,7 @@ wals_bdev_write_complete_quorum(struct wals_bdev_io *wals_io)
 	msg->begin = metadata->core_offset;
 	msg->end = metadata->core_offset + metadata->length - 1;
 	msg->offset = metadata->next_offset - metadata->length;
+	msg->md_offset = metadata->offset - metadata->md_blocknum;
 	msg->round = metadata->round;
 	msg->failed = false;
 	msg->wals_bdev = wals_bdev;

@@ -396,7 +396,7 @@ static bool is_io_within_memory_region(void* data, uint64_t cnt, uint64_t blockl
 }
 
 static int
-cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
+cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_checksum_offset checksum_offset, struct wals_bdev_io *wals_io)
 {
     // BUG: the reconnection poller must be in the same thread as the IO thread, 
     // otherwise it may secretly try to reconnect and free the RDMA resources, causing 

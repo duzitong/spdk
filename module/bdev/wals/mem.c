@@ -45,7 +45,7 @@ mem_stop(struct wals_target *target, struct wals_bdev *wals_bdev)
 }
 
 static int
-mem_submit_log_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
+mem_submit_log_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_checksum_offset checksum_offset, struct wals_bdev_io *wals_io)
 {
     SPDK_DEBUGLOG(bdev_wals_mem, "log read: %ld+%ld\n", offset, cnt);
     struct wals_mem_target *mem_target = target->private_info;

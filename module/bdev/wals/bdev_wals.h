@@ -299,25 +299,25 @@ struct wals_target_module {
 	void (*stop)(struct wals_target *target, struct wals_bdev *wals_bdev);
 
 	/* Handler for log read requests */
-	int (*submit_log_read_request)(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io);
+	int (*submit_log_read_request)(struct wals_target *target, void *data, uint64_t offset, uint64_t cnt, struct wals_checksum_offset checksum_offset, struct wals_bdev_io *wals_io);
 
 	/* Handler for core read requests */
-	int (*submit_core_read_request)(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io);
+	int (*submit_core_read_request)(struct wals_target *target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io);
 
 	/* Handler for log write requests */
-	int (*submit_log_write_request)(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io);
+	int (*submit_log_write_request)(struct wals_target *target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io);
 
 	/* register write pollers */
-	int (*register_write_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
+	int (*register_write_pollers)(struct wals_target *target, struct wals_bdev *wals_bdev);
 
 	/* unregister write pollers */
-	int (*unregister_write_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
+	int (*unregister_write_pollers)(struct wals_target *target, struct wals_bdev *wals_bdev);
 
 	/* register read pollers */
-	int (*register_read_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
+	int (*register_read_pollers)(struct wals_target *target, struct wals_bdev *wals_bdev);
 
 	/* register read pollers */
-	int (*unregister_read_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
+	int (*unregister_read_pollers)(struct wals_target *target, struct wals_bdev *wals_bdev);
 
 	TAILQ_ENTRY(wals_target_module) link;
 };
@@ -478,6 +478,8 @@ struct wals_index_msg {
 	uint64_t			round;
 
 	uint64_t			offset;
+
+	uint64_t			md_offset;
 
 	bool				failed;
 
