@@ -483,6 +483,7 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 			wals_io->targets_failed++;
 			wals_io->target_index = (wals_io->target_index + 1) % QUORUM_TARGETS;
 			if (wals_io->targets_failed < QUORUM_TARGETS) {
+				wals_io->status = SPDK_BDEV_IO_STATUS_SUCCESS;
 				wals_bdev_submit_read_request(wals_io);
 			} else {
 				SPDK_ERRLOG("read request failed on all targets.\n");
