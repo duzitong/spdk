@@ -60,7 +60,7 @@ mem_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
         calc_checksum = wals_bdev_calc_crc(buf, mem_target->blocklen);
         if (calc_checksum != *checksum) {
             wals_target_read_complete(wals_io, false);
-            return;
+            return 0;
         }
     }
 
