@@ -16,10 +16,12 @@ struct wals_mem_target {
 
     uint64_t            blocklen;
 
+    uint64_t            index;
+
     struct wals_slice   *slice;
 };
 
-uint64_t g_offset;
+uint64_t g_index = 0;
 
 static struct wals_target* 
 mem_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct wals_slice *slice)
@@ -33,6 +35,8 @@ mem_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
 					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
     mem_target->core_buf = spdk_zmalloc(wals_bdev->slice_blockcnt * mem_target->blocklen, 2 * 1024 * 1024, NULL,
 					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+    mem_target->index = g_index;
+    g_index++;
     
     target->log_blockcnt = LOG_BUFFER_SIZE;
     target->private_info = mem_target;
@@ -56,12 +60,10 @@ mem_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     void *buf = mem_target->log_buf + offset * mem_target->blocklen;
     wals_crc calc_checksum;
 
-    if (g_offset != offset) {
+    if (mem_target->index == 0) {
         wals_target_read_complete(wals_io, false);
         return 0;
     }
-
-    g_offset = offset;
 
     memcpy(data, buf, cnt * mem_target->blocklen);
 
