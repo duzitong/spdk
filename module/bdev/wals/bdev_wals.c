@@ -695,7 +695,7 @@ wals_bdev_write_complete_quorum(struct wals_bdev_io *wals_io)
 	msg->begin = metadata->core_offset;
 	msg->end = metadata->core_offset + metadata->length - 1;
 	msg->offset = metadata->next_offset - metadata->length;
-	msg->md_offset = metadata->offset - metadata->md_blocknum;
+	msg->md_offset = msg->offset - metadata->md_blocknum;
 	msg->round = metadata->round;
 	msg->failed = false;
 	msg->wals_bdev = wals_bdev;
