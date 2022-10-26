@@ -94,7 +94,7 @@ void wals_bdev_target_module_list_add(struct wals_target_module *target_module)
 }
 
 /* Function declarations */
-static void wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
+static void wals_bdev_submit_read_request(struct wals_bdev_io *wals_io);
 static void	wals_bdev_examine(struct spdk_bdev *bdev);
 static int	wals_bdev_start(struct wals_bdev *bdev);
 static void	wals_bdev_stop(struct wals_bdev *bdev);
