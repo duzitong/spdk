@@ -50,7 +50,7 @@ mem_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     SPDK_DEBUGLOG(bdev_wals_mem, "log read: %ld+%ld\n", offset, cnt);
     struct wals_mem_target *mem_target = target->private_info;
     uint64_t i;
-    wals_crc *checksum = (wals_crc *) mem_target->log_buf + checksum_offset.block_offset * mem_target->blocklen + checksum_offset.byte_offset;
+    wals_crc *checksum = (wals_crc *) (mem_target->log_buf + checksum_offset.block_offset * mem_target->blocklen + checksum_offset.byte_offset);
     void *buf = mem_target->log_buf + offset * mem_target->blocklen;
     wals_crc calc_checksum;
 
