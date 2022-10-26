@@ -267,9 +267,15 @@ struct wals_bdev_io {
 
 	uint64_t	total_num_blocks;
 
+	/* write targets failed */
+	/* read  targets failed */
 	int		targets_failed;
 
+	/* write targets completed */
 	int		targets_completed;
+
+	/* track read target */
+	int		target_index;
 
 	bool	io_completed;
 };
