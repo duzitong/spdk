@@ -56,7 +56,7 @@ mem_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     void *buf = mem_target->log_buf + offset * mem_target->blocklen;
     wals_crc calc_checksum;
 
-    if (g_offset == offset) {
+    if (g_offset != offset) {
         wals_target_read_complete(wals_io, false);
         return 0;
     }
