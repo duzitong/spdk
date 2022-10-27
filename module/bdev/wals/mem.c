@@ -16,8 +16,12 @@ struct wals_mem_target {
 
     uint64_t            blocklen;
 
+    uint64_t            index;
+
     struct wals_slice   *slice;
 };
+
+uint64_t g_index = 0;
 
 static struct wals_target* 
 mem_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct wals_slice *slice)
@@ -31,6 +35,8 @@ mem_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
 					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
     mem_target->core_buf = spdk_zmalloc(wals_bdev->slice_blockcnt * mem_target->blocklen, 2 * 1024 * 1024, NULL,
 					 SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+    mem_target->index = g_index;
+    g_index++;
     
     target->log_blockcnt = LOG_BUFFER_SIZE;
     target->private_info = mem_target;
@@ -45,11 +51,31 @@ mem_stop(struct wals_target *target, struct wals_bdev *wals_bdev)
 }
 
 static int
-mem_submit_log_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
+mem_submit_log_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_checksum_offset checksum_offset, struct wals_bdev_io *wals_io)
 {
     SPDK_DEBUGLOG(bdev_wals_mem, "log read: %ld+%ld\n", offset, cnt);
     struct wals_mem_target *mem_target = target->private_info;
-    memcpy(data, mem_target->log_buf + offset * mem_target->blocklen, cnt * mem_target->blocklen);
+    uint64_t i;
+    wals_crc *checksum = (wals_crc *) (mem_target->log_buf + checksum_offset.block_offset * mem_target->blocklen + checksum_offset.byte_offset);
+    void *buf = mem_target->log_buf + offset * mem_target->blocklen;
+    wals_crc calc_checksum;
+
+    if (mem_target->index == 0) {
+        wals_target_read_complete(wals_io, false);
+        return 0;
+    }
+
+    memcpy(data, buf, cnt * mem_target->blocklen);
+
+    for (i = 0; i < cnt; i++) {
+        calc_checksum = wals_bdev_calc_crc(buf, mem_target->blocklen);
+        if (calc_checksum != *checksum) {
+            wals_target_read_complete(wals_io, false);
+            return 0;
+        }
+        buf += mem_target->blocklen;
+        checksum++;
+    }
 
     wals_target_read_complete(wals_io, true);
     return 0;
@@ -75,7 +101,7 @@ mem_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
 
     struct wals_metadata *metadata = data;
     SPDK_DEBUGLOG(bdev_wals_mem, "core write: %ld+%ld\n", metadata->core_offset, metadata->length);
-    memcpy(mem_target->core_buf + metadata->core_offset * mem_target->blocklen, data + METADATA_BLOCKS * mem_target->blocklen, metadata->length * mem_target->blocklen);
+    memcpy(mem_target->core_buf + metadata->core_offset * mem_target->blocklen, data + metadata->md_blocknum * mem_target->blocklen, metadata->length * mem_target->blocklen);
 
     if (offset < target->head.offset) {
         target->head.round++;

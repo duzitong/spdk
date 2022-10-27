@@ -37,7 +37,7 @@ struct dma_page {
 
     size_t data_size;
 
-    size_t md_size;
+    size_t buf_size;
 
     TAILQ_ENTRY(dma_page) link;
 };
@@ -58,7 +58,7 @@ struct dma_heap {
     TAILQ_HEAD(, dma_page) page_4m;
 };
 
-struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, size_t align);
+struct dma_heap* dma_heap_alloc(size_t data_size, size_t md_size, int checksum_size_512, int align_shift);
 void* dma_heap_get_buf(struct dma_heap *heap);
 size_t dma_heap_get_buf_size(struct dma_heap *heap);
 

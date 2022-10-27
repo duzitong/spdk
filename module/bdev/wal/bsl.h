@@ -21,7 +21,8 @@ typedef struct bstat {
     union location {
         long unsigned int bdevOffset;
         void *memPointer;
-    } l;
+    } l;  // data offset
+    long unsigned int mdOffset;
 } bstat;
 
 typedef struct bskiplistNode {

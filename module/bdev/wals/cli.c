@@ -214,7 +214,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
         }
 
     }
-    if (wals_bdev->buffer_blocklen != wals_bdev->bdev.blocklen) {
+    if (wals_bdev->blocklen != wals_bdev->bdev.blocklen) {
         SPDK_ERRLOG("Only support buffer blocklen == bdev blocklen\n");
         return NULL;
     }
@@ -396,7 +396,7 @@ static bool is_io_within_memory_region(void* data, uint64_t cnt, uint64_t blockl
 }
 
 static int
-cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
+cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_checksum_offset checksum_offset, struct wals_bdev_io *wals_io)
 {
     // BUG: the reconnection poller must be in the same thread as the IO thread, 
     // otherwise it may secretly try to reconnect and free the RDMA resources, causing 
@@ -417,7 +417,7 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     //     return 0;
     // }
 
-    if (!is_io_within_memory_region(data, cnt, slice->wals_bdev->buffer_blocklen, slice->rdma_conn->mr_read)) {
+    if (!is_io_within_memory_region(data, cnt, slice->wals_bdev->blocklen, slice->rdma_conn->mr_read)) {
         SPDK_ERRLOG("IO out of MR range\n");
         wals_target_read_complete(wals_io, false);
         return 0;
@@ -439,14 +439,14 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     wr.opcode = IBV_WR_RDMA_READ;
     wr.num_sge = 1;
     wr.sg_list = &sge;
-    wr.wr.rdma.remote_addr = (uint64_t)g_rdma_handshakes[slice->rdma_conn->id].base_addr + offset * slice->wals_bdev->buffer_blocklen;
+    wr.wr.rdma.remote_addr = (uint64_t)g_rdma_handshakes[slice->rdma_conn->id].base_addr + offset * slice->wals_bdev->blocklen;
     wr.wr.rdma.rkey = g_rdma_handshakes[slice->rdma_conn->id].rkey;
 
     sge.addr = (uint64_t)data;
-    sge.length = cnt * slice->wals_bdev->buffer_blocklen;
+    sge.length = cnt * slice->wals_bdev->blocklen;
     sge.lkey = slice->rdma_conn->mr_read->lkey;
     // SPDK_NOTICELOG("READ %p %p %p %p %ld %ld %ld %ld\n", wals_io, data, data + sge.length, wr.wr.rdma.remote_addr,
-    //     cnt, offset, slice->wals_bdev->buffer_blocklen, sge.lkey);
+    //     cnt, offset, slice->wals_bdev->blocklen, sge.lkey);
 
     
     rc = ibv_post_send(slice->rdma_conn->cm_id->qp, &wr, &bad_wr);
@@ -499,7 +499,7 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
     int rc;
     struct wals_cli_slice* slice = target->private_info;
 
-    if (!is_io_within_memory_region(data, cnt, slice->wals_bdev->buffer_blocklen, slice->rdma_conn->mr_write)) {
+    if (!is_io_within_memory_region(data, cnt, slice->wals_bdev->blocklen, slice->rdma_conn->mr_write)) {
         SPDK_ERRLOG("IO out of MR range\n");
         wals_target_write_complete(wals_io, false);
         return 0;
@@ -531,11 +531,11 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
 	wr.opcode = IBV_WR_RDMA_WRITE;
 	wr.num_sge = 1;
 	wr.sg_list = &sge;
-	wr.wr.rdma.remote_addr = (uint64_t)g_rdma_handshakes[slice->rdma_conn->id].base_addr + offset * wals_io->wals_bdev->buffer_blocklen;
+	wr.wr.rdma.remote_addr = (uint64_t)g_rdma_handshakes[slice->rdma_conn->id].base_addr + offset * wals_io->wals_bdev->blocklen;
 	wr.wr.rdma.rkey = g_rdma_handshakes[slice->rdma_conn->id].rkey;
 
 	sge.addr = (uint64_t)data;
-	sge.length = cnt * slice->wals_bdev->buffer_blocklen;
+	sge.length = cnt * slice->wals_bdev->blocklen;
 	sge.lkey = slice->rdma_conn->mr_write->lkey;
 
 	rc = ibv_post_send(slice->rdma_conn->cm_id->qp, &wr, &bad_wr);
@@ -799,7 +799,7 @@ rdma_cli_connection_poller(void* ctx) {
                     handshake->rkey = mr_handshake->rkey;
                     // TODO: server should provide this value
                     handshake->block_cnt = LOG_BLOCKCNT;
-                    handshake->block_size = wals_bdev->buffer_blocklen;
+                    handshake->block_size = wals_bdev->blocklen;
                     handshake->reconnect_cnt = g_rdma_cli_conns[i].reconnect_cnt;
 
                     wr.wr_id = (uintptr_t)i;
@@ -1107,7 +1107,7 @@ static int slice_destage_info_poller(void* ctx) {
                 send_wr.sg_list = &send_sge;
                 send_wr.num_sge = 1;
                 send_wr.send_flags = 0;
-                send_wr.wr.rdma.remote_addr = (uint64_t)g_rdma_handshakes[cli_slice->rdma_conn->id].base_addr + LOG_BLOCKCNT * cli_slice->wals_bdev->buffer_blocklen;
+                send_wr.wr.rdma.remote_addr = (uint64_t)g_rdma_handshakes[cli_slice->rdma_conn->id].base_addr + LOG_BLOCKCNT * cli_slice->wals_bdev->blocklen;
                 send_wr.wr.rdma.rkey = g_rdma_handshakes[cli_slice->rdma_conn->id].rkey;
 
                 send_sge.addr = (uint64_t)&g_destage_info[cli_slice->id];

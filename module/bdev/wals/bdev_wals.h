@@ -49,7 +49,7 @@
 #include "dma_heap.h"
 
 #define METADATA_VERSION		10086	// XD
-#define METADATA_BLOCKS			1
+#define MAGIC_INIT_CRC			0x88610086
 
 #define NUM_TARGETS				4
 #define QUORUM_TARGETS			3
@@ -133,6 +133,8 @@ enum wals_bdev_state {
 	WALS_BDEV_MAX
 };
 
+typedef uint32_t wals_crc;
+
 struct wals_metadata {
 	uint64_t	version;
 	
@@ -145,6 +147,19 @@ struct wals_metadata {
 	uint64_t	core_offset;
 
 	uint64_t	round;
+
+	uint64_t	md_blocknum;
+
+	// new fields add before checksums
+	wals_crc	md_checksum;
+
+	wals_crc	data_checksum[0];
+};
+
+struct wals_checksum_offset {
+	uint64_t	block_offset;
+
+	uint64_t	byte_offset;
 };
 
 struct wals_target_info {
@@ -253,9 +268,17 @@ struct wals_bdev_io {
 
 	uint64_t	slice_index;
 
+	uint64_t	total_num_blocks;
+
+	/* write targets failed */
+	/* read  targets failed */
 	int		targets_failed;
 
+	/* write targets completed */
 	int		targets_completed;
+
+	/* track read target */
+	int		target_index;
 
 	bool	io_completed;
 };
@@ -285,25 +308,25 @@ struct wals_target_module {
 	void (*stop)(struct wals_target *target, struct wals_bdev *wals_bdev);
 
 	/* Handler for log read requests */
-	int (*submit_log_read_request)(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io);
+	int (*submit_log_read_request)(struct wals_target *target, void *data, uint64_t offset, uint64_t cnt, struct wals_checksum_offset checksum_offset, struct wals_bdev_io *wals_io);
 
 	/* Handler for core read requests */
-	int (*submit_core_read_request)(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io);
+	int (*submit_core_read_request)(struct wals_target *target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io);
 
 	/* Handler for log write requests */
-	int (*submit_log_write_request)(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io);
+	int (*submit_log_write_request)(struct wals_target *target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io);
 
 	/* register write pollers */
-	int (*register_write_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
+	int (*register_write_pollers)(struct wals_target *target, struct wals_bdev *wals_bdev);
 
 	/* unregister write pollers */
-	int (*unregister_write_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
+	int (*unregister_write_pollers)(struct wals_target *target, struct wals_bdev *wals_bdev);
 
 	/* register read pollers */
-	int (*register_read_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
+	int (*register_read_pollers)(struct wals_target *target, struct wals_bdev *wals_bdev);
 
 	/* register read pollers */
-	int (*unregister_read_pollers)(struct wals_target* target, struct wals_bdev *wals_bdev);
+	int (*unregister_read_pollers)(struct wals_target *target, struct wals_bdev *wals_bdev);
 
 	TAILQ_ENTRY(wals_target_module) link;
 };
@@ -325,9 +348,6 @@ struct wals_bdev {
 
 	/* pointer to config file entry */
 	struct wals_bdev_config		*config;
-
-	/* block length bit shift for optimized calculation */
-	uint32_t			blocklen_shift;
 
 	/* state of wals bdev */
 	enum wals_bdev_state		state;
@@ -371,8 +391,11 @@ struct wals_bdev {
 
 	struct wals_slice	*slices;
 
-	/* buffer block length */
-	uint64_t			buffer_blocklen;
+	/* block length */
+	uint64_t			blocklen;
+
+	/* blocklen shift for fast calculation */
+	int					blocklen_shift;
 
 	/* number of blocks of the buffer */
 	uint64_t			buffer_blockcnt;
@@ -465,6 +488,8 @@ struct wals_index_msg {
 
 	uint64_t			offset;
 
+	uint64_t			md_offset;
+
 	bool				failed;
 
 	struct wals_bdev	*wals_bdev;
@@ -530,6 +555,8 @@ __TARGET_MODULE_REGISTER(__LINE__)(void)					\
     wals_bdev_target_module_list_add(_module);					\
 }
 
+wals_crc
+wals_bdev_calc_crc(void *data, size_t len);
 void
 wals_target_read_complete(struct wals_bdev_io *wals_io, bool success);
 void
