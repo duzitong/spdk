@@ -897,7 +897,7 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 	}
 	
 	data = ptr + (wals_io->total_num_blocks - bdev_io->u.bdev.num_blocks) * wals_bdev->blocklen;
-	checksum = (wals_crc *) (ptr + offsetof(struct wals_metadata, data_checksum));
+	checksum = metadata->data_checksum;
 	for (i = 0; i < bdev_io->u.bdev.num_blocks; i++) {
 		*checksum = wals_bdev_calc_crc(data, wals_bdev->blocklen);
 		checksum++;
