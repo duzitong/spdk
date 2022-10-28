@@ -130,6 +130,8 @@ wals_bdev_firo_alloc(const char *name, uint32_t pool_size)
 
 	TAILQ_INIT(&firo->head);
 	firo->entry_pool = spdk_mempool_create(name, pool_size, sizeof(struct wals_lp_firo_entry), 0, SPDK_ENV_SOCKET_ID_ANY);
+
+	return firo;
 }
 
 static void
