@@ -128,7 +128,7 @@ wals_bdev_firo_alloc(const char *name, uint32_t pool_size)
 {
 	struct wals_lp_firo *firo = calloc(1, sizeof(struct wals_lp_firo));
 
-	TAILQ_INIT(firo->head);
+	TAILQ_INIT(&firo->head);
 	firo->entry_pool = spdk_mempool_create(name, pool_size, sizeof(struct wals_lp_firo_entry), 0, SPDK_ENV_SOCKET_ID_ANY);
 }
 
@@ -1682,9 +1682,9 @@ wals_bdev_start(struct wals_bdev *wals_bdev)
 	wals_bdev->bslfn = bslfnCreate(wals_bdev->bsl_node_pool, wals_bdev->bstat_pool);
 
 	for (i = 0; i < wals_bdev->slicecnt; i++) {
-		snprintf(pool_name, sizeof(pool_name), "WALS_WRITE_FIRO_%d", i);
+		snprintf(pool_name, sizeof(pool_name), "WALS_WRITE_FIRO_%ld", i);
 		wals_bdev->slices[i].write_firo = wals_bdev_firo_alloc(pool_name, 128);
-		snprintf(pool_name, sizeof(pool_name), "WALS_READ_FIRO_%d", i);
+		snprintf(pool_name, sizeof(pool_name), "WALS_READ_FIRO_%ld", i);
 		wals_bdev->slices[i].read_firo = wals_bdev_firo_alloc(pool_name, 128);
 	}
 
