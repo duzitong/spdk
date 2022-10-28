@@ -147,6 +147,8 @@ wals_bdev_firo_insert(struct wals_lp_firo* firo, wals_log_position lp)
 	entry->pos = lp;
 	entry->removed = false;
 	TAILQ_INSERT_TAIL(&firo->head, entry, link);
+
+	return entry;
 }
 
 static void
