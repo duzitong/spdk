@@ -1734,7 +1734,7 @@ wals_bdev_log_head_update(void *ctx)
 
 	for (i = 0; i < wals_bdev->slicecnt; i++) {
 		slice = &wals_bdev->slices[i];
-		if (wals_bdev_firo_empty(&slice->read_firo)) {
+		if (wals_bdev_firo_empty(slice->read_firo)) {
 			slice->head = wals_bdev_get_targets_log_head_min(slice);
 			cnt++;
 		}
