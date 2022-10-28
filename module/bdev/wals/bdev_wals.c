@@ -930,6 +930,8 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 		data += wals_bdev->blocklen;
 	}
 
+	wals_io->firo_entry = wals_bdev_firo_insert(slice->write_firo, slice_tail);
+
 	// call module to submit to all targets
 	for (i = 0; i < NUM_TARGETS; i++) {
 		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_W_T, 0, 0, (uintptr_t)wals_io, i);
@@ -946,8 +948,6 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 			SPDK_ERRLOG("io submit error due to %d for target %d on slice %ld.\n", ret, i, wals_io->slice_index);
 		}
 	}
-
-	wals_io->firo_entry = wals_bdev_firo_insert(slice->write_firo, slice_tail);
 
 	slice->tail = slice_tail;
 	SPDK_DEBUGLOG(bdev_wals, "slice tail updated: %ld(%ld)\n", slice->tail.offset, slice->tail.round);
