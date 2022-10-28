@@ -160,6 +160,7 @@ wals_bdev_firo_remove(struct wals_lp_firo* firo, struct wals_lp_firo_entry* entr
 	while (e && e->removed) {
 		*ret = e->pos;
 		TAILQ_REMOVE(&firo->head, e, link);
+		spdk_mempool_put(firo->entry_pool, e);
 		e = TAILQ_FIRST(&firo->head);
 	}
 }
