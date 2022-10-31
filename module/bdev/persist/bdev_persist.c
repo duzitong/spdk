@@ -664,12 +664,14 @@ static int update_persist_rdma_connection(struct persist_rdma_connection* rdma_c
 				rc = rdma_bind_addr(cm_id, (struct sockaddr*)&addr);
 				if (rc != 0) {
 					SPDK_ERRLOG("rdma bind addr failed\n");
-					return 1;
+					rdma_conn->status = RDMA_SERVER_ERROR;
+					break;
 				}
 				rc = rdma_listen(cm_id, 3);
 				if (rc != 0) {
 					SPDK_ERRLOG("rdma listen failed\n");
-					return 1;
+					rdma_conn->status = RDMA_SERVER_ERROR;
+					break;
 				}
 
 				SPDK_NOTICELOG("listening on port %d\n", ntohs(addr.sin_port));
@@ -1353,7 +1355,7 @@ static int update_persist_rdma_connection(struct persist_rdma_connection* rdma_c
 		}
 		case RDMA_CLI_ERROR:
 		{
-			SPDK_NOTICELOG("In error state. Cannot recover by now\n");
+			// SPDK_NOTICELOG("In error state. Cannot recover by now\n");
 			break;
 		}
 	}
@@ -1365,7 +1367,7 @@ static int persist_rdma_poller(void* ctx) {
 	struct persist_disk* pdisk = ctx;
 
 	update_persist_rdma_connection(&pdisk->client_conn, pdisk);
-	for (int i = 0; i < pdisk->num_peers; i++) {
+	for (size_t i = 0; i < pdisk->num_peers; i++) {
 		update_persist_rdma_connection(pdisk->peer_conns + i, pdisk);
 	}
 
@@ -1484,6 +1486,7 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 	}
 
 	pdisk->client_conn.status = RDMA_SERVER_INITIALIZED;
+	pdisk->client_conn.is_server = true;
 
 	struct addrinfo hints = {};
 	struct addrinfo* addr_res = NULL;
@@ -1496,8 +1499,10 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 	}
 	pdisk->client_conn.server_addr = addr_res;
 
+	SPDK_NOTICELOG("num_peers = %d\n", num_peers);
+
 	pdisk->num_peers = num_peers;
-	for (int i = 0; i < num_peers; i++) {
+	for (size_t i = 0; i < num_peers; i++) {
 		struct rdma_event_channel* channel = rdma_create_event_channel();
 		pdisk->peer_conns[i].channel = channel;
 
@@ -1525,6 +1530,7 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 				return 1;
 			}
 			pdisk->peer_conns[i].server_addr = addr_res;
+			pdisk->peer_conns[i].status = RDMA_SERVER_INITIALIZED;
 		}
 		else {
 			pdisk->peer_conns[i].is_server = false;
@@ -1534,8 +1540,8 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 				return 1;
 			}
 			pdisk->peer_conns[i].server_addr = addr_res;
+			pdisk->peer_conns[i].status = RDMA_CLI_INITIALIZED;
 		}
-		pdisk->peer_conns[i].status = RDMA_CLI_INITIALIZED;
 	}
 
 	pdisk->disk.ctxt = pdisk;
