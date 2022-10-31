@@ -39,13 +39,21 @@
 #include "spdk/string.h"
 #include "spdk/log.h"
 
-struct rpc_construct_persist {
-	char *name;
-	char *uuid;
-	char *ip;
-	char *port;
-	bool attach_disk;
+
+static const struct spdk_json_object_decoder rpc_bdev_peer_decoders[] = {
+	{"remote_ip", offsetof(struct rpc_persist_peer_info, remote_ip), spdk_json_decode_string},
+	{"remote_port", offsetof(struct rpc_persist_peer_info, remote_port), spdk_json_decode_string},
+	{"local_port", offsetof(struct rpc_persist_peer_info, local_port), spdk_json_decode_string},
 };
+
+static int decode_peer(const struct spdk_json_val* val, void* out) {
+	return spdk_json_decode_object(val, rpc_bdev_peer_decoders, SPDK_COUNTOF(rpc_bdev_peer_decoders), out);
+}
+
+static int decode_peers(const struct spdk_json_val* val, void* out) {
+	struct rpc_persist_peers* peers = out;
+	return spdk_json_decode_array(val, decode_peer, peers->peers, RPC_MAX_PEERS, &peers->num_peers, sizeof(struct rpc_persist_peer_info));
+}
 
 static void
 free_rpc_construct_persist(struct rpc_construct_persist *r)
@@ -62,6 +70,7 @@ static const struct spdk_json_object_decoder rpc_construct_persist_decoders[] = 
 	{"ip", offsetof(struct rpc_construct_persist, ip), spdk_json_decode_string, true},
 	{"port", offsetof(struct rpc_construct_persist, port), spdk_json_decode_string, true},
 	{"attach_disk", offsetof(struct rpc_construct_persist, attach_disk), spdk_json_decode_bool, true},
+	{"peers", offsetof(struct rpc_construct_persist, peers), decode_peers, true},
 };
 
 static void
@@ -93,7 +102,7 @@ rpc_bdev_persist_create(struct spdk_jsonrpc_request *request,
 		uuid = &decoded_uuid;
 	}
 
-	rc = create_persist_disk(&bdev, req.name, req.ip, req.port, uuid, req.attach_disk);
+	rc = create_persist_disk(&bdev, req.name, req.ip, req.port, uuid, req.attach_disk, req.peers.peers, req.peers.num_peers);
 	if (rc) {
 		spdk_jsonrpc_send_error_response(request, rc, spdk_strerror(-rc));
 		goto cleanup;

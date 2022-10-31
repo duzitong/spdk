@@ -46,6 +46,7 @@
 #define PERSIST_WC_BATCH_SIZE 32
 #define PERSIST_METADATA_VERSION		10086	// TODO: merge with wal
 // #define PERSIST_MD_LEN 8
+#define RPC_MAX_PEERS 3
 
 #define TRACE_BDEV_WRITE_MEMCPY_START	SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x20)
 #define TRACE_BDEV_WRITE_MEMCPY_END		SPDK_TPOINT_ID(TRACE_GROUP_BDEV, 0x21)
@@ -55,7 +56,34 @@
 
 typedef void (*spdk_delete_persist_complete)(void *cb_arg, int bdeverrno);
 
-int create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, const char* port, const struct spdk_uuid *uuid, bool attach_disk);
+struct rpc_persist_peer_info {
+	char* remote_ip;
+	char* remote_port;
+	char* local_port;
+};
+
+struct rpc_persist_peers {
+	size_t num_peers;
+	struct rpc_persist_peer_info peers[RPC_MAX_PEERS];
+};
+
+struct rpc_construct_persist {
+	char *name;
+	char *uuid;
+	char *ip;
+	char *port;
+	bool attach_disk;
+	struct rpc_persist_peers peers;
+};
+
+int create_persist_disk(struct spdk_bdev **bdev,
+    const char *name,
+    const char* ip,
+    const char* port,
+    const struct spdk_uuid *uuid,
+    bool attach_disk,
+    struct rpc_persist_peer_info* peer_info_array,
+    size_t num_peers);
 
 void delete_persist_disk(const char *name, spdk_delete_persist_complete cb_fn, void *cb_arg);
 

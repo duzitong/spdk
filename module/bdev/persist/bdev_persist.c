@@ -59,6 +59,9 @@
 // TODO: make it configurable
 #define PERSIST_MEM_BLOCK_SIZE 512
 #define PERSIST_MEM_BLOCK_CNT (20LL * 1024 * 1024)
+// TODO: make it configurable
+#define LOG_BLOCKCNT 1310720
+#define LOG_BLOCKSIZE 512
 
 struct persist_destage_context {
 	int remaining;
@@ -69,33 +72,47 @@ enum persist_disk_status {
 	PERSIST_DISK_IN_RECOVERY,
 };
 
-enum persist_rdma_status {
-	PERSIST_RDMA_INITIALIZED,
-	PERSIST_RDMA_LISTENING,
-	PERSIST_RDMA_ACCEPTED,
-	PERSIST_RDMA_ESTABLISHED,
-	PERSIST_RDMA_CONNECTED,
-	PERSIST_RDMA_ERROR,
+enum rdma_status {
+	RDMA_SERVER_INITIALIZED,
+	RDMA_SERVER_LISTENING,
+	RDMA_SERVER_ACCEPTED,
+	RDMA_SERVER_ESTABLISHED,
+	RDMA_SERVER_CONNECTED,
+	RDMA_SERVER_ERROR,
+
+	RDMA_CLI_INITIALIZED,
+	RDMA_CLI_ADDR_RESOLVING,
+	RDMA_CLI_ROUTE_RESOLVING,
+	RDMA_CLI_CONNECTING,
+	RDMA_CLI_ESTABLISHED,
+	RDMA_CLI_CONNECTED,
+	RDMA_CLI_ERROR,
+};
+
+struct persist_rdma_connection {
+	// one node acts as recover server,
+	// the other one acts as the client.
+	// both should support reconnection.
+	bool is_server;
+	struct rdma_event_channel* channel;
+	// if it is server, then it is local address
+	// otherwise it is the server address
+	struct addrinfo* server_addr;
+	struct rdma_cm_id* cm_id;
+	struct rdma_cm_id* parent_cm_id;
+	struct ibv_mr* mr;
+	struct ibv_mr* mr_handshake;
+	struct ibv_cq* cq;
+	struct rdma_handshake* handshake_buf;
+	enum rdma_status status;
+	// only used in client
+	uint64_t reject_cnt;
 };
 
 struct persist_disk {
 	struct spdk_bdev		disk;
 	// act as circular buffer
 	void *malloc_buf;
-	struct addrinfo* server_addr;
-	struct addrinfo* recover_addr;
-	// one node acts as recover server,
-	// the other one acts as the client.
-	// both should support reconnection.
-	bool is_recover_server;
-	struct rdma_event_channel* rdma_channel;
-	// both need to be freed
-	struct rdma_cm_id* cm_id;
-	struct rdma_cm_id* parent_cm_id;
-	struct ibv_mr* mr;
-	struct ibv_mr* mr_handshake;
-	struct ibv_cq* cq;
-	struct rdma_handshake* remote_handshake;
 	struct spdk_poller* destage_poller;
 	struct spdk_poller* rdma_poller;
 	struct spdk_poller* nvme_poller;
@@ -106,8 +123,10 @@ struct persist_disk {
 	struct destage_info* destage_info;
 	struct persist_destage_context destage_context;
 	uint64_t prev_seq;
-	enum persist_rdma_status rdma_status;
 	enum persist_disk_status disk_status;
+	struct persist_rdma_connection peer_conns[RPC_MAX_PEERS];
+	size_t num_peers;
+	struct persist_rdma_connection client_conn;
 	
 	// if false, then all nvme-related fields are null.
 	bool attach_disk;
@@ -286,7 +305,6 @@ bdev_persist_next_sge(void *ref, void **address, uint32_t *length) {
 	}
 
 	return 0;
-
 }
 
 static void bdev_persist_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
@@ -517,7 +535,7 @@ persist_destage_poller(void *ctx)
 	};
 	int rc;
 
-	if (pdisk->rdma_status != PERSIST_RDMA_CONNECTED) {
+	if (pdisk->client_conn.status != RDMA_SERVER_CONNECTED) {
 		// need to establish RDMA connection and alloc buffer first
 		return SPDK_POLLER_IDLE;
 	}
@@ -627,40 +645,51 @@ persist_destage_poller(void *ctx)
 	return SPDK_POLLER_BUSY;
 }
 
-static int persist_rdma_poller(void* ctx) {
-	struct persist_disk* pdisk = ctx;
+static int update_persist_rdma_connection(struct persist_rdma_connection* rdma_conn, struct persist_disk* pdisk) {
 	int rc;
-	switch (pdisk->rdma_status) {
-		case PERSIST_RDMA_INITIALIZED:
+	switch (rdma_conn->status) {
+		case RDMA_CLI_INITIALIZED:
+		case RDMA_SERVER_INITIALIZED:
 		{
 			struct rdma_cm_id* cm_id = NULL;
-			rc = rdma_create_id(pdisk->rdma_channel, &cm_id, NULL, RDMA_PS_TCP);
+			rc = rdma_create_id(rdma_conn->channel, &cm_id, NULL, RDMA_PS_TCP);
 			if (rc != 0) {
 				SPDK_ERRLOG("rdma_create_id failed\n");
 				return 1;
 			}
-			pdisk->parent_cm_id = cm_id;
-			struct sockaddr_in addr;
-			memcpy(&addr, pdisk->server_addr->ai_addr, sizeof(addr));
-			rc = rdma_bind_addr(cm_id, (struct sockaddr*)&addr);
-			if (rc != 0) {
-				SPDK_ERRLOG("rdma bind addr failed\n");
-				return 1;
-			}
-			rc = rdma_listen(cm_id, 3);
-			if (rc != 0) {
-				SPDK_ERRLOG("rdma listen failed\n");
-				return 1;
-			}
+			rdma_conn->parent_cm_id = cm_id;
+			if (rdma_conn->is_server) {
+				struct sockaddr_in addr;
+				memcpy(&addr, rdma_conn->server_addr->ai_addr, sizeof(addr));
+				rc = rdma_bind_addr(cm_id, (struct sockaddr*)&addr);
+				if (rc != 0) {
+					SPDK_ERRLOG("rdma bind addr failed\n");
+					return 1;
+				}
+				rc = rdma_listen(cm_id, 3);
+				if (rc != 0) {
+					SPDK_ERRLOG("rdma listen failed\n");
+					return 1;
+				}
 
-			SPDK_NOTICELOG("listening on port %d\n", ntohs(addr.sin_port));
-			pdisk->rdma_status = PERSIST_RDMA_LISTENING;
+				SPDK_NOTICELOG("listening on port %d\n", ntohs(addr.sin_port));
+				rdma_conn->status = RDMA_SERVER_LISTENING;
+			}
+			else {
+                rc = rdma_resolve_addr(cm_id, NULL, rdma_conn->server_addr->ai_addr, 1000);
+                if (rc != 0) {
+                    SPDK_ERRLOG("rdma_resolve_addr failed\n");
+                    rdma_conn->status = RDMA_CLI_ERROR;
+                    break;
+                }
+                rdma_conn->status = RDMA_CLI_ADDR_RESOLVING;
+			}
 			break;
 		}
-		case PERSIST_RDMA_LISTENING:
+		case RDMA_SERVER_LISTENING:
 		{
 			struct rdma_cm_event* connect_event;
-			rc = rdma_get_cm_event(pdisk->rdma_channel, &connect_event);
+			rc = rdma_get_cm_event(rdma_conn->channel, &connect_event);
 			if (rc != 0) {
 				if (errno == EAGAIN) {
 					// waiting for connection
@@ -747,17 +776,17 @@ static int persist_rdma_poller(void* ctx) {
 				SPDK_ERRLOG("accept err\n");
 				return -EINVAL;
 			}
-			pdisk->cm_id = child_cm_id;
-			pdisk->cq = ibv_cq;
-			pdisk->remote_handshake = handshake + 1;
-			pdisk->mr_handshake = ibv_mr_handshake;
-			pdisk->rdma_status = PERSIST_RDMA_ACCEPTED;
+			rdma_conn->cm_id = child_cm_id;
+			rdma_conn->cq = ibv_cq;
+			rdma_conn->handshake_buf = handshake;
+			rdma_conn->mr_handshake = ibv_mr_handshake;
+			rdma_conn->status = RDMA_SERVER_ACCEPTED;
 			break;
 		}
-		case PERSIST_RDMA_ACCEPTED:
+		case RDMA_SERVER_ACCEPTED:
 		{
 			struct rdma_cm_event* established_event;
-			rc = rdma_get_cm_event(pdisk->rdma_channel, &established_event);
+			rc = rdma_get_cm_event(rdma_conn->channel, &established_event);
 			if (rc != 0) {
 				if (errno == EAGAIN) {
 					// waiting for establish event
@@ -772,18 +801,68 @@ static int persist_rdma_poller(void* ctx) {
 				SPDK_ERRLOG("incorrect established event %d\n", established_event->event);
 				return 1;
 			}
+
 			SPDK_NOTICELOG("connected. waiting for handshake ...\n");
-			pdisk->rdma_status = PERSIST_RDMA_ESTABLISHED;
-			break;
-		}
-		case PERSIST_RDMA_ESTABLISHED:
-		{
+			size_t log_size = LOG_BLOCKCNT * LOG_BLOCKSIZE;
+			size_t total_size = (LOG_BLOCKCNT + 1) * LOG_BLOCKSIZE;
+
+			// one more block for current destage position
+			// TODO: another block for commit tail
+			// NOTE: the buffer length must not change when reconnecting
+			if (pdisk->malloc_buf == NULL) {
+				pdisk->malloc_buf = spdk_zmalloc(total_size,
+					2 * 1024 * 1024,
+					NULL,
+					SPDK_ENV_LCORE_ID_ANY,
+					SPDK_MALLOC_DMA);
+			}
+			
+			pdisk->destage_info = pdisk->malloc_buf + log_size;
 			struct ibv_send_wr send_wr, *bad_send_wr = NULL;
 			struct ibv_mr* ibv_mr_circular;
 			memset(&send_wr, 0, sizeof(send_wr));
 
+			ibv_mr_circular = ibv_reg_mr(
+				rdma_conn->cm_id->qp->pd,
+				pdisk->malloc_buf,
+				total_size,
+				IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
+
+			rdma_conn->mr = ibv_mr_circular;
+			struct ibv_sge send_sge;
+			
+			rdma_conn->handshake_buf->base_addr = pdisk->malloc_buf;
+			rdma_conn->handshake_buf->rkey = ibv_mr_circular->rkey;
+			rdma_conn->handshake_buf->block_cnt = LOG_BLOCKCNT;
+			rdma_conn->handshake_buf->block_size = LOG_BLOCKSIZE;
+
+			send_wr.wr_id = 2;
+			send_wr.opcode = IBV_WR_SEND;
+			send_wr.sg_list = &send_sge;
+			send_wr.num_sge = 1;
+			send_wr.send_flags = IBV_SEND_SIGNALED;
+
+			send_sge.addr = (uint64_t)rdma_conn->handshake_buf;
+			send_sge.length = sizeof(struct rdma_handshake);
+			send_sge.lkey = rdma_conn->mr_handshake->lkey;
+			
+			rc = ibv_post_send(rdma_conn->cm_id->qp, &send_wr, &bad_send_wr);
+			if (rc != 0) {
+				SPDK_ERRLOG("post send failed\n");
+				return 1;
+			}
+			SPDK_NOTICELOG("sent local addr %p rkey %d length %ld\n",
+				rdma_conn->handshake_buf->base_addr,
+				rdma_conn->handshake_buf->rkey,
+				log_size);
+
+			rdma_conn->status = RDMA_SERVER_ESTABLISHED;
+			break;
+		}
+		case RDMA_SERVER_ESTABLISHED:
+		{
 			struct ibv_wc wc;
-			int ret = ibv_poll_cq(pdisk->cq, 1, &wc);
+			int ret = ibv_poll_cq(rdma_conn->cq, 1, &wc);
 			if (ret < 0) {
 				SPDK_ERRLOG("ibv_poll_cq failed\n");
 				return SPDK_POLLER_IDLE;
@@ -800,73 +879,29 @@ static int persist_rdma_poller(void* ctx) {
 
 			if (wc.wr_id == 1) {
 				// recv complete
-				uint64_t buffer_len = pdisk->remote_handshake->block_cnt * pdisk->remote_handshake->block_size;
-				SPDK_NOTICELOG("received remote addr %p rkey %d length %ld (%ld MB)\n",
-					pdisk->remote_handshake->base_addr,
-					pdisk->remote_handshake->rkey,
-					buffer_len,
-					buffer_len / 1048576);
+				struct rdma_handshake* remote_handshake = rdma_conn->handshake_buf + 1;
+				SPDK_NOTICELOG("received remote addr %p rkey %d\n",
+					remote_handshake->base_addr,
+					remote_handshake->rkey);
 
-				pdisk->malloc_buf = spdk_zmalloc(buffer_len + pdisk->remote_handshake->block_size,
-					2 * 1024 * 1024,
-					NULL,
-					SPDK_ENV_LCORE_ID_ANY,
-					SPDK_MALLOC_DMA);
-				
-				pdisk->destage_info = pdisk->malloc_buf + buffer_len;
-
-				ibv_mr_circular = ibv_reg_mr(
-					pdisk->cm_id->qp->pd,
-					pdisk->malloc_buf,
-					buffer_len + pdisk->remote_handshake->block_size,
-					IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
-
-				pdisk->mr = ibv_mr_circular;
-				struct rdma_handshake* handshake = pdisk->remote_handshake - 1;
-				struct ibv_sge send_sge;
-				
-				handshake->base_addr = pdisk->malloc_buf;
-				handshake->rkey = ibv_mr_circular->rkey;
-				handshake->block_cnt = pdisk->remote_handshake->block_cnt;
-				handshake->block_size = pdisk->remote_handshake->block_size;
-
-				send_wr.wr_id = 2;
-				send_wr.opcode = IBV_WR_SEND;
-				send_wr.sg_list = &send_sge;
-				send_wr.num_sge = 1;
-				send_wr.send_flags = IBV_SEND_SIGNALED;
-
-				send_sge.addr = (uint64_t)handshake;
-				send_sge.length = sizeof(struct rdma_handshake);
-				send_sge.lkey = pdisk->mr_handshake->lkey;
-				
-				rc = ibv_post_send(pdisk->cm_id->qp, &send_wr, &bad_send_wr);
-				if (rc != 0) {
-					SPDK_ERRLOG("post send failed\n");
-					return 1;
-				}
-				SPDK_NOTICELOG("sent local addr %p rkey %d length %ld\n",
-					handshake->base_addr,
-					handshake->rkey,
-					buffer_len);
-
-				if (pdisk->remote_handshake->reconnect_cnt > 0) {
+				if (remote_handshake->reconnect_cnt > 0) {
 					// TODO
 					SPDK_NOTICELOG("The node is reconnected\n");
 					pdisk->disk_status = PERSIST_DISK_IN_RECOVERY;
 				}
+
+				SPDK_NOTICELOG("rdma handshake complete\n");
+				rdma_conn->status = RDMA_SERVER_CONNECTED;
 			}
 			else if (wc.wr_id == 2) {
 				SPDK_NOTICELOG("send req complete\n");
-				SPDK_NOTICELOG("rdma handshake complete\n");
-				pdisk->rdma_status = PERSIST_RDMA_CONNECTED;
 			}
 			break;
 		}
-		case PERSIST_RDMA_CONNECTED:
+		case RDMA_SERVER_CONNECTED:
 		{
 			struct rdma_cm_event* event;
-			rc = rdma_get_cm_event(pdisk->rdma_channel, &event);
+			rc = rdma_get_cm_event(rdma_conn->channel, &event);
 
 			if (rc != 0) {
 				if (errno == EAGAIN) {
@@ -881,75 +916,457 @@ static int persist_rdma_poller(void* ctx) {
 			rc = rdma_ack_cm_event(event);
 			if (rc != 0) {
 				SPDK_ERRLOG("failed to ack event\n");
-				pdisk->rdma_status = PERSIST_RDMA_ERROR;
+				rdma_conn->status = RDMA_SERVER_ERROR;
 				break;
 			}
 
 			if (event->event == RDMA_CM_EVENT_DISCONNECTED) {
 				SPDK_NOTICELOG("Received disconnect event\n");
-				rdma_destroy_qp(pdisk->cm_id);
-				if (pdisk->cm_id->qp != NULL) {
+				rdma_destroy_qp(rdma_conn->cm_id);
+				if (rdma_conn->cm_id->qp != NULL) {
 					SPDK_NOTICELOG("cannot free qp\n");
-					pdisk->rdma_status = PERSIST_RDMA_ERROR;
+					rdma_conn->status = RDMA_SERVER_ERROR;
 					break;
 				}
 
 				// rc = rdma_destroy_id(pdisk->cm_id);
 				// if (rc != 0) {
 				// 	SPDK_ERRLOG("cannot destroy id\n");
-				// 	pdisk->rdma_status = PERSIST_RDMA_ERROR;
+				// 	pdisk->status = PERSIST_RDMA_ERROR;
 				// 	break;
 				// }
 				// pdisk->cm_id = NULL;
 				// SPDK_NOTICELOG("2\n");
 
-				rc = rdma_destroy_id(pdisk->parent_cm_id);
+				rc = rdma_destroy_id(rdma_conn->parent_cm_id);
 				if (rc != 0) {
 					SPDK_ERRLOG("cannot destroy id\n");
-					pdisk->rdma_status = PERSIST_RDMA_ERROR;
+					rdma_conn->status = RDMA_SERVER_ERROR;
 					break;
 				}
-				pdisk->parent_cm_id = NULL;
+				rdma_conn->parent_cm_id = NULL;
 
-				rc = ibv_destroy_cq(pdisk->cq);
+				rc = ibv_destroy_cq(rdma_conn->cq);
 				if (rc != 0) {
 					SPDK_ERRLOG("destroy cq failed\n");
-					pdisk->rdma_status = PERSIST_RDMA_ERROR;
+					rdma_conn->status = RDMA_SERVER_ERROR;
 					break;
 				}
-				pdisk->cq = NULL;
+				rdma_conn->cq = NULL;
 
-				rc = ibv_dereg_mr(pdisk->mr);
+				rc = ibv_dereg_mr(rdma_conn->mr);
 				if (rc != 0) {
 					SPDK_ERRLOG("failed to dereg mr\n");
-					pdisk->rdma_status = PERSIST_RDMA_ERROR;
+					rdma_conn->status = RDMA_SERVER_ERROR;
 					break;
 				}
-				pdisk->mr = NULL;
+				rdma_conn->mr = NULL;
 
-				rc = ibv_dereg_mr(pdisk->mr_handshake);
+				rc = ibv_dereg_mr(rdma_conn->mr_handshake);
 				if (rc != 0) {
 					SPDK_ERRLOG("failed to dereg mr\n");
-					pdisk->rdma_status = PERSIST_RDMA_ERROR;
+					rdma_conn->status = RDMA_SERVER_ERROR;
 					break;
 				}
-				pdisk->mr_handshake = NULL;
+				rdma_conn->mr_handshake = NULL;
 
-				spdk_free(pdisk->malloc_buf);
-				spdk_free(pdisk->remote_handshake - 1);
+				// spdk_free(pdisk->malloc_buf);
+				spdk_free(rdma_conn->handshake_buf);
 
-				pdisk->rdma_status = PERSIST_RDMA_INITIALIZED;
+				rdma_conn->status = RDMA_SERVER_INITIALIZED;
 			}
 			else {
 				SPDK_ERRLOG("Should not receive event %d when connected\n", event->event);
 			}
 			break;
 		}
-		case PERSIST_RDMA_ERROR:
+		case RDMA_SERVER_ERROR:
 		{
 			// no way to recover now.
 			break;
 		}
+		case RDMA_CLI_ADDR_RESOLVING:
+		case RDMA_CLI_ROUTE_RESOLVING:
+		{
+			int rc;
+			struct rdma_cm_event* event;
+			rc = rdma_get_cm_event(rdma_conn->channel, &event);
+			if (rc != 0) {
+				if (errno == EAGAIN) {
+					// wait for server to accept. do nothing
+				}
+				else {
+					SPDK_ERRLOG("Unexpected CM error %d\n", errno);
+				}
+				break;
+			}
+			enum rdma_cm_event_type expected_event_type;
+			if (rdma_conn->status == RDMA_CLI_ADDR_RESOLVING) {
+				expected_event_type = RDMA_CM_EVENT_ADDR_RESOLVED;
+			}
+			else if (rdma_conn->status == RDMA_CLI_ROUTE_RESOLVING) {
+				expected_event_type = RDMA_CM_EVENT_ROUTE_RESOLVED;
+			}
+			else {
+				// should not happen
+				SPDK_ERRLOG("ERROR\n");
+				rdma_conn->status = RDMA_CLI_ERROR;
+				break;
+			}
+
+			// suppose addr and resolving never fails
+			if (event->event != expected_event_type) {
+				SPDK_ERRLOG("unexpected event type %d (expect %d)\n",
+					event->event,
+					expected_event_type);
+				rdma_conn->status = RDMA_CLI_ERROR;
+				break;
+			}
+			if (rdma_conn->cm_id != event->id) {
+				SPDK_ERRLOG("CM id mismatch\n");
+				rdma_conn->status = RDMA_CLI_ERROR;
+				break;
+			}
+			rc = rdma_ack_cm_event(event);
+			if (rc != 0) {
+				SPDK_ERRLOG("ack cm event failed\n");
+				rdma_conn->status = RDMA_CLI_ERROR;
+				break;
+			}
+
+			if (rdma_conn->status == RDMA_CLI_ADDR_RESOLVING) {
+				rc = rdma_resolve_route(rdma_conn->cm_id, 1000);
+				if (rc != 0) {
+					SPDK_ERRLOG("resolve route failed\n");
+					rdma_conn->status = RDMA_CLI_ERROR;
+					break;
+				}
+				rdma_conn->status = RDMA_CLI_ROUTE_RESOLVING;
+			}
+			else if (rdma_conn->status == RDMA_CLI_ROUTE_RESOLVING) {
+				struct ibv_context* ibv_context = rdma_conn->cm_id->verbs;
+				struct ibv_device_attr device_attr = {};
+				ibv_query_device(ibv_context, &device_attr);
+				// SPDK_NOTICELOG("max wr sge = %d, max wr num = %d, max cqe = %d, max qp = %d\n",
+				//     device_attr.max_sge, device_attr.max_qp_wr, device_attr.max_cqe, device_attr.max_qp);
+				struct ibv_cq* ibv_cq = ibv_create_cq(ibv_context, 256, NULL, NULL, 0);
+				if (ibv_cq == NULL) {
+					SPDK_ERRLOG("Failed to create cq\n");
+					rdma_conn->status = RDMA_CLI_ERROR;
+					break;
+				}
+				rdma_conn->cq = ibv_cq;
+				// no SRQ here - only one qp
+				// TODO: fine-tune these params; 
+				struct ibv_qp_init_attr init_attr = {
+					.send_cq = ibv_cq,
+					.recv_cq = ibv_cq,
+					.qp_type = IBV_QPT_RC,
+					.cap = {
+						.max_send_sge = device_attr.max_sge,
+						.max_send_wr = 256,
+						.max_recv_sge = device_attr.max_sge,
+						.max_recv_wr = 256,
+					}
+				};
+
+				rc = rdma_create_qp(rdma_conn->cm_id, NULL, &init_attr);
+				if (rc != 0) {
+					SPDK_ERRLOG("rdma_create_qp fails %d\n", rc);
+					rdma_conn->status = RDMA_CLI_ERROR;
+					break;
+				}
+
+				struct ibv_recv_wr wr, *bad_wr = NULL;
+				struct ibv_sge sge;
+
+				struct rdma_handshake* handshake = spdk_zmalloc(2 * sizeof(struct rdma_handshake), 2 * 1024 * 1024, NULL,
+					SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+				
+				rdma_conn->handshake_buf = handshake;
+				struct rdma_handshake* remote_handshake = handshake + 1;
+				struct ibv_mr* ibv_mr_circular = ibv_reg_mr(
+					rdma_conn->cm_id->qp->pd,
+					pdisk->malloc_buf,
+					(LOG_BLOCKCNT + 1) * LOG_BLOCKSIZE,
+					IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
+
+				rdma_conn->mr = ibv_mr_circular;
+
+				handshake->base_addr = pdisk->malloc_buf;
+				handshake->rkey = rdma_conn->mr->rkey;
+				// TODO: server should provide this value
+				handshake->block_cnt = LOG_BLOCKCNT;
+				handshake->block_size = LOG_BLOCKSIZE;
+				// TODO: does peer connection need this?
+				handshake->reconnect_cnt = 0;
+
+				struct ibv_mr* ibv_mr_handshake = ibv_reg_mr(rdma_conn->cm_id->qp->pd,
+					handshake,
+					2 * sizeof(struct rdma_handshake),
+					IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
+				
+				rdma_conn->mr_handshake = ibv_mr_handshake;
+
+				wr.wr_id = (uintptr_t)2;
+				wr.next = NULL;
+				wr.sg_list = &sge;
+				wr.num_sge = 1;
+
+				sge.addr = (uint64_t)remote_handshake;
+				sge.length = sizeof(struct rdma_handshake);
+				sge.lkey = ibv_mr_handshake->lkey;
+
+				rc = ibv_post_recv(rdma_conn->cm_id->qp, &wr, &bad_wr);
+				if (rc != 0) {
+					SPDK_ERRLOG("post recv failed\n");
+					rdma_conn->status = RDMA_CLI_ERROR;
+					break;
+				}
+
+				struct rdma_conn_param conn_param = {};
+
+				conn_param.responder_resources = 16;
+				conn_param.initiator_depth = 16;
+				conn_param.retry_count = 7;
+				conn_param.rnr_retry_count = 7;
+
+				rc = rdma_connect(rdma_conn->cm_id, &conn_param);
+				if (rc != 0) {
+					SPDK_ERRLOG("rdma_connect failed\n");
+					rdma_conn->status = RDMA_CLI_ERROR;
+					break;
+				}
+				rdma_conn->status = RDMA_CLI_CONNECTING;
+			}
+			break;
+		}
+		case RDMA_CLI_CONNECTING:
+		{
+			int rc;
+			struct rdma_cm_event* connect_event;
+			rc = rdma_get_cm_event(rdma_conn->channel, &connect_event);
+			if (rc != 0) {
+				if (errno == EAGAIN) {
+					// wait for server to accept. do nothing
+				}
+				else {
+					SPDK_ERRLOG("Unexpected CM error %d\n", errno);
+				}
+				break;
+			}
+			rc = rdma_ack_cm_event(connect_event);
+			if (rc != 0) {
+				SPDK_ERRLOG("failed to ack event\n");
+				rdma_conn->status = RDMA_CLI_ERROR;
+				break;
+			}
+
+			if (connect_event->event == RDMA_CM_EVENT_REJECTED) {
+				rdma_conn->reject_cnt++;
+				if (rdma_conn->reject_cnt % 100 == 1) {
+					SPDK_NOTICELOG("Rejected %ld. Try again...\n", rdma_conn->reject_cnt);
+				}
+				rdma_destroy_qp(rdma_conn->cm_id);
+				if (rdma_conn->cm_id->qp != NULL) {
+					SPDK_NOTICELOG("cannot free qp\n");
+					rdma_conn->status = RDMA_CLI_ERROR;
+					break;
+				}
+
+				rc = rdma_destroy_id(rdma_conn->cm_id);
+				if (rc != 0) {
+					SPDK_ERRLOG("cannot destroy id\n");
+					rdma_conn->status = RDMA_CLI_ERROR;
+					break;
+				}
+				rdma_conn->cm_id = NULL;
+
+				rc = ibv_destroy_cq(rdma_conn->cq);
+				if (rc != 0) {
+					SPDK_ERRLOG("destroy cq failed\n");
+					rdma_conn->status = RDMA_CLI_ERROR;
+					break;
+				}
+				rdma_conn->cq = NULL;
+
+				rc = ibv_dereg_mr(rdma_conn->mr);
+				if (rc != 0) {
+					SPDK_ERRLOG("failed to dereg mr\n");
+					rdma_conn->status = RDMA_CLI_ERROR;
+					break;
+				}
+				rdma_conn->mr = NULL;
+
+				rc = ibv_dereg_mr(rdma_conn->mr_handshake);
+				if (rc != 0) {
+					SPDK_ERRLOG("failed to dereg mr\n");
+					rdma_conn->status = RDMA_CLI_ERROR;
+					break;
+				}
+				rdma_conn->mr_handshake = NULL;
+
+				// remote not ready yet
+				// destroy all rdma resources and try again
+				rdma_conn->status = RDMA_CLI_INITIALIZED;
+				break;
+			}
+			else if (connect_event->event != RDMA_CM_EVENT_ESTABLISHED) {
+				SPDK_ERRLOG("invalid event type %d\n", connect_event->event);
+				break;
+			}
+
+			SPDK_NOTICELOG("connected. posting send...\n");
+			SPDK_NOTICELOG("sending local addr %p rkey %d block_cnt %ld block_size %ld\n",
+				rdma_conn->handshake_buf->base_addr,
+				rdma_conn->handshake_buf->rkey,
+				rdma_conn->handshake_buf->block_cnt,
+				rdma_conn->handshake_buf->block_size);
+
+			struct ibv_send_wr send_wr, *bad_send_wr = NULL;
+			struct ibv_sge send_sge;
+			memset(&send_wr, 0, sizeof(send_wr));
+
+			send_wr.wr_id = 1;
+			send_wr.opcode = IBV_WR_SEND;
+			send_wr.sg_list = &send_sge;
+			send_wr.num_sge = 1;
+			send_wr.send_flags = IBV_SEND_SIGNALED;
+
+			send_sge.addr = (uint64_t)rdma_conn->handshake_buf;
+			send_sge.length = sizeof(struct rdma_handshake);
+			send_sge.lkey = rdma_conn->mr_handshake->lkey;
+
+			rc = ibv_post_send(rdma_conn->cm_id->qp, &send_wr, &bad_send_wr);
+			if (rc != 0) {
+				SPDK_ERRLOG("post send failed\n");
+				break;
+			}
+			rdma_conn->status = RDMA_CLI_ESTABLISHED;
+			break;
+		}
+		case RDMA_CLI_ESTABLISHED:
+		{
+			struct ibv_wc wc;
+			struct rdma_handshake* remote_handshake = rdma_conn->handshake_buf + 1;
+			int cnt = ibv_poll_cq(rdma_conn->cq, 1, &wc);
+			if (cnt < 0) {
+				SPDK_ERRLOG("ibv_poll_cq failed\n");
+				break;
+			}
+
+			if (cnt == 0) {
+				break;
+			}
+
+			if (wc.status != IBV_WC_SUCCESS) {
+				SPDK_ERRLOG("WC bad status %d\n", wc.status);
+				break;
+			}
+
+			if (wc.wr_id == 2) {
+				// recv complete
+				SPDK_NOTICELOG("received remote addr %p rkey %d block_cnt %ld block_size %ld\n",
+					remote_handshake->base_addr,
+					remote_handshake->rkey,
+					remote_handshake->block_cnt,
+					remote_handshake->block_size);
+			}
+			else if (wc.wr_id == 1) {
+				// send cpl
+				SPDK_NOTICELOG("send req complete\n");
+				SPDK_NOTICELOG("rdma handshake complete\n");
+				rdma_conn->status = RDMA_CLI_CONNECTED;
+			}
+			else {
+				SPDK_ERRLOG("Should not complete wrid = %ld\n", wc.wr_id);
+			}
+			break;
+		}
+		case RDMA_CLI_CONNECTED:
+		{
+			struct rdma_cm_event* cm_event;
+			int rc = rdma_get_cm_event(rdma_conn->channel, &cm_event);
+			if (rc != 0) {
+				if (errno == EAGAIN) {
+					// wait for server to accept. do nothing
+				}
+				else {
+					SPDK_ERRLOG("Unexpected CM error %d\n", errno);
+				}
+				break;
+			}
+			rc = rdma_ack_cm_event(cm_event);
+			if (rc != 0) {
+				SPDK_ERRLOG("failed to ack event\n");
+				rdma_conn->status = RDMA_CLI_ERROR;
+				break;
+			}
+
+			if (cm_event->event == RDMA_CM_EVENT_DISCONNECTED) {
+				SPDK_NOTICELOG("Received disconnect event\n");
+				rdma_destroy_qp(rdma_conn->cm_id);
+				if (rdma_conn->cm_id->qp != NULL) {
+					SPDK_NOTICELOG("cannot free qp\n");
+					rdma_conn->status = RDMA_CLI_ERROR;
+					break;
+				}
+
+				rc = rdma_destroy_id(rdma_conn->cm_id);
+				if (rc != 0) {
+					SPDK_ERRLOG("cannot destroy id\n");
+					rdma_conn->status = RDMA_CLI_ERROR;
+					break;
+				}
+				rdma_conn->cm_id = NULL;
+
+				rc = ibv_destroy_cq(rdma_conn->cq);
+				if (rc != 0) {
+					SPDK_ERRLOG("destroy cq failed\n");
+					rdma_conn->status = RDMA_CLI_ERROR;
+					break;
+				}
+				rdma_conn->cq = NULL;
+
+				rc = ibv_dereg_mr(rdma_conn->mr);
+				if (rc != 0) {
+					SPDK_ERRLOG("failed to dereg mr\n");
+					rdma_conn->status = RDMA_CLI_ERROR;
+					break;
+				}
+				rdma_conn->mr = NULL;
+
+				rc = ibv_dereg_mr(rdma_conn->mr_handshake);
+				if (rc != 0) {
+					SPDK_ERRLOG("failed to dereg mr\n");
+					rdma_conn->status = RDMA_CLI_ERROR;
+					break;
+				}
+				rdma_conn->mr_handshake = NULL;
+
+				rdma_conn->status = RDMA_CLI_INITIALIZED;
+			}
+			else {
+				SPDK_ERRLOG("Should not receive event %d when connected\n", cm_event->event);
+			}
+			break;
+		}
+		case RDMA_CLI_ERROR:
+		{
+			SPDK_NOTICELOG("In error state. Cannot recover by now\n");
+			break;
+		}
+	}
+
+	return SPDK_POLLER_BUSY;
+}
+
+static int persist_rdma_poller(void* ctx) {
+	struct persist_disk* pdisk = ctx;
+
+	update_persist_rdma_connection(&pdisk->client_conn, pdisk);
+	for (int i = 0; i < pdisk->num_peers; i++) {
+		update_persist_rdma_connection(pdisk->peer_conns + i, pdisk);
 	}
 
 	return SPDK_POLLER_BUSY;
@@ -979,7 +1396,8 @@ persist_destroy_channel_cb(void *io_device, void *ctx)
 
 int
 create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, const char* port,
-			const struct spdk_uuid *uuid, bool attach_disk)
+			const struct spdk_uuid *uuid, bool attach_disk, struct rpc_persist_peer_info* peer_info_array,
+			size_t num_peers)
 {
 	SPDK_DEBUGLOG(bdev_persist, "in create disk\n");
 	struct persist_disk	*pdisk;
@@ -1053,18 +1471,19 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 		spdk_uuid_generate(&pdisk->disk.uuid);
 	}
 
-	struct rdma_event_channel* rdma_channel = rdma_create_event_channel();
-	pdisk->rdma_channel = rdma_channel;
-
+	struct rdma_event_channel* channel = rdma_create_event_channel();
+	pdisk->client_conn.channel = channel;
 
 	// need to make sure that the fd is set to non-blocking before 
 	// entering the poller.
-	int flags = fcntl(pdisk->rdma_channel->fd, F_GETFL);
-	rc = fcntl(pdisk->rdma_channel->fd, F_SETFL, flags | O_NONBLOCK);
+	int flags = fcntl(pdisk->client_conn.channel->fd, F_GETFL);
+	rc = fcntl(pdisk->client_conn.channel->fd, F_SETFL, flags | O_NONBLOCK);
 	if (rc != 0) {
 		SPDK_ERRLOG("fcntl failed\n");
 		return -EINVAL;
 	}
+
+	pdisk->client_conn.status = RDMA_SERVER_INITIALIZED;
 
 	struct addrinfo hints = {};
 	struct addrinfo* addr_res = NULL;
@@ -1075,7 +1494,49 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 		SPDK_ERRLOG("getaddrinfo failed\n");
 		return 1;
 	}
-	pdisk->server_addr = addr_res;
+	pdisk->client_conn.server_addr = addr_res;
+
+	pdisk->num_peers = num_peers;
+	for (int i = 0; i < num_peers; i++) {
+		struct rdma_event_channel* channel = rdma_create_event_channel();
+		pdisk->peer_conns[i].channel = channel;
+
+		// need to make sure that the fd is set to non-blocking before 
+		// entering the poller.
+		int flags = fcntl(pdisk->peer_conns[i].channel->fd, F_GETFL);
+		rc = fcntl(pdisk->peer_conns[i].channel->fd, F_SETFL, flags | O_NONBLOCK);
+		if (rc != 0) {
+			SPDK_ERRLOG("fcntl failed\n");
+			return -EINVAL;
+		}
+
+		struct addrinfo hints = {};
+		struct addrinfo* addr_res = NULL;
+		hints.ai_family = AF_INET;
+		hints.ai_flags = AI_PASSIVE;
+
+		// the smaller ip one is the server
+		if (strcmp(ip, peer_info_array[i].remote_ip) < 0
+			|| (strcmp(ip, peer_info_array[i].remote_ip) == 0 && strcmp(port, peer_info_array[i].remote_port) < 0)) {
+			pdisk->peer_conns[i].is_server = true;
+			rc = getaddrinfo(ip, peer_info_array[i].local_port, &hints, &addr_res);
+			if (rc != 0) {
+				SPDK_ERRLOG("getaddrinfo failed\n");
+				return 1;
+			}
+			pdisk->peer_conns[i].server_addr = addr_res;
+		}
+		else {
+			pdisk->peer_conns[i].is_server = false;
+			rc = getaddrinfo(peer_info_array[i].remote_ip, peer_info_array[i].remote_port, &hints, &addr_res);
+			if (rc != 0) {
+				SPDK_ERRLOG("getaddrinfo failed\n");
+				return 1;
+			}
+			pdisk->peer_conns[i].server_addr = addr_res;
+		}
+		pdisk->peer_conns[i].status = RDMA_CLI_INITIALIZED;
+	}
 
 	pdisk->disk.ctxt = pdisk;
 	pdisk->disk.fn_table = &persist_fn_table;

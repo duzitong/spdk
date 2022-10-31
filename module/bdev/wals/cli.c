@@ -12,10 +12,6 @@
 #include <rdma/rdma_cma.h>
 
 #define WC_BATCH_SIZE 32
-// TODO: make it configurable; server should decide it?
-// need another async API to tell parent bdev about the 
-// block size; hard-code now.
-#define LOG_BLOCKCNT 1310720
 // Should not exceed log_blockcnt
 #define PENDING_IO_MAX_CNT 131072
 #define MAX_SLICES 256
@@ -76,6 +72,8 @@ struct rdma_cli_connection {
     uint64_t reject_cnt;
     uint64_t io_fail_cnt;
     uint64_t reconnect_cnt;
+    size_t blocksize_per_slice;
+    size_t blockcnt_per_slice;
     TAILQ_HEAD(, wals_cli_slice) slices;
 };
 
@@ -370,7 +368,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
     }
 
     // TODO: should not set log_blockcnt right now
-    target->log_blockcnt = LOG_BLOCKCNT;
+    target->log_blockcnt = cli_slice->rdma_conn->blockcnt_per_slice;
     target->private_info = cli_slice;
 
     cli_slice->id = g_num_slices;
@@ -423,7 +421,7 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
         return 0;
     }
 
-    if (offset + cnt > LOG_BLOCKCNT) {
+    if (offset + cnt > slice->rdma_conn->blockcnt_per_slice) {
         SPDK_ERRLOG("READ out of remote PMEM range: %ld %ld\n", offset, cnt);
         wals_target_read_complete(wals_io, false);
         return 0;
@@ -505,7 +503,7 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
         return 0;
     }
 
-    if (offset + cnt > LOG_BLOCKCNT) {
+    if (offset + cnt > slice->rdma_conn->blockcnt_per_slice) {
         SPDK_ERRLOG("Write out of remote PMEM range: %ld %ld\n", offset, cnt);
         wals_target_write_complete(wals_io, false);
         return 0;
@@ -797,9 +795,6 @@ rdma_cli_connection_poller(void* ctx) {
                     struct rdma_handshake* remote_handshake = &g_rdma_handshakes[i];
                     handshake->base_addr = &g_rdma_handshakes[0];
                     handshake->rkey = mr_handshake->rkey;
-                    // TODO: server should provide this value
-                    handshake->block_cnt = LOG_BLOCKCNT;
-                    handshake->block_size = wals_bdev->blocklen;
                     handshake->reconnect_cnt = g_rdma_cli_conns[i].reconnect_cnt;
 
                     wr.wr_id = (uintptr_t)i;
@@ -1006,32 +1001,6 @@ rdma_cli_connection_poller(void* ctx) {
                     break;
                 }
 
-                SPDK_NOTICELOG("connected. posting send...\n");
-                SPDK_NOTICELOG("sending local addr %p rkey %d block_cnt %ld block_size %ld\n",
-                    handshake->base_addr,
-                    handshake->rkey,
-                    handshake->block_cnt,
-                    handshake->block_size);
-
-                struct ibv_send_wr send_wr, *bad_send_wr = NULL;
-                struct ibv_sge send_sge;
-                memset(&send_wr, 0, sizeof(send_wr));
-
-                send_wr.wr_id = NUM_TARGETS + i;
-                send_wr.opcode = IBV_WR_SEND;
-                send_wr.sg_list = &send_sge;
-                send_wr.num_sge = 1;
-                send_wr.send_flags = IBV_SEND_SIGNALED;
-
-                send_sge.addr = (uint64_t)handshake;
-                send_sge.length = sizeof(struct rdma_handshake);
-                send_sge.lkey = g_rdma_cli_conns[i].mr_handshake->lkey;
-
-                rc = ibv_post_send(g_rdma_cli_conns[i].cm_id->qp, &send_wr, &bad_send_wr);
-                if (rc != 0) {
-                    SPDK_ERRLOG("post send failed\n");
-                    break;
-                }
                 g_rdma_cli_conns[i].status = RDMA_CLI_ESTABLISHED;
                 break;
             }
@@ -1062,20 +1031,47 @@ rdma_cli_connection_poller(void* ctx) {
                         remote_handshake->rkey,
                         remote_handshake->block_cnt,
                         remote_handshake->block_size);
+
+                    if (remote_handshake->block_size != wals_bdev->bdev.blocklen) {
+                        SPDK_ERRLOG("Bdev blocklen %d mismatch log blocklen %ld\n",
+                            wals_bdev->bdev.blocklen,
+                            remote_handshake->block_size);
+                    }
                     
-                    // TODO: remove block cnt check
-                    if (remote_handshake->block_cnt != handshake->block_cnt ||
-                        remote_handshake->block_size != handshake->block_size) {
-                        SPDK_ERRLOG("buffer config handshake mismatch\n");
+                    SPDK_NOTICELOG("connected. posting send...\n");
+                    handshake->block_cnt = remote_handshake->block_cnt;
+                    handshake->block_size = remote_handshake->block_size;
+                    SPDK_NOTICELOG("sending local addr %p rkey %d block_cnt %ld block_size %ld\n",
+                        handshake->base_addr,
+                        handshake->rkey,
+                        handshake->block_cnt,
+                        handshake->block_size);
+
+                    struct ibv_send_wr send_wr, *bad_send_wr = NULL;
+                    struct ibv_sge send_sge;
+                    memset(&send_wr, 0, sizeof(send_wr));
+
+                    send_wr.wr_id = NUM_TARGETS + i;
+                    send_wr.opcode = IBV_WR_SEND;
+                    send_wr.sg_list = &send_sge;
+                    send_wr.num_sge = 1;
+                    send_wr.send_flags = IBV_SEND_SIGNALED;
+
+                    send_sge.addr = (uint64_t)handshake;
+                    send_sge.length = sizeof(struct rdma_handshake);
+                    send_sge.lkey = g_rdma_cli_conns[i].mr_handshake->lkey;
+
+                    int rc = ibv_post_send(g_rdma_cli_conns[i].cm_id->qp, &send_wr, &bad_send_wr);
+                    if (rc != 0) {
+                        SPDK_ERRLOG("post send failed\n");
                         break;
                     }
-                    SPDK_NOTICELOG("rdma handshake complete\n");
-                    g_rdma_cli_conns[i].status = RDMA_CLI_CONNECTED;
-                    // TODO: should set slice log_blockcnt to proper value provided by remote handshake
                 }
                 else if (wc.wr_id < 2 * NUM_TARGETS) {
                     // send cpl
                     SPDK_NOTICELOG("send req complete\n");
+                    SPDK_NOTICELOG("rdma handshake complete\n");
+                    g_rdma_cli_conns[i].status = RDMA_CLI_CONNECTED;
                 }
                 else {
                     SPDK_ERRLOG("Should not complete wrid = %ld\n", wc.wr_id);
@@ -1107,7 +1103,7 @@ static int slice_destage_info_poller(void* ctx) {
                 send_wr.sg_list = &send_sge;
                 send_wr.num_sge = 1;
                 send_wr.send_flags = 0;
-                send_wr.wr.rdma.remote_addr = (uint64_t)g_rdma_handshakes[cli_slice->rdma_conn->id].base_addr + LOG_BLOCKCNT * cli_slice->wals_bdev->blocklen;
+                send_wr.wr.rdma.remote_addr = (uint64_t)g_rdma_handshakes[cli_slice->rdma_conn->id].base_addr + cli_slice->rdma_conn->blockcnt_per_slice * cli_slice->wals_bdev->blocklen;
                 send_wr.wr.rdma.rkey = g_rdma_handshakes[cli_slice->rdma_conn->id].rkey;
 
                 send_sge.addr = (uint64_t)&g_destage_info[cli_slice->id];
