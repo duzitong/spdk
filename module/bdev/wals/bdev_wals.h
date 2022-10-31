@@ -181,10 +181,18 @@ typedef struct wals_log_position {
 	uint64_t	round;
 } wals_log_position;
 
-struct wals_read_after {
-	wals_log_position pos;
+struct wals_lp_firo_entry {
+	wals_log_position 				pos;
 
-	LIST_ENTRY(wals_read_after) entries;
+	bool							removed;
+
+	TAILQ_ENTRY(wals_lp_firo_entry)	link;
+};
+
+struct wals_lp_firo {	
+	TAILQ_HEAD(, wals_lp_firo_entry)	head;
+
+	struct spdk_mempool					*entry_pool;
 };
 
 struct wals_target {
@@ -205,34 +213,13 @@ struct wals_slice {
 	/* min(outstanding read requests offset, min2(targets.offset)) */
 	volatile wals_log_position	head;
 
+	wals_log_position			committed_tail;
+
 	struct wals_target			*targets[NUM_TARGETS];
 
-	/* list of outstanding read_afters */
-	LIST_HEAD(, wals_read_after) outstanding_read_afters;
+	struct wals_lp_firo			*write_firo;
 
-	struct wals_read_after		*oldest;
-};
-
-struct wals_io_read_buffer {
-	void	*buf;
-
-	int		blockcnt;
-
-	LIST_ENTRY(wals_io_read_buffer) entries;
-};
-
-struct wals_bdev_read_buffer {
-	void	*buf;
-
-	int		blockcnt;
-
-	int		head;
-
-	int		tail;
-	
-	int		end;
-
-	LIST_HEAD(, wals_io_read_buffer)	recycles;
+	struct wals_lp_firo			*read_firo;
 };
 
 /*
@@ -262,7 +249,7 @@ struct wals_bdev_io {
 	
 	uint16_t	remaining_read_requests;
 
-	struct wals_read_after	*read_after;
+	struct wals_lp_firo_entry	*firo_entry;
 
 	struct dma_page	*dma_page;
 
