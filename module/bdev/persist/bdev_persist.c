@@ -844,7 +844,7 @@ static int update_persist_rdma_connection(struct persist_rdma_connection* rdma_c
 			SPDK_NOTICELOG("sent local addr %p rkey %d length %ld\n",
 				rdma_conn->handshake_buf->base_addr,
 				rdma_conn->handshake_buf->rkey,
-				log_size);
+				LOG_BLOCKCNT * LOG_BLOCKSIZE);
 
 			rdma_conn->status = RDMA_SERVER_ESTABLISHED;
 			break;
