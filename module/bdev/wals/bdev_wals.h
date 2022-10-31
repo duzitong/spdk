@@ -207,7 +207,7 @@ struct wals_slice {
 
 	wals_log_position			tail;
 
-	/* min(outstanding read requests offset, min2(targets.offset)) */
+	/* min(outstanding read requests offset, min(targets.offset)) */
 	volatile wals_log_position	head;
 
 	wals_log_position			committed_tail;

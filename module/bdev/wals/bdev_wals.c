@@ -1640,6 +1640,8 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 		SPDK_NOTICELOG("log_blockcnt = %ld\n", wals_bdev->slices[i].log_blockcnt);
 	}
 
+	// TODO: recover
+
 	rc = wals_bdev_configure(wals_bdev);
 	if (rc != 0) {
 		SPDK_ERRLOG("Failed to configure WALS bdev\n");
@@ -1675,8 +1677,6 @@ wals_bdev_start(struct wals_bdev *wals_bdev)
 
 	wals_bdev->write_heap = dma_heap_alloc(wals_bdev->buffer_blockcnt * wals_bdev->blocklen, offsetof(struct wals_metadata, data_checksum), sizeof(wals_crc), wals_bdev->blocklen_shift);
 	wals_bdev->read_heap = dma_heap_alloc(wals_bdev->buffer_blockcnt * wals_bdev->blocklen, 0, 0, wals_bdev->blocklen_shift);
-
-	// TODO: recover
 
 	return 0;
 }
