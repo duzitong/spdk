@@ -1093,6 +1093,12 @@ static int update_persist_rdma_connection(struct persist_rdma_connection* rdma_c
 					pdisk->malloc_buf,
 					(LOG_BLOCKCNT + 1) * LOG_BLOCKSIZE,
 					IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ);
+				
+				if (ibv_mr_circular == NULL) {
+					SPDK_ERRLOG("Failed to register mr\n");
+					rdma_conn->status = RDMA_CLI_ERROR;
+					break;
+				}
 
 				rdma_conn->mr = ibv_mr_circular;
 
@@ -1109,6 +1115,12 @@ static int update_persist_rdma_connection(struct persist_rdma_connection* rdma_c
 					2 * sizeof(struct rdma_handshake),
 					IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
 				
+				if (ibv_mr_handshake == NULL) {
+					SPDK_ERRLOG("Failed to register mr\n");
+					rdma_conn->status = RDMA_CLI_ERROR;
+					break;
+				}
+
 				rdma_conn->mr_handshake = ibv_mr_handshake;
 
 				wr.wr_id = (uintptr_t)2;
