@@ -138,36 +138,6 @@ struct persist_disk {
 	TAILQ_ENTRY(persist_disk)	link;
 };
 
-// struct wal_metadata {
-// 	uint64_t	version;
-	
-// 	uint64_t	seq;
-
-// 	uint64_t	next_offset;
-
-// 	uint64_t	length;
-
-// 	uint64_t	core_offset;
-
-// 	uint64_t	core_length;
-
-// 	uint64_t	round;
-// };
-
-struct wals_metadata {
-	uint64_t	version;
-	
-	uint64_t	seq;
-
-	uint64_t	next_offset;
-
-	uint64_t	length;
-
-	uint64_t	core_offset;
-
-	uint64_t	round;
-};
-
 static struct destage_info {
 	uint64_t destage_head;
 	uint64_t destage_round;
