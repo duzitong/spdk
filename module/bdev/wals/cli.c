@@ -72,7 +72,6 @@ struct rdma_cli_connection {
     uint64_t reject_cnt;
     uint64_t io_fail_cnt;
     uint64_t reconnect_cnt;
-    size_t blocksize_per_slice;
     size_t blockcnt_per_slice;
     TAILQ_HEAD(, wals_cli_slice) slices;
 };
@@ -1033,10 +1032,13 @@ rdma_cli_connection_poller(void* ctx) {
                         remote_handshake->block_size);
 
                     if (remote_handshake->block_size != wals_bdev->bdev.blocklen) {
+                        // TODO: this is fatal
                         SPDK_ERRLOG("Bdev blocklen %d mismatch log blocklen %ld\n",
                             wals_bdev->bdev.blocklen,
                             remote_handshake->block_size);
                     }
+
+                    g_rdma_cli_conns[i].blockcnt_per_slice = remote_handshake->block_cnt;
                     
                     SPDK_NOTICELOG("connected. posting send...\n");
                     handshake->block_cnt = remote_handshake->block_cnt;

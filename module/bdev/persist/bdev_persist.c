@@ -1166,7 +1166,7 @@ static int update_persist_rdma_connection(struct persist_rdma_connection* rdma_c
 
 			if (connect_event->event == RDMA_CM_EVENT_REJECTED) {
 				rdma_conn->reject_cnt++;
-				if (rdma_conn->reject_cnt % 100 == 1) {
+				if (rdma_conn->reject_cnt % 1000 == 1) {
 					SPDK_NOTICELOG("Rejected %ld. Try again...\n", rdma_conn->reject_cnt);
 				}
 				rdma_destroy_qp(rdma_conn->cm_id);
