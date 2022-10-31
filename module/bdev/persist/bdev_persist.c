@@ -657,8 +657,8 @@ static int update_persist_rdma_connection(struct persist_rdma_connection* rdma_c
 				SPDK_ERRLOG("rdma_create_id failed\n");
 				return 1;
 			}
-			rdma_conn->parent_cm_id = cm_id;
 			if (rdma_conn->is_server) {
+				rdma_conn->parent_cm_id = cm_id;
 				struct sockaddr_in addr;
 				memcpy(&addr, rdma_conn->server_addr->ai_addr, sizeof(addr));
 				rc = rdma_bind_addr(cm_id, (struct sockaddr*)&addr);
@@ -678,6 +678,7 @@ static int update_persist_rdma_connection(struct persist_rdma_connection* rdma_c
 				rdma_conn->status = RDMA_SERVER_LISTENING;
 			}
 			else {
+				rdma_conn->cm_id = cm_id;
                 rc = rdma_resolve_addr(cm_id, NULL, rdma_conn->server_addr->ai_addr, 1000);
                 if (rc != 0) {
                     SPDK_ERRLOG("rdma_resolve_addr failed\n");
