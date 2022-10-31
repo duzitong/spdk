@@ -708,7 +708,6 @@ wals_bdev_write_complete_quorum(struct wals_bdev_io *wals_io)
 	struct wals_bdev	*wals_bdev = wals_io->wals_bdev;
 	struct wals_metadata *metadata = wals_io->metadata;
 	struct wals_index_msg *msg = spdk_mempool_get(wals_bdev->index_msg_pool);
-	struct wals_slice *slice = &wals_bdev->slices[wals_io->slice_index];
 	int rc, count = 0;
 	
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_COMP_W_Q, 0, 0, (uintptr_t)wals_io);
@@ -740,8 +739,6 @@ wals_bdev_write_complete_quorum(struct wals_bdev_io *wals_io)
 	do {
 		rc = spdk_thread_send_msg(wals_bdev->read_thread, wals_bdev_insert_read_index, msg);
 	} while (rc != 0);
-
-	wals_bdev_firo_remove(slice->write_firo, wals_io->firo_entry, &slice->committed_tail);
 
 	if (wals_io->orig_thread != spdk_get_thread()) {
 		spdk_thread_send_msg(wals_io->orig_thread, wals_bdev_write_complete_deferred_success, wals_io);
@@ -815,6 +812,9 @@ static void
 wals_bdev_write_complete_all(struct wals_bdev_io *wals_io)
 {
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_COMP_W_A, 0, 0, (uintptr_t)wals_io);
+
+	struct wals_slice *slice = &wals_io->wals_bdev->slices[wals_io->slice_index];
+	wals_bdev_firo_remove(slice->write_firo, wals_io->firo_entry, &slice->committed_tail);
 
 	if (wals_io->orig_thread != spdk_get_thread()) {
 		spdk_thread_send_msg(wals_io->orig_thread, wals_bdev_write_complete_free_deferred, wals_io);
