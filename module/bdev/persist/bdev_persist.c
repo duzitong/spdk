@@ -806,21 +806,8 @@ static int update_persist_rdma_connection(struct persist_rdma_connection* rdma_c
 			}
 
 			SPDK_NOTICELOG("connected. waiting for handshake ...\n");
-			size_t log_size = LOG_BLOCKCNT * LOG_BLOCKSIZE;
 			size_t total_size = (LOG_BLOCKCNT + 1) * LOG_BLOCKSIZE;
-
-			// one more block for current destage position
-			// TODO: another block for commit tail
-			// NOTE: the buffer length must not change when reconnecting
-			if (pdisk->malloc_buf == NULL) {
-				pdisk->malloc_buf = spdk_zmalloc(total_size,
-					2 * 1024 * 1024,
-					NULL,
-					SPDK_ENV_LCORE_ID_ANY,
-					SPDK_MALLOC_DMA);
-			}
 			
-			pdisk->destage_info = pdisk->malloc_buf + log_size;
 			struct ibv_send_wr send_wr, *bad_send_wr = NULL;
 			struct ibv_mr* ibv_mr_circular;
 			memset(&send_wr, 0, sizeof(send_wr));
@@ -1462,8 +1449,18 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 		}
 	}
 
-	pdisk->destage_info = spdk_zmalloc(pdisk->disk.blocklen, 0, 
-							NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	size_t log_size = LOG_BLOCKCNT * LOG_BLOCKSIZE;
+	size_t total_size = (LOG_BLOCKCNT + 1) * LOG_BLOCKSIZE;
+
+	// one more block for current destage position
+	// TODO: another block for commit tail
+	// NOTE: the buffer length must not change when reconnecting
+	pdisk->malloc_buf = spdk_zmalloc(total_size,
+		2 * 1024 * 1024,
+		NULL,
+		SPDK_ENV_LCORE_ID_ANY,
+		SPDK_MALLOC_DMA);
+	pdisk->destage_info = pdisk->malloc_buf + log_size;
 
 	if (name) {
 		pdisk->disk.name = strdup(name);
