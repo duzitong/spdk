@@ -916,7 +916,10 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 	metadata->length = bdev_io->u.bdev.num_blocks;
 	metadata->round = slice_tail.round;
 	metadata->md_blocknum = wals_io->total_num_blocks - bdev_io->u.bdev.num_blocks;
+
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_CALC_CRC, 0, 0, (uintptr_t)wals_io, 1);
 	metadata->md_checksum = wals_bdev_calc_crc(metadata, md_size);
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_CALC_CRC, 0, 0, (uintptr_t)wals_io);
 
 	wals_io->metadata = metadata;
 
@@ -931,17 +934,20 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 	
 	data = ptr + (wals_io->total_num_blocks - bdev_io->u.bdev.num_blocks) * wals_bdev->blocklen;
 	checksum = metadata->data_checksum;
+
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_CALC_CRC, 0, 0, (uintptr_t)wals_io, bdev_io->u.bdev.num_blocks);
 	for (i = 0; i < bdev_io->u.bdev.num_blocks; i++) {
 		*checksum = wals_bdev_calc_crc(data, wals_bdev->blocklen);
 		checksum++;
 		data += wals_bdev->blocklen;
 	}
+	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_CALC_CRC, 0, 0, (uintptr_t)wals_io);
 
 	wals_io->firo_entry = wals_bdev_firo_insert(slice->write_firo, slice_tail);
 
 	// call module to submit to all targets
 	for (i = 0; i < NUM_TARGETS; i++) {
-		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_W_T, 0, 0, (uintptr_t)wals_io, i);
+		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_W_T, 0, 0, (uintptr_t)wals_io, i, wals_io->total_num_blocks);
 
 		ret = wals_bdev->module->submit_log_write_request(slice->targets[i], ptr,
 														slice_tail.offset - wals_io->total_num_blocks,
@@ -1646,6 +1652,8 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 		SPDK_NOTICELOG("log_blockcnt = %ld\n", wals_bdev->slices[i].log_blockcnt);
 	}
 
+	// TODO: recover
+
 	rc = wals_bdev_configure(wals_bdev);
 	if (rc != 0) {
 		SPDK_ERRLOG("Failed to configure WALS bdev\n");
@@ -1681,8 +1689,6 @@ wals_bdev_start(struct wals_bdev *wals_bdev)
 
 	wals_bdev->write_heap = dma_heap_alloc(wals_bdev->buffer_blockcnt * wals_bdev->blocklen, offsetof(struct wals_metadata, data_checksum), sizeof(wals_crc), wals_bdev->blocklen_shift);
 	wals_bdev->read_heap = dma_heap_alloc(wals_bdev->buffer_blockcnt * wals_bdev->blocklen, 0, 0, wals_bdev->blocklen_shift);
-
-	// TODO: recover
 
 	return 0;
 }
@@ -1858,6 +1864,7 @@ SPDK_TRACE_REGISTER_FN(wals_trace, "wals", TRACE_GROUP_WALS)
 			OWNER_WALS, OBJECT_WALS_IO, 0,
 			{
 				{ "target", SPDK_TRACE_ARG_TYPE_INT, 8 },
+				{ "total", SPDK_TRACE_ARG_TYPE_INT, 8 },
 			}
 		},
 		{
@@ -1999,6 +2006,18 @@ SPDK_TRACE_REGISTER_FN(wals_trace, "wals", TRACE_GROUP_WALS)
 		{
 			"WALS_F_RDMA_CQ", TRACE_WALS_F_RDMA_CQ,
 			OWNER_WALS, OBJECT_WALS_BDEV, 0,
+			{}
+		},
+		{
+			"WALS_S_CALC_CRC", TRACE_WALS_S_CALC_CRC,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
+			{
+				{ "blocks", SPDK_TRACE_ARG_TYPE_INT, 8 }
+			}
+		},
+		{
+			"WALS_F_CALC_CRC", TRACE_WALS_F_CALC_CRC,
+			OWNER_WALS, OBJECT_WALS_IO, 0,
 			{}
 		},
 	};
