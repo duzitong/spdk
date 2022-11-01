@@ -41,7 +41,7 @@
 #include "spdk/bdev.h"
 #include "spdk/trace.h"
 #include "spdk_internal/trace_defs.h"
-#include "bdev/wals/bdev_wals.h"
+#include "../wals/bdev_wals.h"
 
 #define PERSIST_BLOCK_SIZE 512
 #define PERSIST_WC_BATCH_SIZE 32

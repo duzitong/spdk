@@ -395,6 +395,7 @@ static bool is_io_within_memory_region(void* data, uint64_t cnt, uint64_t blockl
 static int
 cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_checksum_offset checksum_offset, struct wals_bdev_io *wals_io)
 {
+    SPDK_NOTICELOG("Reading from log %ld %ld\n", offset, cnt);
     // BUG: the reconnection poller must be in the same thread as the IO thread, 
     // otherwise it may secretly try to reconnect and free the RDMA resources, causing 
     // segfault.
@@ -474,6 +475,7 @@ static void cli_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
 static int
 cli_submit_core_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
+    SPDK_NOTICELOG("Reading from disk %ld %ld\n", offset, cnt);
     int rc;
     struct wals_cli_slice* slice = target->private_info;
     uint64_t multiplier = slice->wals_bdev->bdev.blocklen / spdk_nvme_ns_get_sector_size(slice->nvmf_conn->ns);
@@ -493,6 +495,7 @@ cli_submit_core_read_request(struct wals_target* target, void *data, uint64_t of
 static int
 cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
+    SPDK_NOTICELOG("Writing to log %ld %ld\n", offset, cnt);
     int rc;
     struct wals_cli_slice* slice = target->private_info;
 
