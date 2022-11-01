@@ -558,7 +558,7 @@ persist_destage_poller(void *ctx)
 
 		// metadata should contain good info from now.
 		// payload is always one block after metadata
-		void* payload = (void*)(metadata) + pdisk->disk.blocklen;
+		void* payload = (void*)(metadata) + metadata->md_blocknum * pdisk->disk.blocklen;
 
 		if (metadata->seq != pdisk->prev_seq + 1) {
 			// TODO: what to do about it?
