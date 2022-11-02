@@ -37,8 +37,8 @@ enum nvmf_cli_status {
 
 // TODO: share the same header file
 static struct destage_info {
-	uint64_t destage_head;
-	uint64_t destage_round;
+	uint64_t offset;
+	uint64_t round;
 	uint32_t checksum;
 };
 
@@ -53,6 +53,7 @@ struct pending_io_queue {
     struct pending_io_context pending_ios[PENDING_IO_MAX_CNT];
 };
 
+// TODO: refactor it so that fields for each slice is not in it
 struct rdma_cli_connection {
     int id;
     struct rdma_event_channel* channel;
@@ -61,7 +62,8 @@ struct rdma_cli_connection {
     struct ibv_mr* mr_read;
     struct ibv_mr* mr_write;
     struct ibv_mr* mr_handshake;
-    struct ibv_mr* mr_destage_info;
+    struct ibv_mr* mr_destage_tail;
+    struct ibv_mr* mr_commit_tail;
     struct addrinfo* server_addr;
     struct ibv_wc wc_buf[WC_BATCH_SIZE];
     struct pending_io_queue pending_read_io_queue;
@@ -104,14 +106,17 @@ struct spdk_poller* g_destage_info_poller;
 
 int g_num_slices = 0;
 
+// TODO: rewrite it to supp
 TAILQ_HEAD(, wals_cli_slice) g_slices;
-struct destage_info g_destage_info[MAX_SLICES];
+struct destage_info g_destage_tail[MAX_SLICES];
+struct destage_info g_commit_tail[MAX_SLICES];
 
 struct wals_cli_slice {
     int id;
     struct wals_bdev* wals_bdev;
     // can use CONTAINEROF?
     struct wals_target* wals_target;
+    struct wals_slice* wals_slice;
     struct rdma_cli_connection* rdma_conn;
     struct nvmf_cli_connection* nvmf_conn;
     // if connected to the same ssd, then they need to share the same qp.
@@ -207,7 +212,8 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
         TAILQ_INIT(&g_slices);
 
         for (int i = 0; i < MAX_SLICES; i++) {
-            g_destage_info[i].checksum = DESTAGE_INFO_CHECKSUM;
+            g_destage_tail[i].checksum = DESTAGE_INFO_CHECKSUM;
+            g_commit_tail[i].checksum = DESTAGE_INFO_CHECKSUM;
         }
 
     }
@@ -223,6 +229,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
 
     cli_slice->wals_bdev = wals_bdev;
     cli_slice->wals_target = target;
+    cli_slice->wals_slice = slice;
 
 	struct sockaddr_in addr;
 	struct addrinfo hints = {};
@@ -778,17 +785,29 @@ rdma_cli_connection_poller(void* ctx) {
                     }
                     g_rdma_cli_conns[i].mr_handshake = mr_handshake;
 
-                    struct ibv_mr* mr_destage_info = ibv_reg_mr(g_rdma_cli_conns[i].cm_id->qp->pd,
-                        g_destage_info,
-                        sizeof(g_destage_info),
+                    struct ibv_mr* mr_destage_tail = ibv_reg_mr(g_rdma_cli_conns[i].cm_id->qp->pd,
+                        g_destage_tail,
+                        sizeof(g_destage_tail),
                         IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
 
-                    if (mr_destage_info == NULL) {
-                        SPDK_ERRLOG("failed to reg mr handshake\n");
+                    if (mr_destage_tail == NULL) {
+                        SPDK_ERRLOG("failed to reg mr destage tail\n");
                         g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
                         break;
                     }
-                    g_rdma_cli_conns[i].mr_destage_info = mr_destage_info;
+                    g_rdma_cli_conns[i].mr_destage_tail = mr_destage_tail;
+
+                    struct ibv_mr* mr_commit_tail = ibv_reg_mr(g_rdma_cli_conns[i].cm_id->qp->pd,
+                        g_commit_tail,
+                        sizeof(g_commit_tail),
+                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
+
+                    if (mr_commit_tail == NULL) {
+                        SPDK_ERRLOG("failed to reg mr commit tail\n");
+                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        break;
+                    }
+                    g_rdma_cli_conns[i].mr_commit_tail = mr_commit_tail;
 
                     struct ibv_recv_wr wr, *bad_wr = NULL;
                     struct ibv_sge sge;
@@ -898,13 +917,21 @@ rdma_cli_connection_poller(void* ctx) {
                         break;
                     }
                     g_rdma_cli_conns[i].mr_handshake = NULL;
-                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_destage_info);
+                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_destage_tail);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
                         g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
                         break;
                     }
-                    g_rdma_cli_conns[i].mr_destage_info = NULL;
+                    g_rdma_cli_conns[i].mr_destage_tail = NULL;
+
+                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_commit_tail);
+                    if (rc != 0) {
+                        SPDK_ERRLOG("failed to dereg mr\n");
+                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        break;
+                    }
+                    g_rdma_cli_conns[i].mr_commit_tail = NULL;
 
                     g_rdma_cli_conns[i].status = RDMA_CLI_INITIALIZED;
                 }
@@ -986,13 +1013,22 @@ rdma_cli_connection_poller(void* ctx) {
                         break;
                     }
                     g_rdma_cli_conns[i].mr_handshake = NULL;
-                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_destage_info);
+                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_destage_tail);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
                         g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
                         break;
                     }
-                    g_rdma_cli_conns[i].mr_destage_info = NULL;
+                    g_rdma_cli_conns[i].mr_destage_tail = NULL;
+
+                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_commit_tail);
+                    if (rc != 0) {
+                        SPDK_ERRLOG("failed to dereg mr\n");
+                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        break;
+                    }
+                    g_rdma_cli_conns[i].mr_commit_tail = NULL;
+
 
                     g_rdma_cli_conns[i].status = RDMA_CLI_INITIALIZED;
                     g_rdma_cli_conns[i].reconnect_cnt++;
@@ -1095,42 +1131,76 @@ rdma_cli_connection_poller(void* ctx) {
 }
 
 static int slice_destage_info_poller(void* ctx) {
+    // the first struct is the destage tail of the target node that the client should 
+    // RDMA read.
+    // the second struct is the commit tail of the slice that the client should RDMA write.
     struct wals_cli_slice* cli_slice;
     TAILQ_FOREACH(cli_slice, &g_slices, tailq_all_slices) {
-        if (g_destage_info[cli_slice->id].checksum == DESTAGE_INFO_CHECKSUM) {
+        // 1. read destage tail
+        if (g_destage_tail[cli_slice->id].checksum == DESTAGE_INFO_CHECKSUM) {
             if (cli_slice->rdma_conn->status == RDMA_CLI_CONNECTED) {
-                struct ibv_send_wr send_wr, *bad_send_wr = NULL;
-                struct ibv_sge send_sge;
-                memset(&send_wr, 0, sizeof(send_wr));
+                struct ibv_send_wr read_wr, *bad_read_wr = NULL;
+                struct ibv_sge read_sge;
+                memset(&read_wr, 0, sizeof(read_wr));
 
-                send_wr.wr_id = 0;
-                send_wr.opcode = IBV_WR_RDMA_READ;
-                send_wr.sg_list = &send_sge;
-                send_wr.num_sge = 1;
-                send_wr.send_flags = 0;
-                send_wr.wr.rdma.remote_addr = (uint64_t)g_rdma_handshakes[cli_slice->rdma_conn->id].base_addr + cli_slice->rdma_conn->blockcnt_per_slice * cli_slice->wals_bdev->blocklen;
-                send_wr.wr.rdma.rkey = g_rdma_handshakes[cli_slice->rdma_conn->id].rkey;
+                read_wr.wr_id = 0;
+                read_wr.opcode = IBV_WR_RDMA_READ;
+                read_wr.sg_list = &read_sge;
+                read_wr.num_sge = 1;
+                read_wr.send_flags = 0;
+                read_wr.wr.rdma.remote_addr = (uint64_t)g_rdma_handshakes[cli_slice->rdma_conn->id].base_addr + cli_slice->rdma_conn->blockcnt_per_slice * cli_slice->wals_bdev->blocklen;
+                read_wr.wr.rdma.rkey = g_rdma_handshakes[cli_slice->rdma_conn->id].rkey;
 
-                send_sge.addr = (uint64_t)&g_destage_info[cli_slice->id];
-                send_sge.length = sizeof(struct destage_info);
-                send_sge.lkey = cli_slice->rdma_conn->mr_destage_info->lkey;
+                read_sge.addr = (uint64_t)&g_destage_tail[cli_slice->id];
+                read_sge.length = sizeof(struct destage_info);
+                read_sge.lkey = cli_slice->rdma_conn->mr_destage_tail->lkey;
 
-                int rc = ibv_post_send(cli_slice->rdma_conn->cm_id->qp, &send_wr, &bad_send_wr);
+                int rc = ibv_post_send(cli_slice->rdma_conn->cm_id->qp, &read_wr, &bad_read_wr);
                 if (rc != 0) {
-                    // SPDK_ERRLOG("post send failed\n");
+                    SPDK_ERRLOG("post send failed\n");
                     continue;
                 }
             }
         } 
-        else if (g_destage_info[cli_slice->id].checksum == 0) {
+        else if (g_destage_tail[cli_slice->id].checksum == 0) {
             // RDMA read is successful
             // update and set the checksum back
-            cli_slice->wals_target->head.offset = g_destage_info[cli_slice->id].destage_head;
-            cli_slice->wals_target->head.round = g_destage_info[cli_slice->id].destage_round;
-            g_destage_info[cli_slice->id].checksum = DESTAGE_INFO_CHECKSUM;
+            cli_slice->wals_target->head.offset = g_destage_tail[cli_slice->id].offset;
+            cli_slice->wals_target->head.round = g_destage_tail[cli_slice->id].round;
+            g_destage_tail[cli_slice->id].checksum = DESTAGE_INFO_CHECKSUM;
         }
         else {
             SPDK_ERRLOG("Should not happen\n");
+        }
+
+        g_destage_tail[cli_slice->id].offset = cli_slice->wals_slice->committed_tail.offset;
+        g_destage_tail[cli_slice->id].round = cli_slice->wals_slice->committed_tail.round;
+        // 2. write commit tail
+        if (cli_slice->rdma_conn->status == RDMA_CLI_CONNECTED) {
+            struct ibv_send_wr write_wr, *bad_write_wr = NULL;
+            struct ibv_sge write_sge;
+            memset(&write_wr, 0, sizeof(write_wr));
+
+            write_wr.wr_id = 0;
+            write_wr.opcode = IBV_WR_RDMA_WRITE;
+            write_wr.sg_list = &write_sge;
+            write_wr.num_sge = 1;
+            write_wr.send_flags = 0;
+            write_wr.wr.rdma.remote_addr =
+                (uint64_t)g_rdma_handshakes[cli_slice->rdma_conn->id].base_addr + \
+                cli_slice->rdma_conn->blockcnt_per_slice * cli_slice->wals_bdev->blocklen + \
+                sizeof(struct destage_info);
+            write_wr.wr.rdma.rkey = g_rdma_handshakes[cli_slice->rdma_conn->id].rkey;
+
+            write_sge.addr = (uint64_t)&g_commit_tail[cli_slice->id];
+            write_sge.length = sizeof(struct destage_info);
+            write_sge.lkey = cli_slice->rdma_conn->mr_commit_tail->lkey;
+
+            int rc = ibv_post_send(cli_slice->rdma_conn->cm_id->qp, &write_wr, &bad_write_wr);
+            if (rc != 0) {
+                SPDK_ERRLOG("post send failed\n");
+                continue;
+            }
         }
     }
     return SPDK_POLLER_BUSY;

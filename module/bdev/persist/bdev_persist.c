@@ -70,6 +70,7 @@ struct persist_destage_context {
 enum persist_disk_status {
 	PERSIST_DISK_NORMAL,
 	PERSIST_DISK_IN_RECOVERY,
+	PERSIST_DISK_ERROR,
 };
 
 enum rdma_status {
@@ -120,7 +121,8 @@ struct persist_disk {
 	struct spdk_nvme_ctrlr* ctrlr;
 	struct spdk_nvme_ns* ns;
 	struct spdk_nvme_qpair* qpair;
-	struct destage_info* destage_info;
+	struct destage_info* destage_tail;
+	struct destage_info* commit_tail;
 	struct persist_destage_context destage_context;
 	uint64_t prev_seq;
 	enum persist_disk_status disk_status;
@@ -139,8 +141,8 @@ struct persist_disk {
 };
 
 static struct destage_info {
-	uint64_t destage_head;
-	uint64_t destage_round;
+	uint64_t offset;
+	uint64_t round;
 	uint32_t checksum;
 };
 
@@ -495,18 +497,65 @@ persist_nvme_poller(void* ctx) {
 	return rc == 0 ? SPDK_POLLER_IDLE : SPDK_POLLER_BUSY;
 }
 
+// async, no guarentee when the memcpy actually completes.
+static int persist_peer_memcpy(int peer_id, struct persist_disk* pdisk, uint64_t start_offset, uint64_t end_offset) {
+	if (start_offset == end_offset) {
+		return 0;
+	}
+	struct ibv_send_wr read_wr, *bad_read_wr = NULL;
+	struct ibv_sge read_sge;
+	memset(&read_wr, 0, sizeof(read_wr));
+	struct rdma_handshake* remote_handshake = pdisk->peer_conns[peer_id].handshake_buf + 1;
+
+	read_wr.wr_id = 0;
+	read_wr.opcode = IBV_WR_RDMA_READ;
+	read_wr.sg_list = &read_sge;
+	read_wr.num_sge = 1;
+	read_wr.send_flags = 0;
+	read_wr.wr.rdma.remote_addr = remote_handshake->base_addr + start_offset * pdisk->disk.blocklen;
+	read_wr.wr.rdma.rkey = remote_handshake->rkey;
+
+	read_sge.addr = pdisk->malloc_buf + start_offset * pdisk->disk.blocklen;
+	read_sge.length = (end_offset - start_offset) * pdisk->disk.blocklen;
+	read_sge.lkey = pdisk->peer_conns[peer_id].mr->lkey;
+
+	int rc = ibv_post_send(pdisk->peer_conns[peer_id].cm_id->qp, &read_wr, &bad_read_wr);
+	if (rc != 0) {
+		SPDK_ERRLOG("post send failed\n");
+	}
+	return rc;
+}
+
 static int
 persist_destage_poller(void *ctx)
 {
 	struct persist_disk* pdisk = ctx;
+
 	struct destage_info old_info = {
-		.destage_head = pdisk->destage_info->destage_head,
-		.destage_round = pdisk->destage_info->destage_round
+		.offset = pdisk->destage_tail->offset,
+		.round = pdisk->destage_tail->round
 	};
+
+	// ignore all the info on-the-fly
+	struct destage_info commit_tail_copy = {
+		.offset = pdisk->commit_tail->offset,
+		.round = pdisk->commit_tail->round
+	};
+
+	if (pdisk->disk_status == PERSIST_DISK_ERROR) {
+		return SPDK_POLLER_IDLE;
+	}
+
+	if (commit_tail_copy.round < pdisk->destage_tail->round ||
+		(commit_tail_copy.offset < pdisk->destage_tail->offset && commit_tail_copy.round == pdisk->destage_tail->round)) {
+		SPDK_NOTICELOG("Reading part of commit tail. Abort this cycle\n");
+		return SPDK_POLLER_IDLE;
+	}
+
 	int rc;
 
 	if (pdisk->client_conn.status != RDMA_SERVER_CONNECTED) {
-		// need to establish RDMA connection and alloc buffer first
+		// need to establish RDMA connection first
 		return SPDK_POLLER_IDLE;
 	}
 
@@ -514,20 +563,26 @@ persist_destage_poller(void *ctx)
 	pdisk->destage_context.remaining = 0;
 
 	while (true) {
-		struct wals_metadata* metadata = pdisk->malloc_buf + pdisk->destage_info->destage_head * pdisk->disk.blocklen;
+		if (pdisk->destage_tail->offset == commit_tail_copy.offset && 
+			pdisk->destage_tail->round == commit_tail_copy.round) {
+			// Done.
+			break;
+		}
+
+		struct wals_metadata* metadata = pdisk->malloc_buf + pdisk->destage_tail->offset * pdisk->disk.blocklen;
 		// if we get unlucky (lucky?), then the next block may be the one for the last
 		// round.
 
 		if (metadata->version != PERSIST_METADATA_VERSION
 			|| metadata->seq < pdisk->prev_seq) {
 			struct wals_metadata* next_round_metadata = pdisk->malloc_buf;
-			if (next_round_metadata->round == pdisk->destage_info->destage_round) {
+			if (next_round_metadata->round == pdisk->destage_tail->round) {
 				// head not in next round yet
 				// it means that no IOs have arrived
 				// do nothing and wait for the next IO
 				break;
 			}
-			else if (next_round_metadata->round == pdisk->destage_info->destage_round + 1) {
+			else if (next_round_metadata->round == pdisk->destage_tail->round + 1) {
 				SPDK_NOTICELOG("Go back to block '0' during move.\n");
 				metadata = next_round_metadata;
 				if (metadata->version != PERSIST_METADATA_VERSION) {
@@ -535,15 +590,15 @@ persist_destage_poller(void *ctx)
 					SPDK_ERRLOG("Buffer head corrupted\n");
 					break;
 				}
-				pdisk->destage_info->destage_head = 0;
-				pdisk->destage_info->destage_round++;
+				pdisk->destage_tail->offset = 0;
+				pdisk->destage_tail->round++;
 			}
 			else {
 				// should not happen
 				// TODO: error handling
 				SPDK_ERRLOG("Next round %ld is not expected when this round is %ld\n",
 					next_round_metadata->round,
-					pdisk->destage_info->destage_round);
+					pdisk->destage_tail->round);
 				break;
 			}
 		}
@@ -595,7 +650,7 @@ persist_destage_poller(void *ctx)
 		}
 		// only updating head pointer
 		// as round only changes when going back to the start of the array
-		pdisk->destage_info->destage_head = metadata->next_offset;
+		pdisk->destage_tail->offset = metadata->next_offset;
 		pdisk->prev_seq++;
 	}
 
@@ -609,6 +664,49 @@ persist_destage_poller(void *ctx)
 				break;
 			}
 		}
+	}
+
+	if (!(pdisk->destage_tail->offset == commit_tail_copy.offset && 
+		pdisk->destage_tail->round == commit_tail_copy.round)) {
+
+		pdisk->disk_status = PERSIST_DISK_IN_RECOVERY;
+		if (pdisk->num_peers == 0) {
+			SPDK_ERRLOG("Cannot catchup because there are no peers\n");
+			pdisk->disk_status = PERSIST_DISK_ERROR;
+			return SPDK_POLLER_IDLE;
+		}
+
+		if (pdisk->peer_conns[0].status != RDMA_CLI_CONNECTED &&
+			pdisk->peer_conns[0].status != RDMA_SERVER_CONNECTED) {
+			// wait for peer connection
+			return SPDK_POLLER_IDLE;
+		}
+
+		// need catchup from destage_tail to commit_tail
+		if (pdisk->destage_tail->offset < commit_tail_copy.offset) {
+			// case 1: no need to wrap around
+			if (pdisk->destage_tail->round != commit_tail_copy.round) {
+				// still continue
+				SPDK_ERRLOG("Unexpected destage tail (%ld, %ld) and commit tail (%ld, %ld)\n",
+					pdisk->destage_tail->offset, pdisk->destage_tail->round,
+					commit_tail_copy.offset, commit_tail_copy.round);
+			}
+			persist_peer_memcpy(0, pdisk, pdisk->destage_tail->offset, commit_tail_copy.offset);
+		}
+		else {
+			// case 2: need to wrap around
+			if (pdisk->destage_tail->round != commit_tail_copy.round - 1) {
+				// still continue
+				SPDK_ERRLOG("Unexpected destage tail (%ld, %ld) and commit tail (%ld, %ld)\n",
+					pdisk->destage_tail->offset, pdisk->destage_tail->round,
+					commit_tail_copy.offset, commit_tail_copy.round);
+			}
+			persist_peer_memcpy(0, pdisk, pdisk->destage_tail->offset, LOG_BLOCKCNT);
+			persist_peer_memcpy(0, pdisk, 0, commit_tail_copy.offset);
+		}
+	}
+	else {
+
 	}
 
 	return SPDK_POLLER_BUSY;
@@ -1429,7 +1527,13 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 		NULL,
 		SPDK_ENV_LCORE_ID_ANY,
 		SPDK_MALLOC_DMA);
-	pdisk->destage_info = pdisk->malloc_buf + log_size;
+	pdisk->destage_tail = pdisk->malloc_buf + log_size;
+	pdisk->commit_tail = pdisk->destage_tail + 1;
+
+	if (2 * sizeof(struct destage_info) > LOG_BLOCKSIZE) {
+		SPDK_ERRLOG("One more block is not enough\n");
+		return -EINVAL;
+	}
 
 	if (name) {
 		pdisk->disk.name = strdup(name);
