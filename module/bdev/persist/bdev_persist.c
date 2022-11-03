@@ -69,7 +69,6 @@ struct persist_destage_context {
 
 enum persist_disk_status {
 	PERSIST_DISK_NORMAL,
-	PERSIST_DISK_IN_RECOVERY,
 	PERSIST_DISK_ERROR,
 };
 
@@ -123,6 +122,7 @@ struct persist_disk {
 	struct spdk_nvme_qpair* qpair;
 	struct destage_info* destage_tail;
 	struct destage_info* commit_tail;
+	struct destage_info recover_tail;
 	struct persist_destage_context destage_context;
 	uint64_t prev_seq;
 	enum persist_disk_status disk_status;
@@ -138,12 +138,6 @@ struct persist_disk {
 	// uint64_t* io_queue_offset;
 
 	TAILQ_ENTRY(persist_disk)	link;
-};
-
-static struct destage_info {
-	uint64_t offset;
-	uint64_t round;
-	uint32_t checksum;
 };
 
 struct persist_io {
@@ -669,7 +663,6 @@ persist_destage_poller(void *ctx)
 	if (!(pdisk->destage_tail->offset == commit_tail_copy.offset && 
 		pdisk->destage_tail->round == commit_tail_copy.round)) {
 
-		pdisk->disk_status = PERSIST_DISK_IN_RECOVERY;
 		if (pdisk->num_peers == 0) {
 			SPDK_ERRLOG("Cannot catchup because there are no peers\n");
 			pdisk->disk_status = PERSIST_DISK_ERROR;
@@ -680,6 +673,11 @@ persist_destage_poller(void *ctx)
 			pdisk->peer_conns[0].status != RDMA_SERVER_CONNECTED) {
 			// wait for peer connection
 			return SPDK_POLLER_IDLE;
+		}
+
+		if (destage_info_gt(&pdisk->recover_tail, pdisk->destage_tail)) {
+			// still recovering from previous catchup result
+			return SPDK_POLLER_BUSY;
 		}
 
 		// need catchup from destage_tail to commit_tail
@@ -704,9 +702,15 @@ persist_destage_poller(void *ctx)
 			persist_peer_memcpy(0, pdisk, pdisk->destage_tail->offset, LOG_BLOCKCNT);
 			persist_peer_memcpy(0, pdisk, 0, commit_tail_copy.offset);
 		}
+
+		// Never look back.
+		// TODO: what will happen with peer memcpy fail? (low prob)
+		pdisk->recover_tail.offset = commit_tail_copy.offset;
+		pdisk->recover_tail.round = commit_tail_copy.round;
 	}
 	else {
-
+		pdisk->recover_tail.offset = pdisk->destage_tail->offset;
+		pdisk->recover_tail.round = pdisk->destage_tail->round;
 	}
 
 	return SPDK_POLLER_BUSY;
@@ -944,7 +948,12 @@ static int update_persist_rdma_connection(struct persist_rdma_connection* rdma_c
 				if (remote_handshake->reconnect_cnt > 0) {
 					// TODO
 					SPDK_NOTICELOG("The node is reconnected\n");
-					pdisk->disk_status = PERSIST_DISK_IN_RECOVERY;
+					if (remote_handshake->destage_tail.offset != 0 || remote_handshake->destage_tail.round != 0) {
+						pdisk->destage_tail->offset = remote_handshake->destage_tail.offset;
+						pdisk->destage_tail->round = remote_handshake->destage_tail.round;
+						pdisk->recover_tail.offset = remote_handshake->destage_tail.offset;
+						pdisk->recover_tail.round = remote_handshake->destage_tail.round;
+					}
 				}
 
 				SPDK_NOTICELOG("rdma handshake complete\n");

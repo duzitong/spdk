@@ -35,13 +35,6 @@ enum nvmf_cli_status {
     NVMF_CLI_ERROR,
 };
 
-// TODO: share the same header file
-static struct destage_info {
-	uint64_t offset;
-	uint64_t round;
-	uint32_t checksum;
-};
-
 struct pending_io_context {
     struct wals_bdev_io* io;
     uint64_t ticks;
@@ -564,7 +557,7 @@ cli_register_write_pollers(struct wals_target *target, struct wals_bdev *wals_bd
         g_rdma_cq_poller = SPDK_POLLER_REGISTER(rdma_cq_poller, wals_bdev, 0);
     }
     if (g_destage_info_poller == NULL) {
-        g_destage_info_poller = SPDK_POLLER_REGISTER(slice_destage_info_poller, NULL, 50);
+        g_destage_info_poller = SPDK_POLLER_REGISTER(slice_destage_info_poller, NULL, 200);
     }
     return 0;
 }
@@ -572,6 +565,9 @@ cli_register_write_pollers(struct wals_target *target, struct wals_bdev *wals_bd
 static int
 cli_unregister_write_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
 {
+    if (g_destage_info_poller != NULL) {
+        spdk_poller_unregister(&g_destage_info_poller);
+    }
     if (g_rdma_cq_poller != NULL) {
         spdk_poller_unregister(&g_rdma_cq_poller);
     }
@@ -818,6 +814,11 @@ rdma_cli_connection_poller(void* ctx) {
                     handshake->rkey = mr_handshake->rkey;
                     handshake->reconnect_cnt = g_rdma_cli_conns[i].reconnect_cnt;
 
+                    // TODO: support multiple slices in each RDMA connection
+                    struct wals_cli_slice* cli_slice = TAILQ_FIRST(&g_rdma_cli_conns[i].slices);
+                    handshake->destage_tail.offset = cli_slice->wals_slice->head.offset;
+                    handshake->destage_tail.round = cli_slice->wals_slice->head.round;
+
                     wr.wr_id = (uintptr_t)i;
                     wr.next = NULL;
                     wr.sg_list = &sge;
@@ -964,7 +965,7 @@ rdma_cli_connection_poller(void* ctx) {
 
                 if (connect_event->event == RDMA_CM_EVENT_REJECTED) {
                     g_rdma_cli_conns[i].reject_cnt++;
-                    if (g_rdma_cli_conns[i].reject_cnt % 100 == 1) {
+                    if (g_rdma_cli_conns[i].reject_cnt % 1000 == 1) {
                         SPDK_NOTICELOG("Rejected %ld. Try again...\n", g_rdma_cli_conns[i].reject_cnt);
                     }
                     // remote not ready yet
@@ -1165,6 +1166,8 @@ static int slice_destage_info_poller(void* ctx) {
         else if (g_destage_tail[cli_slice->id].checksum == 0) {
             // RDMA read is successful
             // update and set the checksum back
+            // SPDK_NOTICELOG("Read destage tail %ld %ld\n", g_destage_tail[cli_slice->id].offset,
+            //     g_destage_tail[cli_slice->id].round);
             cli_slice->wals_target->head.offset = g_destage_tail[cli_slice->id].offset;
             cli_slice->wals_target->head.round = g_destage_tail[cli_slice->id].round;
             g_destage_tail[cli_slice->id].checksum = DESTAGE_INFO_CHECKSUM;
@@ -1173,10 +1176,10 @@ static int slice_destage_info_poller(void* ctx) {
             SPDK_ERRLOG("Should not happen\n");
         }
 
-        g_destage_tail[cli_slice->id].offset = cli_slice->wals_slice->committed_tail.offset;
-        g_destage_tail[cli_slice->id].round = cli_slice->wals_slice->committed_tail.round;
         // 2. write commit tail
         if (cli_slice->rdma_conn->status == RDMA_CLI_CONNECTED) {
+            g_commit_tail[cli_slice->id].offset = cli_slice->wals_slice->committed_tail.offset;
+            g_commit_tail[cli_slice->id].round = cli_slice->wals_slice->committed_tail.round;
             struct ibv_send_wr write_wr, *bad_write_wr = NULL;
             struct ibv_sge write_sge;
             memset(&write_wr, 0, sizeof(write_wr));
@@ -1234,7 +1237,7 @@ rdma_cq_poller(void* ctx) {
 					}
 
                     if (g_rdma_cli_conns[i].wc_buf[j].wr_id == 0) {
-                        // special case: the wr is for reading destage info.
+                        // special case: the wr is for reading destage tail or writing commit tail.
                         // do nothing
                         continue;
                     }
