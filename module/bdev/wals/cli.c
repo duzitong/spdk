@@ -17,6 +17,7 @@
 #define MAX_SLICES 256
 // currently a fake one, to make sure that it fully RDMA reads the struct
 #define DESTAGE_INFO_CHECKSUM 666
+#define TIMEOUT_MS 10
 
 enum rdma_cli_status {
     RDMA_CLI_UNINITIALIZED,
@@ -45,6 +46,10 @@ struct pending_io_queue {
     int tail;
     struct pending_io_context pending_ios[PENDING_IO_MAX_CNT];
 };
+
+static inline bool is_io_queue_full(struct pending_io_queue* q) {
+    return (q->head + PENDING_IO_MAX_CNT - q->tail - 1) % PENDING_IO_MAX_CNT == 0;
+}
 
 // TODO: refactor it so that fields for each slice is not in it
 struct rdma_cli_connection {
@@ -96,6 +101,10 @@ struct spdk_poller* g_nvmf_connection_poller;
 struct spdk_poller* g_rdma_cq_poller;
 struct spdk_poller* g_nvmf_cq_poller;
 struct spdk_poller* g_destage_info_poller;
+// TODO: nvmf timeout? not sure whether nvmf returns in-order or not.
+struct spdk_poller* g_log_read_timeout_poller;
+struct spdk_poller* g_log_write_timeout_poller;
+
 
 int g_num_slices = 0;
 
@@ -402,18 +411,10 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     // Workaround: make free RDMA resources async; do reconnection and switch it in async
     int rc;
     struct wals_cli_slice* slice = target->private_info;
-    // if (slice->rdma_conn->status != RDMA_CLI_CONNECTED) {
-    //     if (wals_io->metadata->seq <= 10) {
-    //         // HACK: the bdev sends some unimportant IOs after the initialization,
-    //         // but the RDMA handshake may be pending.
-    //         SPDK_NOTICELOG("Completing IO without actually sending it\n");
-    //         wals_target_read_complete(wals_io, true);
-    //     }
-    //     else {
-    //         wals_target_read_complete(wals_io, false);
-    //     }
-    //     return 0;
-    // }
+    if (slice->rdma_conn->status != RDMA_CLI_CONNECTED) {
+        wals_target_read_complete(wals_io, false);
+        return 0;
+    }
 
     if (!is_io_within_memory_region(data, cnt, slice->wals_bdev->blocklen, slice->rdma_conn->mr_read)) {
         SPDK_ERRLOG("IO out of MR range\n");
@@ -445,7 +446,6 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     sge.lkey = slice->rdma_conn->mr_read->lkey;
     // SPDK_NOTICELOG("READ %p %p %p %p %ld %ld %ld %ld\n", wals_io, data, data + sge.length, wr.wr.rdma.remote_addr,
     //     cnt, offset, slice->wals_bdev->blocklen, sge.lkey);
-
     
     rc = ibv_post_send(slice->rdma_conn->cm_id->qp, &wr, &bad_wr);
     if (rc != 0) {
@@ -499,6 +499,11 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
     int rc;
     struct wals_cli_slice* slice = target->private_info;
 
+    if (slice->rdma_conn->status != RDMA_CLI_CONNECTED) {
+        wals_target_write_complete(wals_io, false);
+        return 0;
+    }
+
     if (!is_io_within_memory_region(data, cnt, slice->wals_bdev->blocklen, slice->rdma_conn->mr_write)) {
         SPDK_ERRLOG("IO out of MR range\n");
         wals_target_write_complete(wals_io, false);
@@ -546,6 +551,22 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
 			sge.length);
 		wals_target_write_complete(wals_io, false);
 	}
+
+    if (is_io_queue_full(&slice->rdma_conn->pending_write_io_queue)) {
+        SPDK_ERRLOG("Should not happen: io queue is full\n");
+        return 0;
+    }
+
+    slice->rdma_conn->pending_write_io_queue.pending_ios[slice->rdma_conn->pending_write_io_queue.tail] =
+    (struct pending_io_context) {
+        .io = wals_io,
+        .ticks = spdk_get_ticks()
+    };
+
+    slice->rdma_conn->pending_write_io_queue.tail = (
+        slice->rdma_conn->pending_write_io_queue.tail + 1
+    ) % PENDING_IO_MAX_CNT;
+
     return 0;
 }
 
@@ -1247,11 +1268,42 @@ rdma_cq_poller(void* ctx) {
                         wals_target_read_complete(io, success);
                     }
                     else {
-                        wals_target_write_complete(io, success);
+                        if (io == g_rdma_cli_conns[i].pending_write_io_queue.pending_ios[g_rdma_cli_conns[i].pending_write_io_queue.head].io) {
+                            wals_target_write_complete(io, success);
+                            g_rdma_cli_conns[i].pending_write_io_queue.head = (
+                                g_rdma_cli_conns[i].pending_write_io_queue.head + 1
+                            ) % PENDING_IO_MAX_CNT;
+                        }
+                        else {
+                            SPDK_NOTICELOG("Ignoring io %p due to already timeout\n", io);
+                        }
                     }
                 }
             }
         }
+
+        uint64_t current_ticks = spdk_get_ticks();
+        uint64_t timeout_ticks = TIMEOUT_MS * spdk_get_ticks_hz() / 1000;
+        int j;
+        for (j = g_rdma_cli_conns[i].pending_write_io_queue.head;
+            j != g_rdma_cli_conns[i].pending_write_io_queue.tail;
+            j = (j + 1) % PENDING_IO_MAX_CNT) {
+
+            if (
+                g_rdma_cli_conns[i].pending_write_io_queue.pending_ios[j].ticks
+                + timeout_ticks
+                > current_ticks
+            ) {
+                // timeout.
+                struct wals_bdev_io* timeout_io = g_rdma_cli_conns[i].pending_write_io_queue.pending_ios[j].io;
+                SPDK_NOTICELOG("IO %p timeout\n", timeout_io);
+                wals_target_write_complete(timeout_io, false);
+            }
+            else {
+                break;
+            }
+        }
+        g_rdma_cli_conns[i].pending_write_io_queue.head = j;
     }
     spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_RDMA_CQ, 0, 0, (uintptr_t)ctx);
     return SPDK_POLLER_IDLE;
