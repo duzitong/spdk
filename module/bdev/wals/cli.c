@@ -1269,6 +1269,7 @@ rdma_cq_poller(void* ctx) {
                     }
                     else {
                         if (io == g_rdma_cli_conns[i].pending_write_io_queue.pending_ios[g_rdma_cli_conns[i].pending_write_io_queue.head].io) {
+                            // SPDK_NOTICELOG("Write IO %p ok\n", io);
                             wals_target_write_complete(io, success);
                             g_rdma_cli_conns[i].pending_write_io_queue.head = (
                                 g_rdma_cli_conns[i].pending_write_io_queue.head + 1
@@ -1292,7 +1293,7 @@ rdma_cq_poller(void* ctx) {
             if (
                 g_rdma_cli_conns[i].pending_write_io_queue.pending_ios[j].ticks
                 + timeout_ticks
-                > current_ticks
+                < current_ticks
             ) {
                 // timeout.
                 struct wals_bdev_io* timeout_io = g_rdma_cli_conns[i].pending_write_io_queue.pending_ios[j].io;
