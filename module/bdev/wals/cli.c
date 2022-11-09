@@ -123,6 +123,8 @@ struct wals_cli_slice {
     struct nvmf_cli_connection* nvmf_conn;
     // if connected to the same ssd, then they need to share the same qp.
     uint64_t nvmf_block_offset;
+    uint64_t prev_seq;
+    uint64_t prev_offset;
 
 	/* link next for rdma connections */
 	TAILQ_ENTRY(wals_cli_slice)	tailq_rdma;
@@ -516,7 +518,17 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
         return 0;
     }
 
-    // struct wals_metadata* metadata = data;
+    struct wals_metadata* metadata = data;
+    if (metadata->seq != slice->prev_seq + 1) {
+        SPDK_ERRLOG("Seq jumped from %ld to %ld\n", slice->prev_seq, metadata->seq);
+    }
+    if (offset != slice->prev_offset) {
+        if (offset != 0) {
+            SPDK_ERRLOG("Offset jumped from %ld to %ld\n", slice->prev_offset, offset);
+        }
+    }
+    slice->prev_seq++;
+    slice->prev_offset = offset + cnt;
     
     // SPDK_NOTICELOG("Sending md %ld %ld %ld %ld %ld %ld to slice %d\n",
     //     metadata->version,
