@@ -628,6 +628,14 @@ persist_destage_poller(void *ctx)
 			pdisk->prev_seq = metadata->seq - 1;
 		}
 
+		if (metadata->next_offset != pdisk->destage_tail->offset + metadata->md_blocknum + metadata->length) {
+			SPDK_NOTICELOG("next offset mismatch: %ld != %ld + %ld + %ld\n",
+				metadata->next_offset,
+				pdisk->destage_tail->offset,
+				metadata->md_blocknum,
+				metadata->length);
+		}
+
 		if (pdisk->attach_disk) {
 			rc = spdk_nvme_ns_cmd_write(pdisk->ns,
 				pdisk->qpair,
