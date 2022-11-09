@@ -662,6 +662,12 @@ persist_destage_poller(void *ctx)
 
 	if (!(pdisk->destage_tail->offset == commit_tail_copy.offset && 
 		pdisk->destage_tail->round == commit_tail_copy.round)) {
+		SPDK_NOTICELOG("Need to catchup from (%ld, %ld) to (%ld, %ld)\n",
+			pdisk->destage_tail->offset, 
+			pdisk->destage_tail->round, 
+			commit_tail_copy.offset,
+			commit_tail_copy.round
+			);
 
 		if (pdisk->num_peers == 0) {
 			SPDK_ERRLOG("Cannot catchup because there are no peers\n");
