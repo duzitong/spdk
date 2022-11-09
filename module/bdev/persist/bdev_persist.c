@@ -577,13 +577,21 @@ persist_destage_poller(void *ctx)
 				break;
 			}
 			else if (next_round_metadata->round == pdisk->destage_tail->round + 1) {
-				SPDK_NOTICELOG("Go back to block '0' during move.\n");
 				metadata = next_round_metadata;
 				if (metadata->version != PERSIST_METADATA_VERSION) {
 					// should not happen even before any IO comes, because of the round
 					SPDK_ERRLOG("Buffer head corrupted\n");
 					break;
 				}
+
+				if (metadata->seq != pdisk->prev_seq + 1) {
+					// wait for previous IO that is still in the last round
+					if (metadata->seq < pdisk->prev_seq + 1) {
+						SPDK_ERRLOG("should not happen\n");
+					}
+					break;
+				}
+				SPDK_NOTICELOG("Go back to block '0' during move.\n");
 				pdisk->destage_tail->offset = 0;
 				pdisk->destage_tail->round++;
 			}
