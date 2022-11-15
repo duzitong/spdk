@@ -107,6 +107,9 @@
 #define TRACE_WALS_S_COMP_R_A			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x26)	// all
 #define TRACE_WALS_F_COMP_R_A			SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x27)
 
+#define TRACE_WALS_S_RDMA_CQ            SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x36)  // rdma poller
+#define TRACE_WALS_F_RDMA_CQ            SPDK_TPOINT_ID(TRACE_GROUP_WALS, 0x37)  // rdma poller
+
 
 /*
  * WALS state describes the state of the wals bdev. This wals bdev can be either in

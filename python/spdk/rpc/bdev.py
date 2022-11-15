@@ -304,7 +304,7 @@ def bdev_target_delete(client, name):
     return client.call('bdev_target_delete', params)
 
 
-def bdev_persist_create(client, ip=None, port=None, name=None, uuid=None, attach_disk=True):
+def bdev_persist_create(client, ip=None, port=None, name=None, uuid=None, attach_disk=True, peers=None):
     """Construct a persist block device.
 
     Args:
@@ -326,6 +326,8 @@ def bdev_persist_create(client, ip=None, port=None, name=None, uuid=None, attach
         params['ip'] = ip
     if port:
         params['port'] = port
+    if peers:
+        params['peers'] = peers
     return client.call('bdev_persist_create', params)
 
 

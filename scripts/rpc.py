@@ -416,7 +416,8 @@ if __name__ == "__main__":
                                                uuid=args.uuid,
                                                ip=args.addr,
                                                port=args.port,
-                                               attach_disk=args.attach_disk))
+                                               attach_disk=args.attach_disk,
+                                               peers=json.loads(args.peers)))
     p = subparsers.add_parser('bdev_persist_create', aliases=['construct_persist_bdev'],
                               help='Create a bdev to destage from PMEM')
     p.add_argument('-b', '--name', help="Name of the bdev")
@@ -424,6 +425,7 @@ if __name__ == "__main__":
     p.add_argument('-a', '--addr', help="addr of local node")
     p.add_argument('-p', '--port', help="port of local node")
     p.add_argument('-d', '--attach-disk', help="to attach to local nvme disk", default=False, action='store_true')
+    p.add_argument('--peers', help="info about peer nodes")
     p.set_defaults(func=bdev_persist_create)
 
     def bdev_persist_delete(args):

@@ -12,15 +12,12 @@
 #include <rdma/rdma_cma.h>
 
 #define WC_BATCH_SIZE 32
-// TODO: make it configurable; server should decide it?
-// need another async API to tell parent bdev about the 
-// block size; hard-code now.
-#define LOG_BLOCKCNT 131072
 // Should not exceed log_blockcnt
 #define PENDING_IO_MAX_CNT 131072
 #define MAX_SLICES 256
 // currently a fake one, to make sure that it fully RDMA reads the struct
 #define DESTAGE_INFO_CHECKSUM 666
+#define TIMEOUT_MS 10
 
 enum rdma_cli_status {
     RDMA_CLI_UNINITIALIZED,
@@ -39,13 +36,6 @@ enum nvmf_cli_status {
     NVMF_CLI_ERROR,
 };
 
-// TODO: share the same header file
-static struct destage_info {
-	uint64_t destage_head;
-	uint64_t destage_round;
-	uint32_t checksum;
-};
-
 struct pending_io_context {
     struct wals_bdev_io* io;
     uint64_t ticks;
@@ -57,6 +47,11 @@ struct pending_io_queue {
     struct pending_io_context pending_ios[PENDING_IO_MAX_CNT];
 };
 
+static inline bool is_io_queue_full(struct pending_io_queue* q) {
+    return (q->head + PENDING_IO_MAX_CNT - q->tail - 1) % PENDING_IO_MAX_CNT == 0;
+}
+
+// TODO: refactor it so that fields for each slice is not in it
 struct rdma_cli_connection {
     int id;
     struct rdma_event_channel* channel;
@@ -65,7 +60,8 @@ struct rdma_cli_connection {
     struct ibv_mr* mr_read;
     struct ibv_mr* mr_write;
     struct ibv_mr* mr_handshake;
-    struct ibv_mr* mr_destage_info;
+    struct ibv_mr* mr_destage_tail;
+    struct ibv_mr* mr_commit_tail;
     struct addrinfo* server_addr;
     struct ibv_wc wc_buf[WC_BATCH_SIZE];
     struct pending_io_queue pending_read_io_queue;
@@ -75,6 +71,8 @@ struct rdma_cli_connection {
     volatile enum rdma_cli_status status;
     uint64_t reject_cnt;
     uint64_t io_fail_cnt;
+    uint64_t reconnect_cnt;
+    size_t blockcnt_per_slice;
     TAILQ_HEAD(, wals_cli_slice) slices;
 };
 
@@ -103,21 +101,30 @@ struct spdk_poller* g_nvmf_connection_poller;
 struct spdk_poller* g_rdma_cq_poller;
 struct spdk_poller* g_nvmf_cq_poller;
 struct spdk_poller* g_destage_info_poller;
+// TODO: nvmf timeout? not sure whether nvmf returns in-order or not.
+struct spdk_poller* g_log_read_timeout_poller;
+struct spdk_poller* g_log_write_timeout_poller;
+
 
 int g_num_slices = 0;
 
+// TODO: rewrite it to supp
 TAILQ_HEAD(, wals_cli_slice) g_slices;
-struct destage_info g_destage_info[MAX_SLICES];
+struct destage_info g_destage_tail[MAX_SLICES];
+struct destage_info g_commit_tail[MAX_SLICES];
 
 struct wals_cli_slice {
     int id;
     struct wals_bdev* wals_bdev;
     // can use CONTAINEROF?
     struct wals_target* wals_target;
+    struct wals_slice* wals_slice;
     struct rdma_cli_connection* rdma_conn;
     struct nvmf_cli_connection* nvmf_conn;
     // if connected to the same ssd, then they need to share the same qp.
     uint64_t nvmf_block_offset;
+    uint64_t prev_seq;
+    uint64_t prev_offset;
 
 	/* link next for rdma connections */
 	TAILQ_ENTRY(wals_cli_slice)	tailq_rdma;
@@ -209,10 +216,10 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
         TAILQ_INIT(&g_slices);
 
         for (int i = 0; i < MAX_SLICES; i++) {
-            g_destage_info[i].checksum = DESTAGE_INFO_CHECKSUM;
+            g_destage_tail[i].checksum = DESTAGE_INFO_CHECKSUM;
+            g_commit_tail[i].checksum = DESTAGE_INFO_CHECKSUM;
         }
 
-        g_destage_info_poller = SPDK_POLLER_REGISTER(slice_destage_info_poller, NULL, 20);
     }
     if (wals_bdev->blocklen != wals_bdev->bdev.blocklen) {
         SPDK_ERRLOG("Only support buffer blocklen == bdev blocklen\n");
@@ -226,6 +233,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
 
     cli_slice->wals_bdev = wals_bdev;
     cli_slice->wals_target = target;
+    cli_slice->wals_slice = slice;
 
 	struct sockaddr_in addr;
 	struct addrinfo hints = {};
@@ -370,7 +378,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
     }
 
     // TODO: should not set log_blockcnt right now
-    target->log_blockcnt = LOG_BLOCKCNT;
+    target->log_blockcnt = cli_slice->rdma_conn->blockcnt_per_slice;
     target->private_info = cli_slice;
 
     cli_slice->id = g_num_slices;
@@ -398,24 +406,17 @@ static bool is_io_within_memory_region(void* data, uint64_t cnt, uint64_t blockl
 static int
 cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_checksum_offset checksum_offset, struct wals_bdev_io *wals_io)
 {
+    // SPDK_NOTICELOG("Reading from log %ld %ld\n", offset, cnt);
     // BUG: the reconnection poller must be in the same thread as the IO thread, 
     // otherwise it may secretly try to reconnect and free the RDMA resources, causing 
     // segfault.
     // Workaround: make free RDMA resources async; do reconnection and switch it in async
     int rc;
     struct wals_cli_slice* slice = target->private_info;
-    // if (slice->rdma_conn->status != RDMA_CLI_CONNECTED) {
-    //     if (wals_io->metadata->seq <= 10) {
-    //         // HACK: the bdev sends some unimportant IOs after the initialization,
-    //         // but the RDMA handshake may be pending.
-    //         SPDK_NOTICELOG("Completing IO without actually sending it\n");
-    //         wals_target_read_complete(wals_io, true);
-    //     }
-    //     else {
-    //         wals_target_read_complete(wals_io, false);
-    //     }
-    //     return 0;
-    // }
+    if (slice->rdma_conn->status != RDMA_CLI_CONNECTED) {
+        wals_target_read_complete(wals_io, false);
+        return 0;
+    }
 
     if (!is_io_within_memory_region(data, cnt, slice->wals_bdev->blocklen, slice->rdma_conn->mr_read)) {
         SPDK_ERRLOG("IO out of MR range\n");
@@ -423,7 +424,7 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
         return 0;
     }
 
-    if (offset + cnt > LOG_BLOCKCNT) {
+    if (offset + cnt > slice->rdma_conn->blockcnt_per_slice) {
         SPDK_ERRLOG("READ out of remote PMEM range: %ld %ld\n", offset, cnt);
         wals_target_read_complete(wals_io, false);
         return 0;
@@ -447,7 +448,6 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     sge.lkey = slice->rdma_conn->mr_read->lkey;
     // SPDK_NOTICELOG("READ %p %p %p %p %ld %ld %ld %ld\n", wals_io, data, data + sge.length, wr.wr.rdma.remote_addr,
     //     cnt, offset, slice->wals_bdev->blocklen, sge.lkey);
-
     
     rc = ibv_post_send(slice->rdma_conn->cm_id->qp, &wr, &bad_wr);
     if (rc != 0) {
@@ -477,6 +477,7 @@ static void cli_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
 static int
 cli_submit_core_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
+    // SPDK_NOTICELOG("Reading from disk %ld %ld\n", offset, cnt);
     int rc;
     struct wals_cli_slice* slice = target->private_info;
     uint64_t multiplier = slice->wals_bdev->bdev.blocklen / spdk_nvme_ns_get_sector_size(slice->nvmf_conn->ns);
@@ -496,8 +497,14 @@ cli_submit_core_read_request(struct wals_target* target, void *data, uint64_t of
 static int
 cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
+    // SPDK_NOTICELOG("Writing to log %ld %ld\n", offset, cnt);
     int rc;
     struct wals_cli_slice* slice = target->private_info;
+
+    if (slice->rdma_conn->status != RDMA_CLI_CONNECTED) {
+        wals_target_write_complete(wals_io, false);
+        return 0;
+    }
 
     if (!is_io_within_memory_region(data, cnt, slice->wals_bdev->blocklen, slice->rdma_conn->mr_write)) {
         SPDK_ERRLOG("IO out of MR range\n");
@@ -505,13 +512,23 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
         return 0;
     }
 
-    if (offset + cnt > LOG_BLOCKCNT) {
+    if (offset + cnt > slice->rdma_conn->blockcnt_per_slice) {
         SPDK_ERRLOG("Write out of remote PMEM range: %ld %ld\n", offset, cnt);
         wals_target_write_complete(wals_io, false);
         return 0;
     }
 
-    // struct wals_metadata* metadata = data;
+    struct wals_metadata* metadata = data;
+    if (metadata->seq != slice->prev_seq + 1) {
+        SPDK_ERRLOG("Seq jumped from %ld to %ld\n", slice->prev_seq, metadata->seq);
+    }
+    if (offset != slice->prev_offset) {
+        if (offset != 0) {
+            SPDK_ERRLOG("Offset jumped from %ld to %ld\n", slice->prev_offset, offset);
+        }
+    }
+    slice->prev_seq++;
+    slice->prev_offset = offset + cnt;
     
     // SPDK_NOTICELOG("Sending md %ld %ld %ld %ld %ld %ld to slice %d\n",
     //     metadata->version,
@@ -546,6 +563,22 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
 			sge.length);
 		wals_target_write_complete(wals_io, false);
 	}
+
+    if (is_io_queue_full(&slice->rdma_conn->pending_write_io_queue)) {
+        SPDK_ERRLOG("Should not happen: io queue is full\n");
+        return 0;
+    }
+
+    slice->rdma_conn->pending_write_io_queue.pending_ios[slice->rdma_conn->pending_write_io_queue.tail] =
+    (struct pending_io_context) {
+        .io = wals_io,
+        .ticks = spdk_get_ticks()
+    };
+
+    slice->rdma_conn->pending_write_io_queue.tail = (
+        slice->rdma_conn->pending_write_io_queue.tail + 1
+    ) % PENDING_IO_MAX_CNT;
+
     return 0;
 }
 
@@ -556,12 +589,18 @@ cli_register_write_pollers(struct wals_target *target, struct wals_bdev *wals_bd
     if (g_rdma_cq_poller == NULL) {
         g_rdma_cq_poller = SPDK_POLLER_REGISTER(rdma_cq_poller, wals_bdev, 0);
     }
+    if (g_destage_info_poller == NULL) {
+        g_destage_info_poller = SPDK_POLLER_REGISTER(slice_destage_info_poller, NULL, 200);
+    }
     return 0;
 }
 
 static int
 cli_unregister_write_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
 {
+    if (g_destage_info_poller != NULL) {
+        spdk_poller_unregister(&g_destage_info_poller);
+    }
     if (g_rdma_cq_poller != NULL) {
         spdk_poller_unregister(&g_rdma_cq_poller);
     }
@@ -747,7 +786,7 @@ rdma_cli_connection_poller(void* ctx) {
                     }
                     g_rdma_cli_conns[i].mr_read = mr_read;
 
-                    SPDK_NOTICELOG("Registering read buf %p to %p\n", wals_bdev->read_heap->buf, wals_bdev->read_heap->buf + wals_bdev->read_heap->buf_size);
+                    // SPDK_NOTICELOG("Registering read buf %p to %p\n", wals_bdev->read_heap->buf, wals_bdev->read_heap->buf + wals_bdev->read_heap->buf_size);
 
                     struct ibv_mr* mr_write = ibv_reg_mr(g_rdma_cli_conns[i].cm_id->qp->pd,
                         wals_bdev->write_heap->buf,
@@ -761,7 +800,7 @@ rdma_cli_connection_poller(void* ctx) {
                     }
                     g_rdma_cli_conns[i].mr_write = mr_write;
 
-                    SPDK_NOTICELOG("Registering write buf %p to %p\n", wals_bdev->write_heap->buf, wals_bdev->write_heap->buf + wals_bdev->write_heap->buf_size);
+                    // SPDK_NOTICELOG("Registering write buf %p to %p\n", wals_bdev->write_heap->buf, wals_bdev->write_heap->buf + wals_bdev->write_heap->buf_size);
                     
                     struct ibv_mr* mr_handshake = ibv_reg_mr(g_rdma_cli_conns[i].cm_id->qp->pd,
                         g_rdma_handshakes,
@@ -775,17 +814,29 @@ rdma_cli_connection_poller(void* ctx) {
                     }
                     g_rdma_cli_conns[i].mr_handshake = mr_handshake;
 
-                    struct ibv_mr* mr_destage_info = ibv_reg_mr(g_rdma_cli_conns[i].cm_id->qp->pd,
-                        g_destage_info,
-                        sizeof(g_destage_info),
+                    struct ibv_mr* mr_destage_tail = ibv_reg_mr(g_rdma_cli_conns[i].cm_id->qp->pd,
+                        g_destage_tail,
+                        sizeof(g_destage_tail),
                         IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
 
-                    if (mr_destage_info == NULL) {
-                        SPDK_ERRLOG("failed to reg mr handshake\n");
+                    if (mr_destage_tail == NULL) {
+                        SPDK_ERRLOG("failed to reg mr destage tail\n");
                         g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
                         break;
                     }
-                    g_rdma_cli_conns[i].mr_destage_info = mr_destage_info;
+                    g_rdma_cli_conns[i].mr_destage_tail = mr_destage_tail;
+
+                    struct ibv_mr* mr_commit_tail = ibv_reg_mr(g_rdma_cli_conns[i].cm_id->qp->pd,
+                        g_commit_tail,
+                        sizeof(g_commit_tail),
+                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
+
+                    if (mr_commit_tail == NULL) {
+                        SPDK_ERRLOG("failed to reg mr commit tail\n");
+                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        break;
+                    }
+                    g_rdma_cli_conns[i].mr_commit_tail = mr_commit_tail;
 
                     struct ibv_recv_wr wr, *bad_wr = NULL;
                     struct ibv_sge sge;
@@ -794,9 +845,12 @@ rdma_cli_connection_poller(void* ctx) {
                     struct rdma_handshake* remote_handshake = &g_rdma_handshakes[i];
                     handshake->base_addr = &g_rdma_handshakes[0];
                     handshake->rkey = mr_handshake->rkey;
-                    // TODO: server should provide this value
-                    handshake->block_cnt = LOG_BLOCKCNT;
-                    handshake->block_size = wals_bdev->blocklen;
+                    handshake->reconnect_cnt = g_rdma_cli_conns[i].reconnect_cnt;
+
+                    // TODO: support multiple slices in each RDMA connection
+                    struct wals_cli_slice* cli_slice = TAILQ_FIRST(&g_rdma_cli_conns[i].slices);
+                    handshake->destage_tail.offset = cli_slice->wals_slice->head.offset;
+                    handshake->destage_tail.round = cli_slice->wals_slice->head.round;
 
                     wr.wr_id = (uintptr_t)i;
                     wr.next = NULL;
@@ -897,13 +951,21 @@ rdma_cli_connection_poller(void* ctx) {
                         break;
                     }
                     g_rdma_cli_conns[i].mr_handshake = NULL;
-                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_destage_info);
+                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_destage_tail);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
                         g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
                         break;
                     }
-                    g_rdma_cli_conns[i].mr_destage_info = NULL;
+                    g_rdma_cli_conns[i].mr_destage_tail = NULL;
+
+                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_commit_tail);
+                    if (rc != 0) {
+                        SPDK_ERRLOG("failed to dereg mr\n");
+                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        break;
+                    }
+                    g_rdma_cli_conns[i].mr_commit_tail = NULL;
 
                     g_rdma_cli_conns[i].status = RDMA_CLI_INITIALIZED;
                 }
@@ -936,7 +998,7 @@ rdma_cli_connection_poller(void* ctx) {
 
                 if (connect_event->event == RDMA_CM_EVENT_REJECTED) {
                     g_rdma_cli_conns[i].reject_cnt++;
-                    if (g_rdma_cli_conns[i].reject_cnt % 100 == 1) {
+                    if (g_rdma_cli_conns[i].reject_cnt % 1000 == 1) {
                         SPDK_NOTICELOG("Rejected %ld. Try again...\n", g_rdma_cli_conns[i].reject_cnt);
                     }
                     // remote not ready yet
@@ -985,15 +1047,25 @@ rdma_cli_connection_poller(void* ctx) {
                         break;
                     }
                     g_rdma_cli_conns[i].mr_handshake = NULL;
-                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_destage_info);
+                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_destage_tail);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
                         g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
                         break;
                     }
-                    g_rdma_cli_conns[i].mr_destage_info = NULL;
+                    g_rdma_cli_conns[i].mr_destage_tail = NULL;
+
+                    rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_commit_tail);
+                    if (rc != 0) {
+                        SPDK_ERRLOG("failed to dereg mr\n");
+                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        break;
+                    }
+                    g_rdma_cli_conns[i].mr_commit_tail = NULL;
+
 
                     g_rdma_cli_conns[i].status = RDMA_CLI_INITIALIZED;
+                    g_rdma_cli_conns[i].reconnect_cnt++;
                     break;
                 }
                 else if (connect_event->event != RDMA_CM_EVENT_ESTABLISHED) {
@@ -1001,32 +1073,6 @@ rdma_cli_connection_poller(void* ctx) {
                     break;
                 }
 
-                SPDK_NOTICELOG("connected. posting send...\n");
-                SPDK_NOTICELOG("sending local addr %p rkey %d block_cnt %ld block_size %ld\n",
-                    handshake->base_addr,
-                    handshake->rkey,
-                    handshake->block_cnt,
-                    handshake->block_size);
-
-                struct ibv_send_wr send_wr, *bad_send_wr = NULL;
-                struct ibv_sge send_sge;
-                memset(&send_wr, 0, sizeof(send_wr));
-
-                send_wr.wr_id = NUM_TARGETS + i;
-                send_wr.opcode = IBV_WR_SEND;
-                send_wr.sg_list = &send_sge;
-                send_wr.num_sge = 1;
-                send_wr.send_flags = IBV_SEND_SIGNALED;
-
-                send_sge.addr = (uint64_t)handshake;
-                send_sge.length = sizeof(struct rdma_handshake);
-                send_sge.lkey = g_rdma_cli_conns[i].mr_handshake->lkey;
-
-                rc = ibv_post_send(g_rdma_cli_conns[i].cm_id->qp, &send_wr, &bad_send_wr);
-                if (rc != 0) {
-                    SPDK_ERRLOG("post send failed\n");
-                    break;
-                }
                 g_rdma_cli_conns[i].status = RDMA_CLI_ESTABLISHED;
                 break;
             }
@@ -1057,20 +1103,50 @@ rdma_cli_connection_poller(void* ctx) {
                         remote_handshake->rkey,
                         remote_handshake->block_cnt,
                         remote_handshake->block_size);
+
+                    if (remote_handshake->block_size != wals_bdev->bdev.blocklen) {
+                        // TODO: this is fatal
+                        SPDK_ERRLOG("Bdev blocklen %d mismatch log blocklen %ld\n",
+                            wals_bdev->bdev.blocklen,
+                            remote_handshake->block_size);
+                    }
+
+                    g_rdma_cli_conns[i].blockcnt_per_slice = remote_handshake->block_cnt;
                     
-                    // TODO: remove block cnt check
-                    if (remote_handshake->block_cnt != handshake->block_cnt ||
-                        remote_handshake->block_size != handshake->block_size) {
-                        SPDK_ERRLOG("buffer config handshake mismatch\n");
+                    SPDK_NOTICELOG("connected. posting send...\n");
+                    handshake->block_cnt = remote_handshake->block_cnt;
+                    handshake->block_size = remote_handshake->block_size;
+                    SPDK_NOTICELOG("sending local addr %p rkey %d block_cnt %ld block_size %ld\n",
+                        handshake->base_addr,
+                        handshake->rkey,
+                        handshake->block_cnt,
+                        handshake->block_size);
+
+                    struct ibv_send_wr send_wr, *bad_send_wr = NULL;
+                    struct ibv_sge send_sge;
+                    memset(&send_wr, 0, sizeof(send_wr));
+
+                    send_wr.wr_id = NUM_TARGETS + i;
+                    send_wr.opcode = IBV_WR_SEND;
+                    send_wr.sg_list = &send_sge;
+                    send_wr.num_sge = 1;
+                    send_wr.send_flags = IBV_SEND_SIGNALED;
+
+                    send_sge.addr = (uint64_t)handshake;
+                    send_sge.length = sizeof(struct rdma_handshake);
+                    send_sge.lkey = g_rdma_cli_conns[i].mr_handshake->lkey;
+
+                    int rc = ibv_post_send(g_rdma_cli_conns[i].cm_id->qp, &send_wr, &bad_send_wr);
+                    if (rc != 0) {
+                        SPDK_ERRLOG("post send failed\n");
                         break;
                     }
-                    SPDK_NOTICELOG("rdma handshake complete\n");
-                    g_rdma_cli_conns[i].status = RDMA_CLI_CONNECTED;
-                    // TODO: should set slice log_blockcnt to proper value provided by remote handshake
                 }
                 else if (wc.wr_id < 2 * NUM_TARGETS) {
                     // send cpl
                     SPDK_NOTICELOG("send req complete\n");
+                    SPDK_NOTICELOG("rdma handshake complete\n");
+                    g_rdma_cli_conns[i].status = RDMA_CLI_CONNECTED;
                 }
                 else {
                     SPDK_ERRLOG("Should not complete wrid = %ld\n", wc.wr_id);
@@ -1089,42 +1165,78 @@ rdma_cli_connection_poller(void* ctx) {
 }
 
 static int slice_destage_info_poller(void* ctx) {
+    // the first struct is the destage tail of the target node that the client should 
+    // RDMA read.
+    // the second struct is the commit tail of the slice that the client should RDMA write.
     struct wals_cli_slice* cli_slice;
     TAILQ_FOREACH(cli_slice, &g_slices, tailq_all_slices) {
-        if (g_destage_info[cli_slice->id].checksum == DESTAGE_INFO_CHECKSUM) {
+        // 1. read destage tail
+        if (g_destage_tail[cli_slice->id].checksum == DESTAGE_INFO_CHECKSUM) {
             if (cli_slice->rdma_conn->status == RDMA_CLI_CONNECTED) {
-                struct ibv_send_wr send_wr, *bad_send_wr = NULL;
-                struct ibv_sge send_sge;
-                memset(&send_wr, 0, sizeof(send_wr));
+                struct ibv_send_wr read_wr, *bad_read_wr = NULL;
+                struct ibv_sge read_sge;
+                memset(&read_wr, 0, sizeof(read_wr));
 
-                send_wr.wr_id = 0;
-                send_wr.opcode = IBV_WR_RDMA_READ;
-                send_wr.sg_list = &send_sge;
-                send_wr.num_sge = 1;
-                send_wr.send_flags = 0;
-                send_wr.wr.rdma.remote_addr = (uint64_t)g_rdma_handshakes[cli_slice->rdma_conn->id].base_addr + LOG_BLOCKCNT * cli_slice->wals_bdev->blocklen;
-                send_wr.wr.rdma.rkey = g_rdma_handshakes[cli_slice->rdma_conn->id].rkey;
+                read_wr.wr_id = 0;
+                read_wr.opcode = IBV_WR_RDMA_READ;
+                read_wr.sg_list = &read_sge;
+                read_wr.num_sge = 1;
+                read_wr.send_flags = 0;
+                read_wr.wr.rdma.remote_addr = (uint64_t)g_rdma_handshakes[cli_slice->rdma_conn->id].base_addr + cli_slice->rdma_conn->blockcnt_per_slice * cli_slice->wals_bdev->blocklen;
+                read_wr.wr.rdma.rkey = g_rdma_handshakes[cli_slice->rdma_conn->id].rkey;
 
-                send_sge.addr = (uint64_t)&g_destage_info[cli_slice->id];
-                send_sge.length = sizeof(struct destage_info);
-                send_sge.lkey = cli_slice->rdma_conn->mr_destage_info->lkey;
+                read_sge.addr = (uint64_t)&g_destage_tail[cli_slice->id];
+                read_sge.length = sizeof(struct destage_info);
+                read_sge.lkey = cli_slice->rdma_conn->mr_destage_tail->lkey;
 
-                int rc = ibv_post_send(cli_slice->rdma_conn->cm_id->qp, &send_wr, &bad_send_wr);
+                int rc = ibv_post_send(cli_slice->rdma_conn->cm_id->qp, &read_wr, &bad_read_wr);
                 if (rc != 0) {
-                    // SPDK_ERRLOG("post send failed\n");
+                    SPDK_ERRLOG("post send failed\n");
                     continue;
                 }
             }
         } 
-        else if (g_destage_info[cli_slice->id].checksum == 0) {
+        else if (g_destage_tail[cli_slice->id].checksum == 0) {
             // RDMA read is successful
             // update and set the checksum back
-            cli_slice->wals_target->head.offset = g_destage_info[cli_slice->id].destage_head;
-            cli_slice->wals_target->head.round = g_destage_info[cli_slice->id].destage_round;
-            g_destage_info[cli_slice->id].checksum = DESTAGE_INFO_CHECKSUM;
+            // SPDK_NOTICELOG("Read destage tail %ld %ld\n", g_destage_tail[cli_slice->id].offset,
+            //     g_destage_tail[cli_slice->id].round);
+            cli_slice->wals_target->head.offset = g_destage_tail[cli_slice->id].offset;
+            cli_slice->wals_target->head.round = g_destage_tail[cli_slice->id].round;
+            g_destage_tail[cli_slice->id].checksum = DESTAGE_INFO_CHECKSUM;
         }
         else {
             SPDK_ERRLOG("Should not happen\n");
+        }
+
+        // 2. write commit tail
+        if (cli_slice->rdma_conn->status == RDMA_CLI_CONNECTED) {
+            g_commit_tail[cli_slice->id].offset = cli_slice->wals_slice->committed_tail.offset;
+            g_commit_tail[cli_slice->id].round = cli_slice->wals_slice->committed_tail.round;
+            struct ibv_send_wr write_wr, *bad_write_wr = NULL;
+            struct ibv_sge write_sge;
+            memset(&write_wr, 0, sizeof(write_wr));
+
+            write_wr.wr_id = 0;
+            write_wr.opcode = IBV_WR_RDMA_WRITE;
+            write_wr.sg_list = &write_sge;
+            write_wr.num_sge = 1;
+            write_wr.send_flags = 0;
+            write_wr.wr.rdma.remote_addr =
+                (uint64_t)g_rdma_handshakes[cli_slice->rdma_conn->id].base_addr + \
+                cli_slice->rdma_conn->blockcnt_per_slice * cli_slice->wals_bdev->blocklen + \
+                sizeof(struct destage_info);
+            write_wr.wr.rdma.rkey = g_rdma_handshakes[cli_slice->rdma_conn->id].rkey;
+
+            write_sge.addr = (uint64_t)&g_commit_tail[cli_slice->id];
+            write_sge.length = sizeof(struct destage_info);
+            write_sge.lkey = cli_slice->rdma_conn->mr_commit_tail->lkey;
+
+            int rc = ibv_post_send(cli_slice->rdma_conn->cm_id->qp, &write_wr, &bad_write_wr);
+            if (rc != 0) {
+                SPDK_ERRLOG("post send failed\n");
+                continue;
+            }
         }
     }
     return SPDK_POLLER_BUSY;
@@ -1132,6 +1244,7 @@ static int slice_destage_info_poller(void* ctx) {
 
 static int
 rdma_cq_poller(void* ctx) {
+    spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_RDMA_CQ, 0, 0, (uintptr_t)ctx);
     for (int i = 0; i < NUM_TARGETS; i++) {
         if (g_rdma_cli_conns[i].status == RDMA_CLI_CONNECTED) {
             int cnt = ibv_poll_cq(g_rdma_cli_conns[i].cq, WC_BATCH_SIZE, &g_rdma_cli_conns[i].wc_buf[0]);
@@ -1157,21 +1270,55 @@ rdma_cq_poller(void* ctx) {
 					}
 
                     if (g_rdma_cli_conns[i].wc_buf[j].wr_id == 0) {
-                        // special case: the wr is for reading destage info.
+                        // special case: the wr is for reading destage tail or writing commit tail.
                         // do nothing
                         continue;
                     }
+
 
                     if (g_rdma_cli_conns[i].wc_buf[j].opcode == IBV_WC_RDMA_READ) {
                         wals_target_read_complete(io, success);
                     }
                     else {
-                        wals_target_write_complete(io, success);
+                        if (io == g_rdma_cli_conns[i].pending_write_io_queue.pending_ios[g_rdma_cli_conns[i].pending_write_io_queue.head].io) {
+                            // SPDK_NOTICELOG("Write IO %p ok\n", io);
+                            wals_target_write_complete(io, success);
+                            g_rdma_cli_conns[i].pending_write_io_queue.head = (
+                                g_rdma_cli_conns[i].pending_write_io_queue.head + 1
+                            ) % PENDING_IO_MAX_CNT;
+                        }
+                        else {
+                            SPDK_NOTICELOG("Ignoring io %p due to already timeout\n", io);
+                        }
                     }
                 }
             }
         }
+
+        uint64_t current_ticks = spdk_get_ticks();
+        uint64_t timeout_ticks = TIMEOUT_MS * spdk_get_ticks_hz() / 1000;
+        int j;
+        for (j = g_rdma_cli_conns[i].pending_write_io_queue.head;
+            j != g_rdma_cli_conns[i].pending_write_io_queue.tail;
+            j = (j + 1) % PENDING_IO_MAX_CNT) {
+
+            if (
+                g_rdma_cli_conns[i].pending_write_io_queue.pending_ios[j].ticks
+                + timeout_ticks
+                < current_ticks
+            ) {
+                // timeout.
+                struct wals_bdev_io* timeout_io = g_rdma_cli_conns[i].pending_write_io_queue.pending_ios[j].io;
+                SPDK_NOTICELOG("IO %p timeout\n", timeout_io);
+                wals_target_write_complete(timeout_io, false);
+            }
+            else {
+                break;
+            }
+        }
+        g_rdma_cli_conns[i].pending_write_io_queue.head = j;
     }
+    spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_RDMA_CQ, 0, 0, (uintptr_t)ctx);
     return SPDK_POLLER_IDLE;
 }
 

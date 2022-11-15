@@ -832,6 +832,12 @@ wals_target_write_complete(struct wals_bdev_io *wals_io, bool success)
 
 	wals_io->targets_completed++;
 
+	if (((struct wals_metadata*) wals_io->dma_page->buf)->version != METADATA_VERSION) {
+
+        SPDK_ERRLOG("%p %d %ld\n", wals_io->dma_page, success, wals_io->dma_page->data_size);
+
+    }
+
 	if (spdk_unlikely(!success)) {
 		wals_io->targets_failed++;
 
@@ -1002,7 +1008,7 @@ wals_bdev_submit_write_request(void *arg)
 	// check slice space
 	if (!wals_bdev_update_tail(wals_io->total_num_blocks,
 								slice->tail, slice->log_blockcnt, slice->head, &slice_tail)) {
-		SPDK_NOTICELOG("queue bdev io submit due to no enough space left on slice log. head: (%ld,%ld) tail: (%ld,%ld)\n", slice->head.offset, slice->head.round, slice->tail.offset, slice->tail.round);
+		// SPDK_NOTICELOG("queue bdev io submit due to no enough space left on slice log. head: (%ld,%ld) tail: (%ld,%ld)\n", slice->head.offset, slice->head.round, slice->tail.offset, slice->tail.round);
 		spdk_thread_send_msg(spdk_get_thread(), wals_bdev_submit_write_request, wals_io);
 		
 		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_W, 0, 0, (uintptr_t)wals_io, 1, 0);
@@ -1989,6 +1995,16 @@ SPDK_TRACE_REGISTER_FN(wals_trace, "wals", TRACE_GROUP_WALS)
 		},
 		{
 			"WALS_F_UPDATE_HEAD", TRACE_WALS_F_UPDATE_HEAD,
+			OWNER_WALS, OBJECT_WALS_BDEV, 0,
+			{}
+		},
+		{
+			"WALS_S_RDMA_CQ", TRACE_WALS_S_RDMA_CQ,
+			OWNER_WALS, OBJECT_WALS_BDEV, 1,
+			{}
+		},
+		{
+			"WALS_F_RDMA_CQ", TRACE_WALS_F_RDMA_CQ,
 			OWNER_WALS, OBJECT_WALS_BDEV, 0,
 			{}
 		},
