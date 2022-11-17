@@ -745,7 +745,6 @@ wals_bdev_write_complete_quorum(struct wals_bdev_io *wals_io)
 	} else {
 		wals_bdev_write_complete_deferred_success(wals_io);
 	}
-	dma_heap_put_page(wals_bdev->write_heap, wals_io->dma_page);
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_COMP_W_Q, 0, 0, (uintptr_t)wals_io);
 }
@@ -815,6 +814,8 @@ wals_bdev_write_complete_all(struct wals_bdev_io *wals_io)
 
 	struct wals_slice *slice = &wals_io->wals_bdev->slices[wals_io->slice_index];
 	wals_bdev_firo_remove(slice->write_firo, wals_io->firo_entry, &slice->committed_tail);
+
+	dma_heap_put_page(wals_io->wals_bdev->write_heap, wals_io->dma_page);
 
 	if (wals_io->orig_thread != spdk_get_thread()) {
 		spdk_thread_send_msg(wals_io->orig_thread, wals_bdev_write_complete_free_deferred, wals_io);
@@ -1771,6 +1772,7 @@ wals_bdev_cleaner(void *ctx)
 
 	x = x->level[0].forward;
 	if (x && !wals_bdev_is_valid_entry(
+		// BUG: should be slice->head?
 		wals_bdev_get_targets_log_head_min(&wals_bdev->slices[x->ele->begin / wals_bdev->slice_blockcnt]),
 		x->ele)) {
 		for (j = 0; j < x->height; j++) {

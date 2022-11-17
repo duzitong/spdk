@@ -200,6 +200,7 @@ struct wals_lp_firo {
 struct wals_target {
 	volatile uint64_t			log_blockcnt;
 
+	// BUG: need to be atomicly updated
 	volatile wals_log_position	head;
 
 	void						*private_info;
@@ -212,6 +213,7 @@ struct wals_slice {
 
 	wals_log_position			tail;
 
+	// BUG: need to be atomicly updated (RCU)
 	/* min(outstanding read requests offset, min(targets.offset)) */
 	volatile wals_log_position	head;
 
