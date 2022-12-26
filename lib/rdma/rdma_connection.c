@@ -466,19 +466,19 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				rdma_connection_register(
 					rdma_conn,
 					rdma_conn->handshake_buf,
-					2 * sizeof(struct rdma_handshake));
+					VALUE_2MB);
 				
 				// only data node provides base address
 				if (rdma_conn->handshake_buf->base_addr != NULL) {
 					rdma_connection_register(
 						rdma_conn,
 						rdma_conn->handshake_buf->base_addr,
-						(rdma_conn->handshake_buf->block_cnt + 1) * rdma_conn->handshake_buf->block_size);
+						rdma_conn->handshake_buf->block_cnt * rdma_conn->handshake_buf->block_size + VALUE_2MB);
 					
 					rdma_conn->handshake_buf->rkey = rdma_connection_get_rkey(
 						rdma_conn,
 						rdma_conn->handshake_buf->base_addr,
-						(rdma_conn->handshake_buf->block_cnt + 1) * rdma_conn->handshake_buf->block_size);
+						rdma_conn->handshake_buf->block_cnt * rdma_conn->handshake_buf->block_size + VALUE_2MB);
 				}
 
 				wr.wr_id = (uintptr_t)2;
