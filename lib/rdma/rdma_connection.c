@@ -778,13 +778,13 @@ static struct ibv_mr* _rdma_connection_get_mr(struct rdma_connection* rdma_conn,
 		return NULL;
 	}
 
-	if (size < len) {
-		SPDK_ERRLOG("Not enough length for translating %p (%ld > %d)\n",
-			addr,
-			size,
-			len);
-		return NULL;
-	}
+	// if (size < len) {
+	// 	SPDK_ERRLOG("Not enough length for translating %p (%ld > %d)\n",
+	// 		addr,
+	// 		size,
+	// 		len);
+	// 	return NULL;
+	// }
 	return mr;
 }
 
