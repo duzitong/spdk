@@ -745,13 +745,17 @@ int rdma_connection_register(struct rdma_connection* rdma_conn, void* addr, uint
 
 	rdma_conn->mr_arr[rdma_conn->mr_cnt] = mr;
 	rdma_conn->mr_cnt++;
-	spdk_mem_map_set_translation(
+	int rc = spdk_mem_map_set_translation(
 		rdma_conn->mem_map,
 		(uint64_t)addr,
 		len,
 		(uint64_t)mr);
+	
+	if (rc != 0) {
+		SPDK_ERRLOG("Failed to set translation %p %d: %d\n", addr, len, rc);
+	}
 
-	return 0;
+	return rc;
 }
 
 void rdma_connection_construct_sge(struct rdma_connection* rdma_conn, struct ibv_sge* sge, void* addr, uint32_t len) {
