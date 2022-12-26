@@ -791,7 +791,6 @@ wals_bdev_write_complete_failed(struct wals_bdev_io *wals_io)
 	} else {
 		wals_bdev_write_complete_deferred_failure(wals_io);
 	}
-	dma_heap_put_page(wals_bdev->write_heap, wals_io->dma_page);
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_COMP_W_Q, 0, 0, (uintptr_t)wals_io);
 }

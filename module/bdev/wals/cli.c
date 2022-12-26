@@ -5,7 +5,7 @@
 #include "spdk/string.h"
 #include "spdk/util.h"
 #include "spdk/nvme.h"
-#include "spdk/rdma.h"
+#include "spdk/rdma_connection.h"
 
 #include "spdk/log.h"
 #include <infiniband/verbs.h>
@@ -20,14 +20,14 @@
 #define TIMEOUT_MS 10
 
 enum rdma_cli_status {
-    RDMA_CLI_UNINITIALIZED,
-	RDMA_CLI_CONNECTING,
-	RDMA_CLI_ESTABLISHED,
-	RDMA_CLI_CONNECTED,
-	RDMA_CLI_INITIALIZED,
-	RDMA_CLI_ERROR,
-	RDMA_CLI_ADDR_RESOLVING,
-	RDMA_CLI_ROUTE_RESOLVING,
+    RDMA_CLIENT_UNINITIALIZED,
+	RDMA_CLIENT_CONNECTING,
+	RDMA_CLIENT_ESTABLISHED,
+	RDMA_CLIENT_CONNECTED,
+	RDMA_CLIENT_INITIALIZED,
+	RDMA_CLIENT_ERROR,
+	RDMA_CLIENT_ADDR_RESOLVING,
+	RDMA_CLIENT_ROUTE_RESOLVING,
 };
 
 enum nvmf_cli_status {
@@ -248,7 +248,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
 
     // 1. use or create rdma connection
     for (int i = 0; i < NUM_TARGETS; i++) {
-        if (g_rdma_cli_conns[i].status != RDMA_CLI_UNINITIALIZED) {
+        if (g_rdma_cli_conns[i].status != RDMA_CLIENT_UNINITIALIZED) {
             // compare ip and port
             struct sockaddr_in* cur_addr = g_rdma_cli_conns[i].server_addr->ai_addr;
             if (cur_addr->sin_addr.s_addr == addr.sin_addr.s_addr
@@ -264,7 +264,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
     if (cli_slice->rdma_conn == NULL) {
         // no existing connection. need to build one 
         for (int i = 0; i < NUM_TARGETS; i++) {
-            if (g_rdma_cli_conns[i].status == RDMA_CLI_UNINITIALIZED) {
+            if (g_rdma_cli_conns[i].status == RDMA_CLIENT_UNINITIALIZED) {
                 // this slot is empty. use it
                 SPDK_NOTICELOG("Using empty RDMA connection slot %d\n", i);
                 cli_slice->rdma_conn = &g_rdma_cli_conns[i];
@@ -282,7 +282,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                     SPDK_ERRLOG("fcntl failed\n");
                     return NULL;
                 }
-                g_rdma_cli_conns[i].status = RDMA_CLI_INITIALIZED;
+                g_rdma_cli_conns[i].status = RDMA_CLIENT_INITIALIZED;
 
                 // only need one poller for connecting the qps
                 if (g_rdma_connection_poller == NULL) {
@@ -290,7 +290,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                 }
 
 
-                while (g_rdma_cli_conns[i].status != RDMA_CLI_CONNECTED) {
+                while (g_rdma_cli_conns[i].status != RDMA_CLIENT_CONNECTED) {
                     rdma_cli_connection_poller(wals_bdev);
                 }
 
@@ -413,7 +413,7 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     // Workaround: make free RDMA resources async; do reconnection and switch it in async
     int rc;
     struct wals_cli_slice* slice = target->private_info;
-    if (slice->rdma_conn->status != RDMA_CLI_CONNECTED) {
+    if (slice->rdma_conn->status != RDMA_CLIENT_CONNECTED) {
         wals_target_read_complete(wals_io, false);
         return 0;
     }
@@ -501,7 +501,7 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
     int rc;
     struct wals_cli_slice* slice = target->private_info;
 
-    if (slice->rdma_conn->status != RDMA_CLI_CONNECTED) {
+    if (slice->rdma_conn->status != RDMA_CLIENT_CONNECTED) {
         wals_target_write_complete(wals_io, false);
         return 0;
     }
@@ -657,18 +657,18 @@ rdma_cli_connection_poller(void* ctx) {
     struct wals_bdev* wals_bdev = ctx;
     for (int i = 0; i < NUM_TARGETS; i++) {
         switch (g_rdma_cli_conns[i].status) {
-            case RDMA_CLI_UNINITIALIZED:
+            case RDMA_CLIENT_UNINITIALIZED:
             {
                 break;
             }
-            case RDMA_CLI_INITIALIZED:
+            case RDMA_CLIENT_INITIALIZED:
             {
                 int rc;
                 struct rdma_cm_id* cm_id = NULL;
                 rc = rdma_create_id(g_rdma_cli_conns[i].channel, &cm_id, NULL, RDMA_PS_TCP);
                 if (rc != 0) {
                     SPDK_ERRLOG("rdma_create_id failed\n");
-                    g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                    g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                     break;
                 }
                 g_rdma_cli_conns[i].cm_id = cm_id;
@@ -676,14 +676,14 @@ rdma_cli_connection_poller(void* ctx) {
                 rc = rdma_resolve_addr(cm_id, NULL, g_rdma_cli_conns[i].server_addr->ai_addr, 1000);
                 if (rc != 0) {
                     SPDK_ERRLOG("rdma_resolve_addr failed\n");
-                    g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                    g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                     break;
                 }
-                g_rdma_cli_conns[i].status = RDMA_CLI_ADDR_RESOLVING;
+                g_rdma_cli_conns[i].status = RDMA_CLIENT_ADDR_RESOLVING;
                 break;
             }
-            case RDMA_CLI_ADDR_RESOLVING:
-            case RDMA_CLI_ROUTE_RESOLVING:
+            case RDMA_CLIENT_ADDR_RESOLVING:
+            case RDMA_CLIENT_ROUTE_RESOLVING:
             {
                 int rc;
                 struct rdma_cm_event* event;
@@ -698,16 +698,16 @@ rdma_cli_connection_poller(void* ctx) {
                     break;
                 }
                 enum rdma_cm_event_type expected_event_type;
-                if (g_rdma_cli_conns[i].status == RDMA_CLI_ADDR_RESOLVING) {
+                if (g_rdma_cli_conns[i].status == RDMA_CLIENT_ADDR_RESOLVING) {
                     expected_event_type = RDMA_CM_EVENT_ADDR_RESOLVED;
                 }
-                else if (g_rdma_cli_conns[i].status == RDMA_CLI_ROUTE_RESOLVING) {
+                else if (g_rdma_cli_conns[i].status == RDMA_CLIENT_ROUTE_RESOLVING) {
                     expected_event_type = RDMA_CM_EVENT_ROUTE_RESOLVED;
                 }
                 else {
                     // should not happen
                     SPDK_ERRLOG("ERROR\n");
-                    g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                    g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                     break;
                 }
 
@@ -716,31 +716,31 @@ rdma_cli_connection_poller(void* ctx) {
                     SPDK_ERRLOG("unexpected event type %d (expect %d)\n",
                         event->event,
                         expected_event_type);
-                    g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                    g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                     break;
                 }
                 if (g_rdma_cli_conns[i].cm_id != event->id) {
                     SPDK_ERRLOG("CM id mismatch\n");
-                    g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                    g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                     break;
                 }
                 rc = rdma_ack_cm_event(event);
                 if (rc != 0) {
                     SPDK_ERRLOG("ack cm event failed\n");
-                    g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                    g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                     break;
                 }
 
-                if (g_rdma_cli_conns[i].status == RDMA_CLI_ADDR_RESOLVING) {
+                if (g_rdma_cli_conns[i].status == RDMA_CLIENT_ADDR_RESOLVING) {
                     rc = rdma_resolve_route(g_rdma_cli_conns[i].cm_id, 1000);
                     if (rc != 0) {
                         SPDK_ERRLOG("resolve route failed\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
-                    g_rdma_cli_conns[i].status = RDMA_CLI_ROUTE_RESOLVING;
+                    g_rdma_cli_conns[i].status = RDMA_CLIENT_ROUTE_RESOLVING;
                 }
-                else if (g_rdma_cli_conns[i].status == RDMA_CLI_ROUTE_RESOLVING) {
+                else if (g_rdma_cli_conns[i].status == RDMA_CLIENT_ROUTE_RESOLVING) {
                     struct ibv_context* ibv_context = g_rdma_cli_conns[i].cm_id->verbs;
                     struct ibv_device_attr device_attr = {};
                     ibv_query_device(ibv_context, &device_attr);
@@ -749,7 +749,7 @@ rdma_cli_connection_poller(void* ctx) {
                     struct ibv_cq* ibv_cq = ibv_create_cq(ibv_context, 256, NULL, NULL, 0);
                     if (ibv_cq == NULL) {
                         SPDK_ERRLOG("Failed to create cq\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].cq = ibv_cq;
@@ -770,7 +770,7 @@ rdma_cli_connection_poller(void* ctx) {
                     rc = rdma_create_qp(g_rdma_cli_conns[i].cm_id, NULL, &init_attr);
                     if (rc != 0) {
                         SPDK_ERRLOG("rdma_create_qp fails %d\n", rc);
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
 
@@ -781,7 +781,7 @@ rdma_cli_connection_poller(void* ctx) {
 
                     if (mr_read == NULL) {
                         SPDK_ERRLOG("failed to reg mr read\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].mr_read = mr_read;
@@ -795,7 +795,7 @@ rdma_cli_connection_poller(void* ctx) {
 
                     if (mr_write == NULL) {
                         SPDK_ERRLOG("failed to reg mr write\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].mr_write = mr_write;
@@ -809,7 +809,7 @@ rdma_cli_connection_poller(void* ctx) {
 
                     if (mr_handshake == NULL) {
                         SPDK_ERRLOG("failed to reg mr handshake\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].mr_handshake = mr_handshake;
@@ -821,7 +821,7 @@ rdma_cli_connection_poller(void* ctx) {
 
                     if (mr_destage_tail == NULL) {
                         SPDK_ERRLOG("failed to reg mr destage tail\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].mr_destage_tail = mr_destage_tail;
@@ -833,7 +833,7 @@ rdma_cli_connection_poller(void* ctx) {
 
                     if (mr_commit_tail == NULL) {
                         SPDK_ERRLOG("failed to reg mr commit tail\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].mr_commit_tail = mr_commit_tail;
@@ -864,7 +864,7 @@ rdma_cli_connection_poller(void* ctx) {
                     rc = ibv_post_recv(g_rdma_cli_conns[i].cm_id->qp, &wr, &bad_wr);
                     if (rc != 0) {
                         SPDK_ERRLOG("post recv failed\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
 
@@ -878,14 +878,14 @@ rdma_cli_connection_poller(void* ctx) {
                     rc = rdma_connect(g_rdma_cli_conns[i].cm_id, &conn_param);
                     if (rc != 0) {
                         SPDK_ERRLOG("rdma_connect failed\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
-                    g_rdma_cli_conns[i].status = RDMA_CLI_CONNECTING;
+                    g_rdma_cli_conns[i].status = RDMA_CLIENT_CONNECTING;
                 }
                 break;
             }
-            case RDMA_CLI_CONNECTED:
+            case RDMA_CLIENT_CONNECTED:
             {
                 struct rdma_cm_event* cm_event;
                 int rc = rdma_get_cm_event(g_rdma_cli_conns[i].channel, &cm_event);
@@ -901,7 +901,7 @@ rdma_cli_connection_poller(void* ctx) {
                 rc = rdma_ack_cm_event(cm_event);
                 if (rc != 0) {
                     SPDK_ERRLOG("failed to ack event\n");
-                    g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                    g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                     break;
                 }
 
@@ -910,14 +910,14 @@ rdma_cli_connection_poller(void* ctx) {
                     rdma_destroy_qp(g_rdma_cli_conns[i].cm_id);
                     if (g_rdma_cli_conns[i].cm_id->qp != NULL) {
                         SPDK_NOTICELOG("cannot free qp\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
 
                     rc = rdma_destroy_id(g_rdma_cli_conns[i].cm_id);
                     if (rc != 0) {
                         SPDK_ERRLOG("cannot destroy id\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].cm_id = NULL;
@@ -925,7 +925,7 @@ rdma_cli_connection_poller(void* ctx) {
                     rc = ibv_destroy_cq(g_rdma_cli_conns[i].cq);
                     if (rc != 0) {
                         SPDK_ERRLOG("destroy cq failed\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].cq = NULL;
@@ -933,28 +933,28 @@ rdma_cli_connection_poller(void* ctx) {
                     rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_read);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].mr_read = NULL;
                     rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_write);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].mr_write = NULL;
                     rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_handshake);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].mr_handshake = NULL;
                     rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_destage_tail);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].mr_destage_tail = NULL;
@@ -962,19 +962,19 @@ rdma_cli_connection_poller(void* ctx) {
                     rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_commit_tail);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].mr_commit_tail = NULL;
 
-                    g_rdma_cli_conns[i].status = RDMA_CLI_INITIALIZED;
+                    g_rdma_cli_conns[i].status = RDMA_CLIENT_INITIALIZED;
                 }
                 else {
                     SPDK_ERRLOG("Should not receive event %d when connected\n", cm_event->event);
                 }
                 break;
             }
-            case RDMA_CLI_CONNECTING:
+            case RDMA_CLIENT_CONNECTING:
             {
                 struct rdma_handshake* handshake = &g_rdma_handshakes[NUM_TARGETS];
                 int rc;
@@ -992,7 +992,7 @@ rdma_cli_connection_poller(void* ctx) {
                 rc = rdma_ack_cm_event(connect_event);
                 if (rc != 0) {
                     SPDK_ERRLOG("failed to ack event\n");
-                    g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                    g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                     break;
                 }
 
@@ -1006,14 +1006,14 @@ rdma_cli_connection_poller(void* ctx) {
                     rdma_destroy_qp(g_rdma_cli_conns[i].cm_id);
                     if (g_rdma_cli_conns[i].cm_id->qp != NULL) {
                         SPDK_NOTICELOG("cannot free qp\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
 
                     rc = rdma_destroy_id(g_rdma_cli_conns[i].cm_id);
                     if (rc != 0) {
                         SPDK_ERRLOG("cannot destroy id\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].cm_id = NULL;
@@ -1021,7 +1021,7 @@ rdma_cli_connection_poller(void* ctx) {
                     rc = ibv_destroy_cq(g_rdma_cli_conns[i].cq);
                     if (rc != 0) {
                         SPDK_ERRLOG("destroy cq failed\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].cq = NULL;
@@ -1029,28 +1029,28 @@ rdma_cli_connection_poller(void* ctx) {
                     rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_read);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].mr_read = NULL;
                     rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_write);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].mr_write = NULL;
                     rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_handshake);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].mr_handshake = NULL;
                     rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_destage_tail);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].mr_destage_tail = NULL;
@@ -1058,13 +1058,13 @@ rdma_cli_connection_poller(void* ctx) {
                     rc = ibv_dereg_mr(g_rdma_cli_conns[i].mr_commit_tail);
                     if (rc != 0) {
                         SPDK_ERRLOG("failed to dereg mr\n");
-                        g_rdma_cli_conns[i].status = RDMA_CLI_ERROR;
+                        g_rdma_cli_conns[i].status = RDMA_CLIENT_ERROR;
                         break;
                     }
                     g_rdma_cli_conns[i].mr_commit_tail = NULL;
 
 
-                    g_rdma_cli_conns[i].status = RDMA_CLI_INITIALIZED;
+                    g_rdma_cli_conns[i].status = RDMA_CLIENT_INITIALIZED;
                     g_rdma_cli_conns[i].reconnect_cnt++;
                     break;
                 }
@@ -1073,10 +1073,10 @@ rdma_cli_connection_poller(void* ctx) {
                     break;
                 }
 
-                g_rdma_cli_conns[i].status = RDMA_CLI_ESTABLISHED;
+                g_rdma_cli_conns[i].status = RDMA_CLIENT_ESTABLISHED;
                 break;
             }
-            case RDMA_CLI_ESTABLISHED:
+            case RDMA_CLIENT_ESTABLISHED:
             {
                 struct ibv_wc wc;
                 struct rdma_handshake* handshake = &g_rdma_handshakes[NUM_TARGETS];
@@ -1146,14 +1146,14 @@ rdma_cli_connection_poller(void* ctx) {
                     // send cpl
                     SPDK_NOTICELOG("send req complete\n");
                     SPDK_NOTICELOG("rdma handshake complete\n");
-                    g_rdma_cli_conns[i].status = RDMA_CLI_CONNECTED;
+                    g_rdma_cli_conns[i].status = RDMA_CLIENT_CONNECTED;
                 }
                 else {
                     SPDK_ERRLOG("Should not complete wrid = %ld\n", wc.wr_id);
                 }
                 break;
             }
-            case RDMA_CLI_ERROR:
+            case RDMA_CLIENT_ERROR:
             {
                 SPDK_NOTICELOG("In error state. Cannot recover by now\n");
                 break;
@@ -1172,7 +1172,7 @@ static int slice_destage_info_poller(void* ctx) {
     TAILQ_FOREACH(cli_slice, &g_slices, tailq_all_slices) {
         // 1. read destage tail
         if (g_destage_tail[cli_slice->id].checksum == DESTAGE_INFO_CHECKSUM) {
-            if (cli_slice->rdma_conn->status == RDMA_CLI_CONNECTED) {
+            if (cli_slice->rdma_conn->status == RDMA_CLIENT_CONNECTED) {
                 struct ibv_send_wr read_wr, *bad_read_wr = NULL;
                 struct ibv_sge read_sge;
                 memset(&read_wr, 0, sizeof(read_wr));
@@ -1210,7 +1210,7 @@ static int slice_destage_info_poller(void* ctx) {
         }
 
         // 2. write commit tail
-        if (cli_slice->rdma_conn->status == RDMA_CLI_CONNECTED) {
+        if (cli_slice->rdma_conn->status == RDMA_CLIENT_CONNECTED) {
             g_commit_tail[cli_slice->id].offset = cli_slice->wals_slice->committed_tail.offset;
             g_commit_tail[cli_slice->id].round = cli_slice->wals_slice->committed_tail.round;
             struct ibv_send_wr write_wr, *bad_write_wr = NULL;
@@ -1246,7 +1246,7 @@ static int
 rdma_cq_poller(void* ctx) {
     spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_RDMA_CQ, 0, 0, (uintptr_t)ctx);
     for (int i = 0; i < NUM_TARGETS; i++) {
-        if (g_rdma_cli_conns[i].status == RDMA_CLI_CONNECTED) {
+        if (g_rdma_cli_conns[i].status == RDMA_CLIENT_CONNECTED) {
             int cnt = ibv_poll_cq(g_rdma_cli_conns[i].cq, WC_BATCH_SIZE, &g_rdma_cli_conns[i].wc_buf[0]);
             if (cnt < 0) {
                 // hopefully the reconnection poller will spot the error and try to reconnect

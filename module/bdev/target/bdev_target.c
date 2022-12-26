@@ -47,7 +47,7 @@
 #include "spdk/queue.h"
 #include "spdk/string.h"
 #include "spdk/trace.h"
-#include "spdk/rdma.h"
+#include "spdk/rdma_connection.h"
 
 #include "spdk/bdev_module.h"
 #include "spdk/log.h"
