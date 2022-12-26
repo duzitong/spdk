@@ -166,19 +166,19 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
             rdma_connection_register(
 				rdma_conn,
 				rdma_conn->handshake_buf,
-				2 * sizeof(struct rdma_handshake));
+				VALUE_2MB);
 			
 			// only data node provides base address
 			if (rdma_conn->handshake_buf->base_addr != NULL) {
 				rdma_connection_register(
 					rdma_conn,
 					rdma_conn->handshake_buf->base_addr,
-					(rdma_conn->handshake_buf->block_cnt + 1) * rdma_conn->handshake_buf->block_size);
+					rdma_conn->handshake_buf->block_cnt * rdma_conn->handshake_buf->block_size + VALUE_2MB);
 				
 				rdma_conn->handshake_buf->rkey = rdma_connection_get_rkey(
 					rdma_conn,
 					rdma_conn->handshake_buf->base_addr,
-					(rdma_conn->handshake_buf->block_cnt + 1) * rdma_conn->handshake_buf->block_size);
+					rdma_conn->handshake_buf->block_cnt * rdma_conn->handshake_buf->block_size + VALUE_2MB);
 			}
 			// struct ibv_mr* ibv_mr_handshake = ibv_reg_mr(child_cm_id->qp->pd,
 			// 	handshake_buffer,
@@ -754,6 +754,7 @@ int rdma_connection_register(struct rdma_connection* rdma_conn, void* addr, uint
 	if (rc != 0) {
 		SPDK_ERRLOG("Failed to set translation %p %d: %d\n", addr, len, rc);
 	}
+	SPDK_NOTICELOG("Registering %p %d\n", addr, len);
 
 	return rc;
 }

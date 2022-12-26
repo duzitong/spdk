@@ -49,6 +49,7 @@
 #include "spdk/trace.h"
 #include "spdk/rdma_connection.h"
 #include "spdk/likely.h"
+#include "spdk/memory.h"
 
 #include "spdk/bdev_module.h"
 #include "spdk/log.h"
@@ -806,7 +807,12 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 	}
 
 	size_t log_size = LOG_BLOCKCNT * LOG_BLOCKSIZE;
-	size_t total_size = (LOG_BLOCKCNT + 1) * LOG_BLOCKSIZE;
+	size_t total_size = LOG_BLOCKCNT * LOG_BLOCKSIZE + VALUE_2MB;
+
+	if (total_size % VALUE_2MB != 0) {
+		SPDK_ERRLOG("Log buffer size is not multiple of %lld\n", VALUE_2MB);
+		return -EINVAL;
+	}
 
 	// one more block for current destage position
 	// TODO: another block for commit tail
