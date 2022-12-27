@@ -754,7 +754,6 @@ int rdma_connection_register(struct rdma_connection* rdma_conn, void* addr, uint
 	if (rc != 0) {
 		SPDK_ERRLOG("Failed to set translation %p %d: %d\n", addr, len, rc);
 	}
-	SPDK_NOTICELOG("Registering %p %d\n", addr, len);
 
 	return rc;
 }
