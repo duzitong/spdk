@@ -271,7 +271,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                 }
 
                 while (!rdma_connection_is_connected(g_rdma_conns[i])) {
-                    rdma_cli_connection_poller(wals_bdev);
+                    rdma_connection_connect(g_rdma_conns[i]);
                 }
 
                 break;

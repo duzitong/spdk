@@ -806,5 +806,5 @@ uint32_t rdma_connection_get_rkey(struct rdma_connection* rdma_conn, void* addr,
 }
 
 bool rdma_connection_is_connected(struct rdma_connection* rdma_conn) {
-	return rdma_conn->status == RDMA_SERVER_CONNECTED || RDMA_CLI_CONNECTED;
+	return rdma_conn != NULL && (rdma_conn->status == RDMA_SERVER_CONNECTED || rdma_conn->status == RDMA_CLI_CONNECTED);
 }
