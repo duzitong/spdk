@@ -13,7 +13,7 @@ SPDK_MAP_FILE = $(abspath $(CURDIR)/spdk_rdma.map)
 
 LIBNAME = rdma
 
-C_SRCS = common.c
+C_SRCS = common.c rdma_atomic.c rdma_connection.c
 
 ifeq ($(CONFIG_RDMA_PROV),verbs)
 C_SRCS += rdma_verbs.c
