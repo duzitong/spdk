@@ -1,4 +1,5 @@
 #include "dma_heap.h"
+#include "spdk/memory.h"
 
 #define BUFFER_ALIGN    2 * 1024 * 1024
 
@@ -34,6 +35,7 @@ dma_heap_alloc(size_t data_size, size_t md_size, int checksum_size_512, int alig
 
     data_size = (data_size >> SIZE_SHIFT) << SIZE_SHIFT; 
     total_size = dma_heap_total_size(data_size, md_size, checksum_size_512, align_shift);
+    total_size = (total_size / VALUE_2MB + 1) * VALUE_2MB;
     heap->buf = spdk_dma_zmalloc(total_size, BUFFER_ALIGN, NULL);
     heap->buf_size = total_size;
     heap->data_size = data_size;

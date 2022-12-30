@@ -61,7 +61,6 @@ struct slice_rdma_context {
     struct pending_io_queue pending_nvmf_read_io_queue;
     uint64_t io_fail_cnt;
     uint64_t reconnect_cnt;
-    size_t blockcnt_per_slice;
     TAILQ_HEAD(, wals_cli_slice) slices;
 };
 
@@ -84,8 +83,8 @@ int g_num_slices = 0;
 
 // TODO: rewrite it to supp
 TAILQ_HEAD(, wals_cli_slice) g_slices;
-struct destage_info g_destage_tail[MAX_SLICES];
-struct destage_info g_commit_tail[MAX_SLICES];
+struct destage_info* g_destage_tail;
+struct destage_info* g_commit_tail;
 
 struct wals_cli_slice {
     int id;
@@ -118,6 +117,10 @@ void target_connected_cb(void *cb_ctx, struct rdma_connection* rdma_conn) {
 
     rdma_connection_register(rdma_conn, g_destage_tail, VALUE_2MB);
     rdma_connection_register(rdma_conn, g_commit_tail, VALUE_2MB);
+
+    struct wals_cli_slice* cli_slice = TAILQ_FIRST(&context->slices);
+    rdma_connection_register(rdma_conn, cli_slice->wals_bdev->write_heap->buf, cli_slice->wals_bdev->write_heap->buf_size);
+    rdma_connection_register(rdma_conn, cli_slice->wals_bdev->read_heap->buf, cli_slice->wals_bdev->read_heap->buf_size);
 }
 
 static bool
@@ -192,6 +195,18 @@ nvmf_cli_remove_cb(void *cb_ctx, struct spdk_nvme_ctrlr *ctrlr)
 static struct wals_target*
 cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct wals_slice *slice)
 {
+    // init g_destage_tail and g_commit_tail
+    // TODO: should use atomic
+    if (g_destage_tail == NULL) {
+        g_destage_tail = spdk_zmalloc(VALUE_2MB, VALUE_2MB, NULL,
+            SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+    }
+
+    if (g_commit_tail == NULL) {
+        g_commit_tail = spdk_zmalloc(VALUE_2MB, VALUE_2MB, NULL,
+            SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+    }
+
     if (g_num_slices == 0) {
         // BUG: if the first slice registration failed, it will be called twice
         TAILQ_INIT(&g_slices);
@@ -200,12 +215,12 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
             g_destage_tail[i].checksum = DESTAGE_INFO_CHECKSUM;
             g_commit_tail[i].checksum = DESTAGE_INFO_CHECKSUM;
         }
-
     }
     if (wals_bdev->blocklen != wals_bdev->bdev.blocklen) {
         SPDK_ERRLOG("Only support buffer blocklen == bdev blocklen\n");
         return NULL;
     }
+
 
     int rc;
     // TODO: error case should recycle resources
@@ -654,6 +669,8 @@ static int slice_destage_info_poller(void* ctx) {
         if (!rdma_connection_is_connected(cli_slice->rdma_conn)) {
             continue;
         }
+
+        struct rdma_handshake* remote_handshake = &cli_slice->rdma_conn->handshake_buf[1];
         struct slice_rdma_context* rdma_context = cli_slice->rdma_conn->rdma_context;
         // 1. read destage tail
         if (g_destage_tail[cli_slice->id].checksum == DESTAGE_INFO_CHECKSUM) {
@@ -666,8 +683,8 @@ static int slice_destage_info_poller(void* ctx) {
             read_wr.sg_list = &read_sge;
             read_wr.num_sge = 1;
             read_wr.send_flags = 0;
-            read_wr.wr.rdma.remote_addr = (uint64_t)cli_slice->rdma_conn->handshake_buf[1].base_addr + rdma_context->blockcnt_per_slice * cli_slice->wals_bdev->blocklen;
-            read_wr.wr.rdma.rkey = cli_slice->rdma_conn->handshake_buf[1].rkey;
+            read_wr.wr.rdma.remote_addr = (uint64_t)remote_handshake->base_addr + remote_handshake->block_cnt * remote_handshake->block_size;
+            read_wr.wr.rdma.rkey = remote_handshake->rkey;
 
             rdma_connection_construct_sge(cli_slice->rdma_conn,
                 &read_sge,
@@ -694,34 +711,32 @@ static int slice_destage_info_poller(void* ctx) {
         }
 
         // 2. write commit tail
-        if (cli_slice->rdma_conn->status == RDMA_CLI_CONNECTED) {
-            g_commit_tail[cli_slice->id].offset = cli_slice->wals_slice->committed_tail.offset;
-            g_commit_tail[cli_slice->id].round = cli_slice->wals_slice->committed_tail.round;
-            struct ibv_send_wr write_wr, *bad_write_wr = NULL;
-            struct ibv_sge write_sge;
-            memset(&write_wr, 0, sizeof(write_wr));
+        g_commit_tail[cli_slice->id].offset = cli_slice->wals_slice->committed_tail.offset;
+        g_commit_tail[cli_slice->id].round = cli_slice->wals_slice->committed_tail.round;
+        struct ibv_send_wr write_wr, *bad_write_wr = NULL;
+        struct ibv_sge write_sge;
+        memset(&write_wr, 0, sizeof(write_wr));
 
-            write_wr.wr_id = 0;
-            write_wr.opcode = IBV_WR_RDMA_WRITE;
-            write_wr.sg_list = &write_sge;
-            write_wr.num_sge = 1;
-            write_wr.send_flags = 0;
-            write_wr.wr.rdma.remote_addr =
-                (uint64_t)cli_slice->rdma_conn->handshake_buf[1].base_addr + \
-                rdma_context->blockcnt_per_slice * cli_slice->wals_bdev->blocklen + \
-                sizeof(struct destage_info);
-            write_wr.wr.rdma.rkey = cli_slice->rdma_conn->handshake_buf[1].rkey;
+        write_wr.wr_id = 0;
+        write_wr.opcode = IBV_WR_RDMA_WRITE;
+        write_wr.sg_list = &write_sge;
+        write_wr.num_sge = 1;
+        write_wr.send_flags = 0;
+        write_wr.wr.rdma.remote_addr =
+            (uint64_t)remote_handshake->base_addr + \
+            remote_handshake->block_cnt * remote_handshake->block_size + \
+            sizeof(struct destage_info);
+        write_wr.wr.rdma.rkey = remote_handshake->rkey;
 
-            rdma_connection_construct_sge(cli_slice->rdma_conn,
-                &write_sge,
-                &g_commit_tail[cli_slice->id],
-                sizeof(struct destage_info));
+        rdma_connection_construct_sge(cli_slice->rdma_conn,
+            &write_sge,
+            &g_commit_tail[cli_slice->id],
+            sizeof(struct destage_info));
 
-            int rc = ibv_post_send(cli_slice->rdma_conn->cm_id->qp, &write_wr, &bad_write_wr);
-            if (rc != 0) {
-                SPDK_ERRLOG("post send failed\n");
-                continue;
-            }
+        int rc = ibv_post_send(cli_slice->rdma_conn->cm_id->qp, &write_wr, &bad_write_wr);
+        if (rc != 0) {
+            SPDK_ERRLOG("post send failed\n");
+            continue;
         }
     }
     return SPDK_POLLER_BUSY;
