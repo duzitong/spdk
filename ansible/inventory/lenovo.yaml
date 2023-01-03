@@ -1,0 +1,16 @@
+# Lenovo only has four nodes, hence share one node
+# between client and data nodes
+all:
+  children:
+    client:
+      hosts:
+        10.156.96.128: 
+    data_node:
+      hosts:
+        10.156.96.128:
+        10.156.96.129:
+        10.156.96.130:
+        10.156.96.131:
+  vars:
+    ansible_user: root
+    ansible_ssh_pass: User@123
