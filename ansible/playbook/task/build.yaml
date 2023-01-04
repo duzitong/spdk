@@ -7,6 +7,10 @@
   shell:
     cmd: git fetch
     chdir: spdk
+- name: fail when GIT_BRANCH is not defined
+  fail:
+    msg: GIT_BRANCH is not defined
+  when: not lookup('env', 'GIT_BRANCH')
 - name: checkout to the target branch and pull
   shell: 
     cmd: "{{ item }}"
