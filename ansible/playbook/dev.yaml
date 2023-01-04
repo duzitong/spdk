@@ -1,0 +1,10 @@
+- name: dev workflow
+  hosts: all
+  tasks:
+  - name: build
+    include_tasks:
+      file: task/build.yaml
+  
+  - name: run backend
+    include_tasks:
+      file: task/run-backend.yaml

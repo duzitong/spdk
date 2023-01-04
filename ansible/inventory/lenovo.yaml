@@ -5,12 +5,16 @@ all:
     client:
       hosts:
         10.156.96.128: 
-    data_node:
+    data_nodes:
       hosts:
         10.156.96.128:
         10.156.96.129:
         10.156.96.130:
         10.156.96.131:
+    mds:
+      hosts:
+    new_nodes:
+      hosts:
   vars:
     ansible_user: root
     ansible_ssh_pass: User@123

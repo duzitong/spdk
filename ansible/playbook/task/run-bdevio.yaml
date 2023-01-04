@@ -1,0 +1,5 @@
+- name: run binary
+  shell:
+    cmd: ./bdevio -c conf3.json -r /var/tmp/spdk2.sock &> log_io.txt
+    chdir: spdk/test/bdev/bdevio
+    executable: /bin/bash

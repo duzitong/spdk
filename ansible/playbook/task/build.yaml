@@ -1,0 +1,24 @@
+- name: clone the project if the folder doesn't exist
+  shell:
+    cmd: git clone https://github.com/duzitong/spdk.git
+  ignore_errors: true # new-node tasks may need to run multiple times
+  when: inventory_hostname in groups['new_nodes']
+- name: run git fetch
+  shell:
+    cmd: git fetch
+    chdir: spdk
+- name: checkout to the target branch and pull
+  shell: 
+    cmd: "{{ item }}"
+    chdir: spdk
+  with_items: 
+  - git checkout {{ lookup('env', 'GIT_BRANCH') }}
+  - git pull
+    # cmd: git checkout {{ lookup('env', 'GIT_BRANCH') }} && git pull
+- name: cleanup processes before build
+  include_tasks:
+    file: cleanup.yaml
+- name: run build
+  shell:
+    cmd: make
+    chdir: spdk
