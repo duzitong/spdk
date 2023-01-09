@@ -18,3 +18,10 @@
   - name: run bdevio
     include_tasks:
       file: task/run-bdevio.yaml
+
+- name: cleanup previous processes
+  hosts: data_nodes
+  tasks:
+  - name: run kill script
+    include_tasks:
+      file: task/cleanup.yaml

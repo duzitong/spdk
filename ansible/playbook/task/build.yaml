@@ -11,6 +11,9 @@
   fail:
     msg: GIT_BRANCH is not defined
   when: not lookup('env', 'GIT_BRANCH')
+- name: print GIT_BRANCH
+  debug:
+    msg: The target branch is {{ lookup('env', 'GIT_BRANCH') }}
 - name: checkout to the target branch and pull
   shell: 
     cmd: "{{ item }}"

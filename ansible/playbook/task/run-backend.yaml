@@ -3,7 +3,7 @@
     file: cleanup.yaml
 - name: run binary
   shell:
-    cmd: nohup ./build/bin/nvmf_tgt &> log.txt &
+    cmd: nohup ./build/bin/nvmf_tgt -m 0x10 &> log.txt &
     chdir: spdk
     executable: /bin/bash
 - name: run rpc script

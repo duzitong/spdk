@@ -32,6 +32,9 @@ static struct spdk_thread *g_thread_io;
 static bool g_wait_for_tests = false;
 static int g_num_failures = 0;
 static bool g_shutdown = false;
+static bool g_node_failure = false;
+static int g_long_running_seconds = 0;
+static unsigned int g_seed = 0;
 
 struct io_target {
 	struct spdk_bdev	*bdev;
@@ -1127,6 +1130,72 @@ blockdev_test_nvme_admin_passthru(void)
 	CU_ASSERT(pt_req.sc == SPDK_NVME_SC_SUCCESS);
 }
 
+static void 
+blockdev_test_long_running(void)
+{
+	struct io_target* target = g_current_io_target;
+	uint64_t start_ticks = spdk_get_ticks();
+	uint64_t end_ticks = start_ticks + g_long_running_seconds * spdk_get_ticks_hz();
+	unsigned int io_cnt = 0;
+	uint64_t bdev_block_cnt = spdk_bdev_get_num_blocks(target->bdev);
+	uint64_t bdev_block_size = spdk_bdev_get_block_size(target->bdev);
+
+	if (bdev_block_size != 512) {
+		// TODO: support more block size
+		printf("Long running task only support 512B\n");
+		return;
+	}
+
+	if (bdev_block_cnt < 1024 * 1024 * 2) {
+		printf("Long running target should have at least 1GB\n");
+		return;
+	}
+
+	// One byte (char) for each block to save space
+	// against 512B * (1024 * 1024 * 2)
+	bdev_block_cnt = 1024 * 1024 * 2;
+	char patterns[1024 * 1024 * 2];
+	memset(patterns, 0, sizeof(patterns));
+
+	// 512B, 4K, 8K, 16K, 32K, 64K, 1M, 2M
+	int block_cnt_arr[] = {1, 8, 16, 21, 64, 128, 1024 * 2, 1024 * 4};
+
+	srand(g_seed);
+	while (true) {
+		if (spdk_get_ticks() >= end_ticks) {
+			break;
+		}
+
+		int block_cnt = block_cnt_arr[rand() % SPDK_COUNTOF(block_cnt_arr)];
+		// TODO: qd can be random between 1 and 32.
+		int qd = 1;
+
+		for (int q = 0; q < qd; q++) {
+			// bool is_read = rand() % 2 == 1;
+			bool is_read = true;
+			int offset = rand() % (bdev_block_cnt - block_cnt);
+			char* buf = NULL;
+			char pattern = is_read ? 0 : rand() % 128;
+			initialize_buffer(&buf, pattern, block_cnt * bdev_block_size);
+			if (!is_read) {
+				printf("Submitting write\n");
+				memset(&patterns[offset], pattern, block_cnt);
+				blockdev_write(target, buf, offset * bdev_block_size, block_cnt * bdev_block_size, 0);
+			}
+			else {
+				printf("Submitting read\n");
+				blockdev_read(target, buf, offset * bdev_block_size, block_cnt * bdev_block_size, 0);
+
+				for (int i = 0; i < block_cnt; i++) {
+					for (int j = 0; j < bdev_block_size; j++) {
+						CU_ASSERT(buf[i * bdev_block_size + j] == patterns[offset + i]);
+					}
+				}
+			}
+		}
+	}
+}
+
 static void
 __stop_init_thread(void *arg)
 {
@@ -1235,6 +1304,16 @@ __setup_ut_on_single_target(struct io_target *target)
 		rc = CU_get_error();
 		return -rc;
 	}
+
+	if (g_long_running_seconds > 0) {
+		// TODO: add long running tests
+		if (CU_add_test(suite, "blockdev long running test", blockdev_test_long_running) == NULL) {
+			CU_cleanup_registry();
+			rc = CU_get_error();
+			return -rc;
+		}
+	}
+
 	return 0;
 }
 
@@ -1275,6 +1354,11 @@ __construct_targets(void *arg)
 	if (bdevio_construct_targets() < 0) {
 		spdk_app_stop(-1);
 		return;
+	}
+
+	// wait for one node to go down
+	if (g_node_failure) {
+		sleep(30);
 	}
 
 	spdk_thread_send_msg(g_thread_ut, __run_ut_thread, NULL);
@@ -1324,6 +1408,7 @@ static void
 bdevio_usage(void)
 {
 	printf(" -w                        start bdevio app and wait for RPC to start the tests\n");
+	printf(" -N                        wait for 30s to kill a node before starting the tests\n");
 }
 
 static int
@@ -1332,6 +1417,12 @@ bdevio_parse_arg(int ch, char *arg)
 	switch (ch) {
 	case 'w':
 		g_wait_for_tests =  true;
+		break;
+	case 'N':
+		g_node_failure = true;
+		break;
+	case 't':
+		g_long_running_seconds = spdk_strtoll(optarg, 10);
 		break;
 	default:
 		return -EINVAL;
@@ -1439,7 +1530,7 @@ main(int argc, char **argv)
 	opts.reactor_mask = "0x7";
 	opts.shutdown_cb = spdk_bdevio_shutdown_cb;
 
-	if ((rc = spdk_app_parse_args(argc, argv, &opts, "w", NULL,
+	if ((rc = spdk_app_parse_args(argc, argv, &opts, "wNt:", NULL,
 				      bdevio_parse_arg, bdevio_usage)) !=
 	    SPDK_APP_PARSE_ARGS_SUCCESS) {
 		return rc;

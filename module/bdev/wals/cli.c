@@ -442,8 +442,8 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
         data,
         cnt * slice->wals_bdev->blocklen);
 
-    // SPDK_NOTICELOG("READ %p %p %p %p %ld %ld %ld %ld\n", wals_io, data, data + sge.length, wr.wr.rdma.remote_addr,
-    //     cnt, offset, slice->wals_bdev->blocklen, sge.lkey);
+    SPDK_NOTICELOG("READ %p %p %p %p %ld %ld %ld %ld\n", wals_io, data, data + sge.length, wr.wr.rdma.remote_addr,
+        cnt, offset, slice->wals_bdev->blocklen, sge.lkey);
     
     rc = ibv_post_send(slice->rdma_conn->cm_id->qp, &wr, &bad_wr);
     if (rc != 0) {
@@ -460,7 +460,7 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
 static void cli_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
 	struct wals_bdev_io *io = ref;
 	if (spdk_nvme_cpl_is_success(cpl)) {
-		// SPDK_NOTICELOG("read successful\n");
+		SPDK_NOTICELOG("read successful\n");
         wals_target_read_complete(io, true);
 	}
 	else {
@@ -473,7 +473,7 @@ static void cli_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
 static int
 cli_submit_core_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
-    // SPDK_NOTICELOG("Reading from disk %ld %ld\n", offset, cnt);
+    SPDK_NOTICELOG("Reading from disk %ld %ld\n", offset, cnt);
     int rc;
     struct wals_cli_slice* slice = target->private_info;
     uint64_t multiplier = slice->wals_bdev->bdev.blocklen / spdk_nvme_ns_get_sector_size(slice->nvmf_conn->ns);
@@ -589,7 +589,7 @@ cli_register_write_pollers(struct wals_target *target, struct wals_bdev *wals_bd
         g_rdma_cq_poller = SPDK_POLLER_REGISTER(rdma_cq_poller, wals_bdev, 0);
     }
     if (g_destage_info_poller == NULL) {
-        g_destage_info_poller = SPDK_POLLER_REGISTER(slice_destage_info_poller, NULL, 200);
+        g_destage_info_poller = SPDK_POLLER_REGISTER(slice_destage_info_poller, NULL, 2000);
     }
     return 0;
 }
@@ -661,6 +661,7 @@ nvmf_cli_connection_poller(void* ctx) {
 }
 
 static int slice_destage_info_poller(void* ctx) {
+    SPDK_NOTICELOG("In destage info poller\n");
     // the first struct is the destage tail of the target node that the CLI should 
     // RDMA read.
     // the second struct is the commit tail of the slice that the CLI should RDMA write.
@@ -693,15 +694,17 @@ static int slice_destage_info_poller(void* ctx) {
 
             int rc = ibv_post_send(cli_slice->rdma_conn->cm_id->qp, &read_wr, &bad_read_wr);
             if (rc != 0) {
-                SPDK_ERRLOG("post send failed\n");
+                SPDK_ERRLOG("post send read failed for slice %d: error %d\n",
+                    cli_slice->id,
+                    rc);
                 continue;
             }
         } 
         else if (g_destage_tail[cli_slice->id].checksum == 0) {
             // RDMA read is successful
             // update and set the checksum back
-            // SPDK_NOTICELOG("Read destage tail %ld %ld\n", g_destage_tail[cli_slice->id].offset,
-            //     g_destage_tail[cli_slice->id].round);
+            SPDK_NOTICELOG("Read destage tail %ld %ld\n", g_destage_tail[cli_slice->id].offset,
+                g_destage_tail[cli_slice->id].round);
             cli_slice->wals_target->head.offset = g_destage_tail[cli_slice->id].offset;
             cli_slice->wals_target->head.round = g_destage_tail[cli_slice->id].round;
             g_destage_tail[cli_slice->id].checksum = DESTAGE_INFO_CHECKSUM;
@@ -735,7 +738,9 @@ static int slice_destage_info_poller(void* ctx) {
 
         int rc = ibv_post_send(cli_slice->rdma_conn->cm_id->qp, &write_wr, &bad_write_wr);
         if (rc != 0) {
-            SPDK_ERRLOG("post send failed\n");
+            SPDK_ERRLOG("post send write failed for slice %d: error %d\n",
+                cli_slice->id,
+                rc);
             continue;
         }
     }
