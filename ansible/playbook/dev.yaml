@@ -1,10 +1,13 @@
-- name: dev workflow
+- name: make
   hosts: all
   tasks:
   - name: build
     include_tasks:
       file: task/build.yaml
   
+- name: run backend
+  hosts: data_nodes
+  tasks:
   - name: run backend
     include_tasks:
       file: task/run-backend.yaml
