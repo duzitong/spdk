@@ -17,4 +17,3 @@ all:
       hosts:
   vars:
     ansible_user: root
-    ansible_ssh_pass: User@123
