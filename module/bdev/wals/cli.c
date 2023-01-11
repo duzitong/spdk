@@ -442,8 +442,8 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
         data,
         cnt * slice->wals_bdev->blocklen);
 
-    SPDK_NOTICELOG("READ %p %p %p %p %ld %ld %ld %ld\n", wals_io, data, data + sge.length, wr.wr.rdma.remote_addr,
-        cnt, offset, slice->wals_bdev->blocklen, sge.lkey);
+    // SPDK_NOTICELOG("READ %p %p %p %p %ld %ld %ld %ld\n", wals_io, data, data + sge.length, wr.wr.rdma.remote_addr,
+    //     cnt, offset, slice->wals_bdev->blocklen, sge.lkey);
     
     rc = ibv_post_send(slice->rdma_conn->cm_id->qp, &wr, &bad_wr);
     if (rc != 0) {
@@ -460,7 +460,7 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
 static void cli_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
 	struct wals_bdev_io *io = ref;
 	if (spdk_nvme_cpl_is_success(cpl)) {
-		SPDK_NOTICELOG("read successful\n");
+		// SPDK_NOTICELOG("read successful\n");
         wals_target_read_complete(io, true);
 	}
 	else {
@@ -473,7 +473,7 @@ static void cli_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
 static int
 cli_submit_core_read_request(struct wals_target* target, void *data, uint64_t offset, uint64_t cnt, struct wals_bdev_io *wals_io)
 {
-    SPDK_NOTICELOG("Reading from disk %ld %ld\n", offset, cnt);
+    // SPDK_NOTICELOG("Reading from disk %ld %ld\n", offset, cnt);
     int rc;
     struct wals_cli_slice* slice = target->private_info;
     uint64_t multiplier = slice->wals_bdev->bdev.blocklen / spdk_nvme_ns_get_sector_size(slice->nvmf_conn->ns);
@@ -588,18 +588,12 @@ cli_register_write_pollers(struct wals_target *target, struct wals_bdev *wals_bd
     if (g_rdma_cq_poller == NULL) {
         g_rdma_cq_poller = SPDK_POLLER_REGISTER(rdma_cq_poller, wals_bdev, 0);
     }
-    if (g_destage_info_poller == NULL) {
-        g_destage_info_poller = SPDK_POLLER_REGISTER(slice_destage_info_poller, NULL, 2000);
-    }
     return 0;
 }
 
 static int
 cli_unregister_write_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
 {
-    if (g_destage_info_poller != NULL) {
-        spdk_poller_unregister(&g_destage_info_poller);
-    }
     if (g_rdma_cq_poller != NULL) {
         spdk_poller_unregister(&g_rdma_cq_poller);
     }
@@ -612,6 +606,9 @@ cli_register_read_pollers(struct wals_target *target, struct wals_bdev *wals_bde
     if (g_nvmf_cq_poller == NULL) {
         g_nvmf_cq_poller = SPDK_POLLER_REGISTER(nvmf_cq_poller, wals_bdev, 0);
     }
+    if (g_destage_info_poller == NULL) {
+        g_destage_info_poller = SPDK_POLLER_REGISTER(slice_destage_info_poller, NULL, 2000);
+    }
     return 0;
 }
 
@@ -620,6 +617,9 @@ cli_unregister_read_pollers(struct wals_target *target, struct wals_bdev *wals_b
 {
     if (g_nvmf_cq_poller != NULL) {
         spdk_poller_unregister(&g_nvmf_cq_poller);
+    }
+    if (g_destage_info_poller != NULL) {
+        spdk_poller_unregister(&g_destage_info_poller);
     }
     return 0;
 }
@@ -661,7 +661,6 @@ nvmf_cli_connection_poller(void* ctx) {
 }
 
 static int slice_destage_info_poller(void* ctx) {
-    SPDK_NOTICELOG("In destage info poller\n");
     // the first struct is the destage tail of the target node that the CLI should 
     // RDMA read.
     // the second struct is the commit tail of the slice that the CLI should RDMA write.
@@ -683,7 +682,7 @@ static int slice_destage_info_poller(void* ctx) {
             read_wr.opcode = IBV_WR_RDMA_READ;
             read_wr.sg_list = &read_sge;
             read_wr.num_sge = 1;
-            read_wr.send_flags = 0;
+            read_wr.send_flags = IBV_SEND_SIGNALED;
             read_wr.wr.rdma.remote_addr = (uint64_t)remote_handshake->base_addr + remote_handshake->block_cnt * remote_handshake->block_size;
             read_wr.wr.rdma.rkey = remote_handshake->rkey;
 
@@ -703,8 +702,8 @@ static int slice_destage_info_poller(void* ctx) {
         else if (g_destage_tail[cli_slice->id].checksum == 0) {
             // RDMA read is successful
             // update and set the checksum back
-            SPDK_NOTICELOG("Read destage tail %ld %ld\n", g_destage_tail[cli_slice->id].offset,
-                g_destage_tail[cli_slice->id].round);
+            // SPDK_NOTICELOG("Read destage tail %ld %ld\n", g_destage_tail[cli_slice->id].offset,
+            //     g_destage_tail[cli_slice->id].round);
             cli_slice->wals_target->head.offset = g_destage_tail[cli_slice->id].offset;
             cli_slice->wals_target->head.round = g_destage_tail[cli_slice->id].round;
             g_destage_tail[cli_slice->id].checksum = DESTAGE_INFO_CHECKSUM;
@@ -724,7 +723,7 @@ static int slice_destage_info_poller(void* ctx) {
         write_wr.opcode = IBV_WR_RDMA_WRITE;
         write_wr.sg_list = &write_sge;
         write_wr.num_sge = 1;
-        write_wr.send_flags = 0;
+        write_wr.send_flags = IBV_SEND_SIGNALED;
         write_wr.wr.rdma.remote_addr =
             (uint64_t)remote_handshake->base_addr + \
             remote_handshake->block_cnt * remote_handshake->block_size + \
@@ -766,8 +765,9 @@ rdma_cq_poller(void* ctx) {
 					if (wc_buf[j].status != IBV_WC_SUCCESS) {
                         // TODO: should set the qp state to error, or reconnect?
                         if (rdma_context->io_fail_cnt % 10000 == 0) {
-                            SPDK_ERRLOG("IO %p RDMA op %d failed with status %d\n",
+                            SPDK_ERRLOG("IO (%p, %d) RDMA op %d failed with status %d\n",
                                 io,
+                                i,
                                 wc_buf[j].opcode,
                                 wc_buf[j].status);
                         }
@@ -782,7 +782,6 @@ rdma_cq_poller(void* ctx) {
                         continue;
                     }
 
-
                     if (wc_buf[j].opcode == IBV_WC_RDMA_READ) {
                         wals_target_read_complete(io, success);
                     }
@@ -795,7 +794,7 @@ rdma_cq_poller(void* ctx) {
                             ) % PENDING_IO_MAX_CNT;
                         }
                         else {
-                            SPDK_NOTICELOG("Ignoring io %p due to already timeout\n", io);
+                            SPDK_NOTICELOG("Ignoring io (%p, %d) due to already timeout\n", io, i);
                         }
                     }
                 }
@@ -816,7 +815,7 @@ rdma_cq_poller(void* ctx) {
             ) {
                 // timeout.
                 struct wals_bdev_io* timeout_io = rdma_context->pending_write_io_queue.pending_ios[j].io;
-                SPDK_NOTICELOG("IO %p timeout\n", timeout_io);
+                SPDK_NOTICELOG("IO (%p, %d) timeout\n", timeout_io, i);
                 wals_target_write_complete(timeout_io, false);
             }
             else {
