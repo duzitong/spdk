@@ -15,6 +15,7 @@
 #include "spdk/rpc.h"
 #include "spdk/util.h"
 #include "spdk/string.h"
+#include "spdk/memory.h"
 
 #include "bdev_internal.h"
 #include "CUnit/Basic.h"
@@ -42,9 +43,17 @@ static unsigned int g_seed = 0;
 // only IO thread is allowed to modify it within the loop
 static int g_remaining_io = 0;
 // 512B, 4K, 8K, 16K, 32K, 64K, 1M, 2M
-static const int block_cnt_arr[] = {1, 8, 16, 21, 64, 128, 1024 * 2, 1024 * 4};
+static const int block_cnt_arr[] = {1, 8, 16, 32, 64, 128, 1024 * 2, 1024 * 4};
 static int g_write_id = 1;
 static uint64_t last_written_id[DEFAULT_BLOCK_CNT];
+
+enum io_failure_reason {
+	IO_FAILURE_NO_FAILURE,
+	IO_FAILURE_BLOCK_INCONSISTENT,
+	IO_FAILURE_OUTDATED,
+	IO_FAILURE_UNWRITTEN,
+	IO_FAILURE_UNEXPECTED_READ_FAIL,
+};
 
 struct io_target {
 	struct spdk_bdev	*bdev;
@@ -92,17 +101,8 @@ initialize_buffer(char **buf, int pattern, int size)
 	memset(*buf, pattern, size);
 }
 
-static void
-initialize_buffer_u64(uint64_t **buf, uint64_t pattern, int size)
-{
-	*buf = spdk_zmalloc(size, 0x1000, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-	for (unsigned i = 0; i < size / sizeof(uint64_t); i++) {
-		(*buf)[i] = pattern;
-	}
-}
-
 static struct io_test_batch*
-io_test_batch_alloc(int qd) {
+io_test_batch_alloc(int qd, void* buf) {
 	struct io_test_unit* elements = calloc(qd, sizeof(struct io_test_unit));
 	for (int i = 0; i < qd; i++) {
 		elements[i].is_write = rand() & 1;
@@ -113,10 +113,13 @@ io_test_batch_alloc(int qd) {
 		elements[i].block_cnt = block_cnt_arr[rand() % SPDK_COUNTOF(block_cnt_arr)];
 		elements[i].offset = rand() % (DEFAULT_BLOCK_CNT - elements[i].block_cnt);
 		elements[i].result = false;
-		initialize_buffer_u64(
-			&elements[i].buf,
-			elements[i].write_id,
-			elements[i].block_cnt * DEFAULT_BLOCK_SIZE);
+		elements[i].buf = buf;
+		
+		// write_id is 0 for read requests
+		for (unsigned j = 0; j < elements[i].block_cnt * DEFAULT_BLOCK_SIZE / sizeof(uint64_t); j++) {
+			((uint64_t*)elements[i].buf)[j] = elements[i].write_id;
+		}
+		buf += elements[i].block_cnt * DEFAULT_BLOCK_SIZE;
 	}
 
 	struct io_test_batch* batch = calloc(1, sizeof(struct io_test_batch));
@@ -126,9 +129,10 @@ io_test_batch_alloc(int qd) {
 }
 
 static void io_test_batch_free(struct io_test_batch* batch) {
-	for (int i = 0; i < batch->qd; i++) {
-		spdk_free(batch->elements[i].buf);
-	}
+	// for (int i = 0; i < batch->qd; i++) {
+	// 	spdk_free(batch->elements[i].buf);
+	// }
+	free(batch->elements);
 	free(batch);
 }
 
@@ -278,6 +282,7 @@ quick_test_complete_many(struct spdk_bdev_io *bdev_io, bool success, void *arg)
 {
 	struct io_test_unit* io = arg;
 	io->result = success;
+	// printf("IO %d %d %d state %d\n", io->write_id, io->offset, io->block_cnt, success);
 	g_remaining_io--;
 	spdk_bdev_free_io(bdev_io);
 	if (g_remaining_io == 0) {
@@ -318,19 +323,15 @@ __blockdev_write(void *arg)
 static void
 __blockdev_write_many(void *arg)
 {
-	struct bdevio_request *req = arg;
-	struct io_target *target = req->target;
+	struct io_test_unit *io = arg;
 	int rc;
 
-	if (req->iovcnt) {
-		rc = spdk_bdev_writev(target->bdev_desc, target->ch, req->iov, req->iovcnt, req->offset,
-				      req->data_len, quick_test_complete_many, req->io);
-	} else {
-		rc = spdk_bdev_write(target->bdev_desc, target->ch, req->buf, req->offset,
-				     req->data_len, quick_test_complete_many, req->io);
-	}
+	// printf("Submit IO %p %p %d %d %d\n", io, io->buf, io->write_id, io->offset, io->block_cnt);
+	rc = spdk_bdev_write(g_current_io_target->bdev_desc, g_current_io_target->ch, io->buf, io->offset * DEFAULT_BLOCK_SIZE,
+					io->block_cnt * DEFAULT_BLOCK_SIZE, quick_test_complete_many, io);
 
 	if (rc) {
+		printf("Call bdev write failed with %d\n", rc);
 		g_remaining_io--;
 		if (g_remaining_io == 0) {
 			wake_ut_thread();
@@ -444,16 +445,7 @@ static void
 blockdev_write_many(struct io_target *target, char *tx_buf,
 	       uint64_t offset, int data_len, int iov_len, bool is_final, struct io_test_unit* io)
 {
-	struct bdevio_request req;
-
-	req.target = target;
-	req.buf = tx_buf;
-	req.data_len = data_len;
-	req.offset = offset;
-	req.io = io;
-	sgl_chop_buffer(&req, iov_len);
-
-	execute_spdk_function_many(__blockdev_write_many, &req, is_final);
+	execute_spdk_function_many(__blockdev_write_many, io, is_final);
 }
 
 static void
@@ -515,19 +507,15 @@ __blockdev_read(void *arg)
 static void
 __blockdev_read_many(void *arg)
 {
-	struct bdevio_request *req = arg;
-	struct io_target *target = req->target;
+	struct io_test_unit *io = arg;
 	int rc;
 
-	if (req->iovcnt) {
-		rc = spdk_bdev_readv(target->bdev_desc, target->ch, req->iov, req->iovcnt, req->offset,
-				     req->data_len, quick_test_complete_many, req->io);
-	} else {
-		rc = spdk_bdev_read(target->bdev_desc, target->ch, req->buf, req->offset,
-				    req->data_len, quick_test_complete_many, req->io);
-	}
+		// printf("Submit IO %p %d %d %d\n", req->io, req->io->write_id, req->io->offset, req->io->block_cnt);
+	rc = spdk_bdev_read(g_current_io_target->bdev_desc, g_current_io_target->ch, io->buf, io->offset * DEFAULT_BLOCK_SIZE,
+				io->block_cnt * DEFAULT_BLOCK_SIZE, quick_test_complete_many, io);
 
 	if (rc) {
+		printf("Call bdev read failed with %d\n", rc);
 		g_remaining_io--;
 		if (g_remaining_io == 0) {
 			wake_ut_thread();
@@ -557,19 +545,7 @@ static void
 blockdev_read_many(struct io_target *target, char *rx_buf,
 	      uint64_t offset, int data_len, int iov_len, bool is_final, struct io_test_unit* io)
 {
-	struct bdevio_request req;
-
-	req.target = target;
-	req.buf = rx_buf;
-	req.data_len = data_len;
-	req.offset = offset;
-	req.iovcnt = 0;
-	req.io = io;
-	sgl_chop_buffer(&req, iov_len);
-
-	g_completion_success = false;
-
-	execute_spdk_function_many(__blockdev_read_many, &req, is_final);
+	execute_spdk_function_many(__blockdev_read_many, io, is_final);
 }
 
 static int
@@ -1311,11 +1287,15 @@ static void
 blockdev_test_long_running(void)
 {
 	struct io_target* target = g_current_io_target;
-	uint64_t start_ticks = spdk_get_ticks();
-	uint64_t end_ticks = start_ticks + g_long_running_seconds * spdk_get_ticks_hz();
 	unsigned int io_cnt = 0;
 	uint64_t bdev_block_cnt = spdk_bdev_get_num_blocks(target->bdev);
 	uint64_t bdev_block_size = spdk_bdev_get_block_size(target->bdev);
+	enum io_failure_reason failure_reason = IO_FAILURE_NO_FAILURE;
+	void* buf = spdk_zmalloc(MAX_QD * DEFAULT_BLOCK_SIZE * block_cnt_arr[SPDK_COUNTOF(block_cnt_arr) - 1],
+		0x1000,
+		NULL,
+		SPDK_ENV_LCORE_ID_ANY,
+		SPDK_MALLOC_DMA);
 
 	if (bdev_block_size != DEFAULT_BLOCK_SIZE) {
 		// TODO: support more block size
@@ -1331,14 +1311,23 @@ blockdev_test_long_running(void)
 	// One byte (char) for each block to save space
 	// against 512B * (1024 * 1024 * 2)
 	bdev_block_cnt = DEFAULT_BLOCK_CNT;
-	// char patterns[DEFAULT_BLOCK_CNT];
-	// bool can_read[DEFAULT_BLOCK_CNT];
-	// memset(patterns, 0, sizeof(patterns));
-	// for (int i = 0; i < DEFAULT_BLOCK_CNT; i++) {
-	// 	// 0 means cannot read.
-	// 	last_written_id[i] = 0;
-	// 	// can_read[i] = false;
-	// }
+
+	void* init_buf = NULL;
+	int init_block_cnt = block_cnt_arr[SPDK_COUNTOF(block_cnt_arr) - 1];
+	initialize_buffer(&init_buf, 0, init_block_cnt * DEFAULT_BLOCK_SIZE);
+
+	for (int i = 0;
+		i < DEFAULT_BLOCK_CNT / init_block_cnt;
+		i++) {
+		blockdev_write(target,
+			init_buf,
+			i * init_block_cnt * DEFAULT_BLOCK_SIZE,
+			init_block_cnt * DEFAULT_BLOCK_SIZE,
+			0);
+	}
+
+	uint64_t start_ticks = spdk_get_ticks();
+	uint64_t end_ticks = start_ticks + g_long_running_seconds * spdk_get_ticks_hz();
 
 	srand(g_seed);
 	bool ok = true;
@@ -1359,13 +1348,14 @@ blockdev_test_long_running(void)
 
 		// TODO: qd can be random between 1 and 32.
 		int qd = 1 + (rand() % MAX_QD);
+		// printf("qd = %d\n", qd);
 		g_remaining_io = qd;
-		struct io_test_batch* batch = io_test_batch_alloc(qd);
+		struct io_test_batch* batch = io_test_batch_alloc(qd, buf);
 
 		for (int q = 0; q < qd; q++) {
 			bool is_final = q == (qd - 1);
 			if (batch->elements[q].is_write) {
-				// printf("Submitting write\n");
+				// printf("Submitting write %d %p\n", batch->elements[q].write_id, &batch->elements[q]);
 				// TODO: need to consider write fail
 				blockdev_write_many(
 					target,
@@ -1374,7 +1364,7 @@ blockdev_test_long_running(void)
 					batch->elements[q].block_cnt * bdev_block_size,
 					0,
 					is_final,
-					batch->elements + q);
+					&batch->elements[q]);
 			}
 			else {
 				blockdev_read_many(
@@ -1384,7 +1374,7 @@ blockdev_test_long_running(void)
 					batch->elements[q].block_cnt * bdev_block_size,
 					0,
 					is_final,
-					batch->elements + q);
+					&batch->elements[q]);
 			}
 		}
 
@@ -1400,6 +1390,7 @@ blockdev_test_long_running(void)
 						for (unsigned j = 1; j < DEFAULT_BLOCK_SIZE / sizeof(uint64_t); j++) {
 							if (cur_buf[j] != cur_buf[j - 1]) {
 								ok = false;
+								failure_reason = IO_FAILURE_BLOCK_INCONSISTENT;
 								goto end;
 							}
 						}
@@ -1408,6 +1399,7 @@ blockdev_test_long_running(void)
 						uint64_t cur_id = cur_buf[0];
 						if (cur_id < last_written_id[io->offset + i]) {
 							ok = false;
+							failure_reason = IO_FAILURE_OUTDATED;
 							goto end;
 						}
 
@@ -1426,6 +1418,7 @@ blockdev_test_long_running(void)
 							}
 							if (!found) {
 								ok = false;
+								failure_reason = IO_FAILURE_UNWRITTEN;
 								goto end;
 							}
 
@@ -1463,6 +1456,7 @@ blockdev_test_long_running(void)
 
 					if (!expected) {
 						ok = false;
+						failure_reason = IO_FAILURE_UNEXPECTED_READ_FAIL;
 						goto end;
 					}
 				}
@@ -1479,6 +1473,7 @@ blockdev_test_long_running(void)
 					}
 				}
 				else {
+					// printf("Write IO %d failed\n", io->write_id);
 					// check if there is newer successful write io.
 					// if there is not, then the block is not readable.
 					for (int i = 0; i < io->block_cnt; i++) {
@@ -1495,6 +1490,10 @@ blockdev_test_long_running(void)
 
 
 end:
+	if (!ok) {
+		printf("Failure reason is %d\n", failure_reason);
+	}
+	spdk_free(buf);
 	CU_ASSERT(ok);
 	return;
 }
