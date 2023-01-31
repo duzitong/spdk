@@ -1,0 +1,19 @@
+# Lab only has four nodes, hence share one node
+# between client and data nodes
+all:
+  children:
+    client:
+      hosts:
+        10.156.74.127: 
+    data_nodes:
+      hosts:
+        10.156.74.127:
+        10.156.73.219:
+        10.156.73.249:
+        10.156.72.87:
+    mds:
+      hosts:
+    new_nodes:
+      hosts:
+  vars:
+    ansible_user: root

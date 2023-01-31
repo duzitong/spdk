@@ -18,7 +18,8 @@
 #define MAX_SLICES 256
 // currently a fake one, to make sure that it fully RDMA reads the struct
 #define DESTAGE_INFO_CHECKSUM 666
-#define TIMEOUT_MS 10
+// 1ms should be enough for 512-byte payload.
+#define TIMEOUT_MS_PER_BLOCK 1
 
 enum nvmf_cli_status {
     NVMF_CLI_UNINITIALIZED,
@@ -802,11 +803,12 @@ rdma_cq_poller(void* ctx) {
         }
 
         uint64_t current_ticks = spdk_get_ticks();
-        uint64_t timeout_ticks = TIMEOUT_MS * spdk_get_ticks_hz() / 1000;
         int j;
         for (j = rdma_context->pending_write_io_queue.head;
             j != rdma_context->pending_write_io_queue.tail;
             j = (j + 1) % PENDING_IO_MAX_CNT) {
+            struct wals_bdev_io* timeout_io = rdma_context->pending_write_io_queue.pending_ios[j].io;
+            uint64_t timeout_ticks = TIMEOUT_MS_PER_BLOCK * timeout_io->orig_io->u.bdev.num_blocks * spdk_get_ticks_hz() / 1000;
 
             if (
                 rdma_context->pending_write_io_queue.pending_ios[j].ticks
@@ -814,7 +816,6 @@ rdma_cq_poller(void* ctx) {
                 < current_ticks
             ) {
                 // timeout.
-                struct wals_bdev_io* timeout_io = rdma_context->pending_write_io_queue.pending_ios[j].io;
                 SPDK_NOTICELOG("IO (%p, %d) timeout\n", timeout_io, i);
                 wals_target_write_complete(timeout_io, false);
             }

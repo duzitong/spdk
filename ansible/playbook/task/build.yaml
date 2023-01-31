@@ -21,6 +21,7 @@
   with_items: 
   - git checkout {{ lookup('env', 'GIT_BRANCH') }}
   - git pull
+  - git submodule update
     # cmd: git checkout {{ lookup('env', 'GIT_BRANCH') }} && git pull
 - name: cleanup processes before build
   include_tasks:
