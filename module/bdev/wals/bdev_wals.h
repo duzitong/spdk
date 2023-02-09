@@ -198,6 +198,8 @@ struct wals_lp_firo {
 };
 
 struct wals_target {
+	int id;
+
 	volatile uint64_t			log_blockcnt;
 
 	// BUG: need to be atomicly updated
