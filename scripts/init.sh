@@ -1,6 +1,7 @@
 #/bin/bash
 
 git submodule update --init
+apt update
 ./scripts/pkgdep.sh --all
 ./configure --with-rdma --with-virtio
 apt install -y nvme-cli
