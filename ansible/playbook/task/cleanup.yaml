@@ -1,0 +1,9 @@
+- name: run kill script
+  shell: 
+    cmd: "{{ item }}"
+    chdir: spdk
+    executable: /bin/bash
+  with_items: 
+  - ./kill.sh nvmf_tgt
+  - ./kill.sh bdevio
+  - ./kill.sh bdevperf

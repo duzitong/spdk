@@ -198,6 +198,8 @@ struct wals_lp_firo {
 };
 
 struct wals_target {
+	int id;
+
 	volatile uint64_t			log_blockcnt;
 
 	// BUG: need to be atomicly updated
@@ -211,10 +213,17 @@ struct wals_slice {
 
 	uint64_t					log_blockcnt;
 
+	// updated by write thread to point to the tail offset of 
+	// PMEM buffer.
 	wals_log_position			tail;
 
 	// BUG: need to be atomicly updated (RCU)
-	/* min(outstanding read requests offset, min(targets.offset)) */
+	// min(outstanding read requests offset, min(targets.offset))
+	// [head, tail] is the current PMEM buffer that is readable.
+	// head should only advance when there are no read PMEM IOs.
+	// 
+	// It should be the minimum of destage tail of all four data nodes, 
+	// because it can be useful for a data node to recover from other nodes.
 	volatile wals_log_position	head;
 
 	wals_log_position			committed_tail;
@@ -223,6 +232,7 @@ struct wals_slice {
 
 	struct wals_lp_firo			*write_firo;
 
+	// outstanding read requests offset
 	struct wals_lp_firo			*read_firo;
 };
 

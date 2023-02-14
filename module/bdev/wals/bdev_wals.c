@@ -628,8 +628,12 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 
 			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_R_T, 0, 0, (uintptr_t)wals_io, wals_io->target_index, 0);
 
-			ret = wals_bdev->module->submit_log_read_request(slice->targets[wals_io->target_index], buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
-															bn->ele->l.bdevOffset + read_cur - bn->ele->begin, tmp - read_cur + 1, checksum_offset, wals_io);
+			ret = wals_bdev->module->submit_log_read_request(slice->targets[wals_io->target_index],
+				buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
+				bn->ele->l.bdevOffset + read_cur - bn->ele->begin,
+				tmp - read_cur + 1,
+				checksum_offset,
+				wals_io);
 			
 			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_R_T, 0, 0, (uintptr_t)wals_io, wals_io->target_index, 0);
 
@@ -1645,6 +1649,7 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 				SPDK_ERRLOG("Failed to start target '%ld' in slice '%ld'.", j, i);
 				return -EFAULT;
 			}
+			wals_bdev->slices[i].targets[j]->id = j;
 			if (wals_bdev->slices[i].targets[j]->log_blockcnt < wals_bdev->slices[i].log_blockcnt) {
 				wals_bdev->slices[i].log_blockcnt = wals_bdev->slices[i].targets[j]->log_blockcnt;
 			}
@@ -1720,6 +1725,8 @@ wals_bdev_examine(struct spdk_bdev *bdev)
 	spdk_bdev_module_examine_done(&g_wals_if);
 }
 
+// log head update should only update to the minimum of outstanding read PMEM IOs.
+// In current implementation, only update when there are no outstanding read PMEM IOs.
 static int 
 wals_bdev_log_head_update(void *ctx)
 {

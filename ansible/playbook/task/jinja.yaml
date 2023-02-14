@@ -1,0 +1,14 @@
+- template:
+    src: ../templates/rpc.j2  # from ansible/playbook
+    dest: spdk/rpc-jinja.txt  # from /root/
+  when: inventory_hostname in groups['data_nodes']
+  vars:
+    local_ip: "{{ inventory_hostname }}"
+    data_nodes: "{{ groups['data_nodes'] }}"
+
+- template:
+    src: ../templates/bdevio.j2  # from ansible/playbook
+    dest: spdk/test/bdev/bdevio/conf-jinja.json  # from /root/
+  when: inventory_hostname in groups['client']
+  vars:
+    data_nodes: "{{ groups['data_nodes'] }}"

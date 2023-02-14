@@ -1,0 +1,40 @@
+{
+    "subsystems": [
+        {
+            "subsystem": "bdev",
+            "config": [
+                {
+                    "method": "bdev_wals_create",
+                    "params": {
+                        "name": "Wals1",
+                        "module": "cli",
+                        "blocklen": 512,
+                        "slice_blockcnt": 2097152,
+                        "buffer_blockcnt": 2097152,
+                        "write_lcore": 0,
+                        "read_lcore": 2,
+                        "slices": [
+                            [
+{% for remote_ip in data_nodes %}
+                                {
+                                    "log": {
+                                        "address": "{{ remote_ip }}",
+                                        "port": 8000,
+                                        "nqn": "10"
+                                    },
+                                    "core": {
+                                        "address": "{{ remote_ip }}",
+                                        "port": 4420,
+                                        "nqn": "nqn.2016-06.io.spdk:cnode1"
+                                    }
+                                }{% if not loop.last %},{% endif %}
+
+{% endfor %}
+                            ]
+                        ]
+                    }
+                }
+            ]
+        }
+    ]
+}
