@@ -1,6 +1,6 @@
 - name: run binary
   shell:
-    cmd: ./bdevio -c conf3.json -r /var/tmp/spdk2.sock -t 10 2>&1
+    cmd: ./bdevio -c conf-jinja.json -r /var/tmp/spdk2.sock -t 10 2>&1
     chdir: spdk/test/bdev/bdevio
     executable: /bin/bash
   register: result

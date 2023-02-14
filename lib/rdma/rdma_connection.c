@@ -60,6 +60,7 @@ struct rdma_connection* rdma_connection_alloc(
 		return NULL;
 	}
 	rdma_conn->server_addr = addr_res;
+	SPDK_NOTICELOG("Alloc rdma conn %p: (%s:%s, is_server=%d)\n", rdma_conn, ip, port, is_server);
 
     return rdma_conn;
 }
@@ -93,7 +94,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 					break;
 				}
 
-				SPDK_NOTICELOG("listening on port %d\n", ntohs(addr.sin_port));
+				SPDK_NOTICELOG("RDMA conn %p listening on port %d\n", rdma_conn, ntohs(addr.sin_port));
 				rdma_conn->status = RDMA_SERVER_LISTENING;
 			}
 			else {
@@ -129,7 +130,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				return -1;
 			}
 
-			SPDK_NOTICELOG("received conn request\n");
+			SPDK_NOTICELOG("RDMA conn %p received conn request\n", rdma_conn);
 
 			struct ibv_context* ibv_context = connect_event->id->verbs;
 			assert(ibv_context != NULL);
@@ -155,13 +156,13 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 			};
 
 			rc = rdma_create_qp(connect_event->id, NULL, &init_attr);
-			SPDK_NOTICELOG("rdma_create_qp returns %d\n", rc);
+			// SPDK_NOTICELOG("rdma_create_qp returns %d\n", rc);
 
 			// the original cm id becomes useless from here.
 			struct rdma_cm_id* child_cm_id = connect_event->id;
 			rc = rdma_ack_cm_event(connect_event);
 			rdma_conn->cm_id = child_cm_id;
-			SPDK_NOTICELOG("acked conn request\n");
+			SPDK_NOTICELOG("RDMA conn %p acked conn request\n", rdma_conn);
 
             rdma_connection_register(
 				rdma_conn,
@@ -237,7 +238,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				return -1;
 			}
 
-			SPDK_NOTICELOG("established. sending handshake ...\n");
+			SPDK_NOTICELOG("RDMA conn %p established. sending handshake ...\n", rdma_conn);
 			
 			struct ibv_send_wr send_wr, *bad_send_wr = NULL;
 			memset(&send_wr, 0, sizeof(send_wr));
@@ -261,7 +262,8 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				SPDK_ERRLOG("post send failed\n");
 				return 1;
 			}
-			SPDK_NOTICELOG("sent local addr %p rkey %d length %ld\n",
+			SPDK_NOTICELOG("RDMA conn %p sent local addr %p rkey %d length %ld\n",
+				rdma_conn,
 				rdma_conn->handshake_buf->base_addr,
 				rdma_conn->handshake_buf->rkey,
 				rdma_conn->handshake_buf->block_cnt * rdma_conn->handshake_buf->block_size);
@@ -290,7 +292,8 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 			if (wc.wr_id == 1) {
 				// recv complete
 				struct rdma_handshake* remote_handshake = rdma_conn->handshake_buf + 1;
-				SPDK_NOTICELOG("received remote addr %p rkey %d\n",
+				SPDK_NOTICELOG("RDMA conn %p received remote addr %p rkey %d\n",
+					rdma_conn,
 					remote_handshake->base_addr,
 					remote_handshake->rkey);
 
@@ -537,7 +540,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				// destroy all rdma resources and try again
 				rdma_conn->reject_cnt++;
 				if (rdma_conn->reject_cnt % 1000 == 1) {
-					SPDK_NOTICELOG("Rejected %d. Try again...\n", rdma_conn->reject_cnt);
+					SPDK_NOTICELOG("RDMA conn %p Rejected %d. Try again...\n", rdma_conn, rdma_conn->reject_cnt);
 				}
 				rdma_connection_free(rdma_conn);
 
