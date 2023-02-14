@@ -8,5 +8,5 @@
     executable: /bin/bash
 - name: run rpc script
   shell:
-    cmd: ./scripts/rpc.py < rpc.txt
+    cmd: ./scripts/rpc.py < rpc-jinja.txt
     chdir: spdk
