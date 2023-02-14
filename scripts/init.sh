@@ -5,6 +5,7 @@ apt update
 ./scripts/pkgdep.sh --all
 ./configure --with-rdma --with-virtio
 apt install -y nvme-cli
+apt install -y sshpass
 pip3 install --upgrade ansible
 
 ./scripts/setup.sh status > tmp.txt

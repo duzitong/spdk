@@ -1,0 +1,12 @@
+{% set local_idx = data_nodes.index(local_ip) %}
+bdev_persist_create -b Malloc0 -a {{ local_ip }} -p 8000 --peers '[
+{%- for remote_ip in data_nodes if remote_ip != local_ip -%}
+    {# Cannot use loop.index0, as the local_ip is skipped. However, loop.last turns out to be safe. #} 
+    {%- set remote_idx = data_nodes.index(remote_ip) -%}
+    {%- set port = 8001 + (local_idx + remote_idx - 3)|abs -%}
+    {"remote_ip": "{{ remote_ip }}", "remote_port": "{{ port }}", "local_port": "{{ port }}"}{% if not loop.last %}, {% endif %}
+{%- endfor -%}]'
+nvmf_create_transport -t RDMA
+nvmf_create_subsystem nqn.2016-06.io.spdk:cnode1 -a -s SPDK00000000000001 -d SPDK_Controller1
+nvmf_subsystem_add_ns nqn.2016-06.io.spdk:cnode1 Malloc0
+nvmf_subsystem_add_listener nqn.2016-06.io.spdk:cnode1 -t rdma -a {{ local_ip }} -s 4420

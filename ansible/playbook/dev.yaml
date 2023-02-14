@@ -1,13 +1,20 @@
-- name: make
-  hosts: all
-  tasks:
-  - name: build
-    include_tasks:
-      file: task/build.yaml
+# - name: make
+#   hosts: all
+#   tasks:
+#   - name: build
+#     include_tasks:
+#       file: task/build.yaml
   
-- name: run backend
+- name: gen
   hosts: data_nodes
   tasks:
-  - name: run backend
+  - name: gen
     include_tasks:
-      file: task/run-backend.yaml
+      file: task/jinja.yaml
+
+# - name: run backend
+#   hosts: data_nodes
+#   tasks:
+#   - name: run backend
+#     include_tasks:
+#       file: task/run-backend.yaml
