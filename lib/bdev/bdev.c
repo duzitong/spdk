@@ -1933,8 +1933,9 @@ bdev_channel_get_io(struct spdk_bdev_channel *channel)
 		bdev_io = spdk_mempool_get(g_bdev_mgr.bdev_io_pool);
 	}
 
-	bdev_io->free_called = false;
-	bdev_io->free_deferred = false;
+	if (bdev_io != NULL) {
+		bdev_io->can_free = true;
+	}
 
 	return bdev_io;
 }
@@ -1976,8 +1977,7 @@ _spdk_bdev_free_io(struct spdk_bdev_io *bdev_io)
 
 void spdk_bdev_free_io(struct spdk_bdev_io *bdev_io)
 {
-	bdev_io->free_called = true;
-	if (!bdev_io->free_deferred) {
+	if (bdev_io->can_free) {
 		_spdk_bdev_free_io(bdev_io);
 	}
 }

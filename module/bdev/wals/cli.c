@@ -19,7 +19,7 @@
 // currently a fake one, to make sure that it fully RDMA reads the struct
 #define DESTAGE_INFO_CHECKSUM 666
 // 1ms should be enough for 512-byte payload.
-#define TIMEOUT_MS_PER_BLOCK 1
+#define TIMEOUT_MS_PER_BLOCK 5
 
 enum nvmf_cli_status {
     NVMF_CLI_UNINITIALIZED,
@@ -681,6 +681,7 @@ cli_register_write_pollers(struct wals_target *target, struct wals_bdev *wals_bd
 
     for (int target_id = 0; target_id < NUM_TARGETS; target_id++) {
         if (g_pending_write_io_queue[target_id].poller == NULL) {
+            g_pending_write_io_queue[target_id].target_id = target_id;
             g_pending_write_io_queue[target_id].io_type = WALS_RDMA_WRITE;
             g_pending_write_io_queue[target_id].poller = SPDK_POLLER_REGISTER(
                 pending_io_timeout_poller,
@@ -727,6 +728,7 @@ cli_register_read_pollers(struct wals_target *target, struct wals_bdev *wals_bde
 
     for (int target_id = 0; target_id < NUM_TARGETS; target_id++) {
         if (g_pending_read_io_queue[target_id].poller == NULL) {
+            g_pending_read_io_queue[target_id].target_id = target_id;
             g_pending_read_io_queue[target_id].io_type = WALS_RDMA_READ;
             g_pending_read_io_queue[target_id].poller = SPDK_POLLER_REGISTER(
                 pending_io_timeout_poller,
@@ -734,6 +736,7 @@ cli_register_read_pollers(struct wals_target *target, struct wals_bdev *wals_bde
                 1000);
         }
         if (g_pending_nvmf_read_io_queue[target_id].poller == NULL) {
+            g_pending_nvmf_read_io_queue[target_id].target_id = target_id;
             g_pending_nvmf_read_io_queue[target_id].io_type = WALS_NVMF_READ;
             g_pending_nvmf_read_io_queue[target_id].poller = SPDK_POLLER_REGISTER(
                 pending_io_timeout_poller,
@@ -973,7 +976,16 @@ pending_io_timeout_poller(void* ctx) {
 
         if (timeout_ticks < current_ticks) {
             // timeout.
-            SPDK_NOTICELOG("IO (%p, %d) timeout\n", io, io_queue->target_id);
+            SPDK_NOTICELOG("IO (%p, %p, %p %d, %d, %d, %d, %d, %d) timeout\n",
+                io,
+                io->orig_io,
+                io_queue,
+                io_queue->target_id,
+                io_queue->io_type,
+                io->orig_io->u.bdev.num_blocks,
+                io_queue->head,
+                io_queue->tail,
+                j);
             switch (io_queue->io_type) {
                 case WALS_RDMA_WRITE:
                     wals_target_write_complete(io, false);

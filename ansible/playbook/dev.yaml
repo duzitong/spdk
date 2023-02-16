@@ -1,5 +1,6 @@
 - name: make
   hosts: all
+  any_errors_fatal: true
   tasks:
   - name: build
     include_tasks:
@@ -7,6 +8,7 @@
   
 - name: gen
   hosts: data_nodes
+  any_errors_fatal: true
   tasks:
   - name: gen
     include_tasks:
@@ -14,6 +16,7 @@
 
 - name: run backend
   hosts: data_nodes
+  any_errors_fatal: true
   tasks:
   - name: run backend
     include_tasks:

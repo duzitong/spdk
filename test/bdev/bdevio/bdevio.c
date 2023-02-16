@@ -1407,6 +1407,8 @@ blockdev_test_long_running(void)
 						// a) last written id of the previous batches
 						// b) the id of any write io in the batch; if the write io fails,
 						// then set it to be successful.
+						// c) if last_written_id is zero, then normally it shouldn't be 
+						// successful. One corner case is that
 						if (cur_id != last_written_id[io->offset + i]) {
 							bool found = false;
 							for (int j = 0; j < qd; j++) {
@@ -1473,7 +1475,7 @@ blockdev_test_long_running(void)
 					}
 				}
 				else {
-					// printf("Write IO %d failed\n", io->write_id);
+					printf("Write IO %d failed\n", io->write_id);
 					// check if there is newer successful write io.
 					// if there is not, then the block is not readable.
 					for (int i = 0; i < io->block_cnt; i++) {

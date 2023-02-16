@@ -687,7 +687,6 @@ wals_bdev_write_complete_deferred_success(void *arg)
 	
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_COMP_IO, 0, 0, (uintptr_t)wals_io, 1, 1);
 
-	wals_io->orig_io->free_deferred = true;
 	spdk_bdev_io_complete(wals_io->orig_io, SPDK_BDEV_IO_STATUS_SUCCESS);
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_COMP_IO, 0, 0, (uintptr_t)wals_io, 1, 1);
@@ -700,7 +699,6 @@ wals_bdev_write_complete_deferred_failure(void *arg)
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_COMP_IO, 0, 0, (uintptr_t)wals_io, 0, 1);
 
-	wals_io->orig_io->free_deferred = true;
 	spdk_bdev_io_complete(wals_io->orig_io, SPDK_BDEV_IO_STATUS_FAILED);
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_COMP_IO, 0, 0, (uintptr_t)wals_io, 0, 1);
@@ -800,14 +798,11 @@ wals_bdev_write_complete_failed(struct wals_bdev_io *wals_io)
 }
 
 static void
-wals_bdev_write_complete_free_deferred(void *arg)
+wals_bdev_write_free_io(void *arg)
 {
 	struct wals_bdev_io *wals_io = arg;
-	wals_io->orig_io->free_deferred = false;
-	if (wals_io->orig_io->free_called) {
-		spdk_bdev_free_io(wals_io->orig_io);
-	}
-	wals_io->orig_io->free_called = false;
+	wals_io->orig_io->can_free = true;
+	spdk_bdev_free_io(wals_io->orig_io);
 }
 
 static void
@@ -821,9 +816,9 @@ wals_bdev_write_complete_all(struct wals_bdev_io *wals_io)
 	dma_heap_put_page(wals_io->wals_bdev->write_heap, wals_io->dma_page);
 
 	if (wals_io->orig_thread != spdk_get_thread()) {
-		spdk_thread_send_msg(wals_io->orig_thread, wals_bdev_write_complete_free_deferred, wals_io);
+		spdk_thread_send_msg(wals_io->orig_thread, wals_bdev_write_free_io, wals_io);
 	} else {
-		wals_bdev_write_complete_free_deferred(wals_io);
+		wals_bdev_write_free_io(wals_io);
 	}
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_COMP_W_A, 0, 0, (uintptr_t)wals_io);
@@ -835,6 +830,7 @@ wals_target_write_complete(struct wals_bdev_io *wals_io, bool success)
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_COMP_W_T, 0, 0, (uintptr_t)wals_io);
 
 	wals_io->targets_completed++;
+	wals_io->orig_io->can_free = false;
 
 	if (((struct wals_metadata*) wals_io->dma_page->buf)->version != METADATA_VERSION) {
 
@@ -973,6 +969,10 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 		SPDK_ERRLOG("All targets failed on slice %ld, no complete callback will be triggered.\n", wals_io->slice_index);
 		wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
 	}
+
+	// from now on, every call to spdk_bdev_free_io will not do anything,
+	// until all targets return.
+	wals_io->orig_io->can_free = false;
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_W_I, 0, 0, (uintptr_t)wals_io);
 }

@@ -568,7 +568,7 @@ persist_destage_poller(void *ctx)
 					}
 					break;
 				}
-				SPDK_NOTICELOG("Go back to block '0' during move.\n");
+				SPDK_NOTICELOG("Round advance to %ld\n", pdisk->destage_tail->round);
 				pdisk->destage_tail->offset = 0;
 				pdisk->destage_tail->round++;
 			}

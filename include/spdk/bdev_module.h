@@ -554,9 +554,10 @@ struct spdk_bdev_io {
 	/** Array of iovecs used for I/O splitting. */
 	struct iovec child_iov[BDEV_IO_NUM_CHILD_IOV];
 
-	bool free_deferred;
-
-	bool free_called;
+	// In wals write request, we don't want the IO to be freed by client, as one target may still
+	// be working on it.
+	// Instead, the wals bdev controls the field, and frees the IO when all four targets return.
+	bool can_free;
 
 	union {
 		struct {
