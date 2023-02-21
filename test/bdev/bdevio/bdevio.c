@@ -43,9 +43,9 @@ static unsigned int g_seed = 0;
 // only IO thread is allowed to modify it within the loop
 static int g_remaining_io = 0;
 // 512B, 4K, 8K, 16K, 32K, 64K, 1M, 2M
-static const int block_cnt_arr[] = {1, 8, 16, 32, 64, 128, 1024 * 2, 1024 * 4};
+static const int g_block_cnt_arr[] = {1, 8, 16, 32, 64, 128, 1024 * 2, 1024 * 4};
 static int g_write_id = 1;
-static uint64_t last_written_id[DEFAULT_BLOCK_CNT];
+static uint64_t g_last_written_id[DEFAULT_BLOCK_CNT];
 
 enum io_failure_reason {
 	IO_FAILURE_NO_FAILURE,
@@ -110,7 +110,7 @@ io_test_batch_alloc(int qd, void* buf) {
 			elements[i].write_id = g_write_id;
 			g_write_id++;
 		}
-		elements[i].block_cnt = block_cnt_arr[rand() % SPDK_COUNTOF(block_cnt_arr)];
+		elements[i].block_cnt = g_block_cnt_arr[rand() % SPDK_COUNTOF(g_block_cnt_arr)];
 		elements[i].offset = rand() % (DEFAULT_BLOCK_CNT - elements[i].block_cnt);
 		elements[i].result = false;
 		elements[i].buf = buf;
@@ -1291,7 +1291,7 @@ blockdev_test_long_running(void)
 	uint64_t bdev_block_cnt = spdk_bdev_get_num_blocks(target->bdev);
 	uint64_t bdev_block_size = spdk_bdev_get_block_size(target->bdev);
 	enum io_failure_reason failure_reason = IO_FAILURE_NO_FAILURE;
-	void* buf = spdk_zmalloc(MAX_QD * DEFAULT_BLOCK_SIZE * block_cnt_arr[SPDK_COUNTOF(block_cnt_arr) - 1],
+	void* buf = spdk_zmalloc(MAX_QD * DEFAULT_BLOCK_SIZE * g_block_cnt_arr[SPDK_COUNTOF(g_block_cnt_arr) - 1],
 		0x1000,
 		NULL,
 		SPDK_ENV_LCORE_ID_ANY,
@@ -1313,7 +1313,7 @@ blockdev_test_long_running(void)
 	bdev_block_cnt = DEFAULT_BLOCK_CNT;
 
 	void* init_buf = NULL;
-	int init_block_cnt = block_cnt_arr[SPDK_COUNTOF(block_cnt_arr) - 1];
+	int init_block_cnt = g_block_cnt_arr[SPDK_COUNTOF(g_block_cnt_arr) - 1];
 	initialize_buffer(&init_buf, 0, init_block_cnt * DEFAULT_BLOCK_SIZE);
 
 	for (int i = 0;
@@ -1381,7 +1381,7 @@ blockdev_test_long_running(void)
 		for (int q = 0; q < qd; q++) {
 			struct io_test_unit* io = &batch->elements[q];
 			// no validation for the write io
-			// write io only changes the last_written_id array
+			// write io only changes the g_last_written_id array
 			if (!io->is_write) {
 				if (io->result) {
 					for (int i = 0; i < io->block_cnt; i++) {
@@ -1397,7 +1397,7 @@ blockdev_test_long_running(void)
 
 						// 2. should not read outdated data
 						uint64_t cur_id = cur_buf[0];
-						if (cur_id < last_written_id[io->offset + i]) {
+						if (cur_id < g_last_written_id[io->offset + i]) {
 							ok = false;
 							failure_reason = IO_FAILURE_OUTDATED;
 							goto end;
@@ -1407,9 +1407,9 @@ blockdev_test_long_running(void)
 						// a) last written id of the previous batches
 						// b) the id of any write io in the batch; if the write io fails,
 						// then set it to be successful.
-						// c) if last_written_id is zero, then normally it shouldn't be 
+						// c) if g_last_written_id is zero, then normally it shouldn't be 
 						// successful. One corner case is that
-						if (cur_id != last_written_id[io->offset + i]) {
+						if (cur_id != g_last_written_id[io->offset + i]) {
 							bool found = false;
 							for (int j = 0; j < qd; j++) {
 								if (cur_id == batch->elements[j].write_id) {
@@ -1424,7 +1424,7 @@ blockdev_test_long_running(void)
 								goto end;
 							}
 
-							last_written_id[io->offset + i] = cur_id;
+							g_last_written_id[io->offset + i] = cur_id;
 						}
 					}
 				}
@@ -1438,7 +1438,7 @@ blockdev_test_long_running(void)
 					// write in the batch succeeded.
 					bool expected = false;
 					for (int i = 0; i < io->block_cnt; i++) {
-						if (last_written_id[io->offset + i] == 0) {
+						if (g_last_written_id[io->offset + i] == 0) {
 							expected = true;
 							break;
 						}
@@ -1465,13 +1465,13 @@ blockdev_test_long_running(void)
 			}
 		}
 
-		// update last_written_id for each write
+		// update g_last_written_id for each write
 		for (int q = qd - 1; q >= 0; q--) {
 			struct io_test_unit* io = &batch->elements[q];
 			if (io->is_write) {
 				if (io->result) {
 					for (int i = 0; i < io->block_cnt; i++) {
-						last_written_id[io->offset + i] = spdk_max(last_written_id[io->offset + i], io->write_id);
+						g_last_written_id[io->offset + i] = spdk_max(g_last_written_id[io->offset + i], io->write_id);
 					}
 				}
 				else {
@@ -1479,8 +1479,8 @@ blockdev_test_long_running(void)
 					// check if there is newer successful write io.
 					// if there is not, then the block is not readable.
 					for (int i = 0; i < io->block_cnt; i++) {
-						if (last_written_id[io->offset + i] < io->write_id) {
-							last_written_id[io->offset + i] = 0;
+						if (g_last_written_id[io->offset + i] < io->write_id) {
+							g_last_written_id[io->offset + i] = 0;
 						}
 					}
 				}

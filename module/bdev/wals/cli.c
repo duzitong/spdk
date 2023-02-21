@@ -19,7 +19,7 @@
 // currently a fake one, to make sure that it fully RDMA reads the struct
 #define DESTAGE_INFO_CHECKSUM 666
 // 1ms should be enough for 512-byte payload.
-#define TIMEOUT_MS_PER_BLOCK 5
+#define TIMEOUT_MS_PER_BLOCK 10
 
 enum nvmf_cli_status {
     NVMF_CLI_UNINITIALIZED,
