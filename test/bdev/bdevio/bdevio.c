@@ -1403,6 +1403,11 @@ blockdev_test_long_running(void)
 						uint64_t cur_id = cur_buf[0];
 						if (cur_id < g_last_written_id[io->offset + i]) {
 							ok = false;
+							printf("Outdated IO: %ld, %ld, %ld, %ld\n",
+								cur_id,
+								g_last_written_id[io->offset + i],
+								total_io_cnt,
+								total_write_io_cnt);
 							failure_reason = IO_FAILURE_OUTDATED;
 							goto end;
 						}
