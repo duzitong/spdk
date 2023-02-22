@@ -4,6 +4,6 @@
     chdir: spdk
     executable: /bin/bash
   with_items: 
-  - ./kill.sh nvmf_tgt
-  - ./kill.sh bdevio
-  - ./kill.sh bdevperf
+  - ./scripts/kill.sh nvmf_tgt
+  - ./scripts/kill.sh bdevio
+  - ./scripts/kill.sh bdevperf

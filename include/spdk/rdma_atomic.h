@@ -26,7 +26,6 @@ struct rdma_atomic_rcu {
     // tail, then advance head before read. Similarly, tail can never reach head.
     // Only one thread is allowed to call read/write.
     int head, tail;
-    struct ibv_mr* mr;
 };
 
 struct rdma_atomic_rcu*

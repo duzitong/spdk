@@ -1287,7 +1287,10 @@ static void
 blockdev_test_long_running(void)
 {
 	struct io_target* target = g_current_io_target;
-	unsigned int io_cnt = 0;
+	unsigned long total_io_cnt = 0;
+	unsigned long total_write_io_cnt = 0;
+	unsigned long total_failed_write_io_cnt = 0;
+	unsigned long total_failed_read_io_cnt = 0;
 	uint64_t bdev_block_cnt = spdk_bdev_get_num_blocks(target->bdev);
 	uint64_t bdev_block_size = spdk_bdev_get_block_size(target->bdev);
 	enum io_failure_reason failure_reason = IO_FAILURE_NO_FAILURE;
@@ -1346,8 +1349,8 @@ blockdev_test_long_running(void)
 			goto end;
 		}
 
-		// TODO: qd can be random between 1 and 32.
 		int qd = 1 + (rand() % MAX_QD);
+		total_io_cnt += qd;
 		// printf("qd = %d\n", qd);
 		g_remaining_io = qd;
 		struct io_test_batch* batch = io_test_batch_alloc(qd, buf);
@@ -1357,6 +1360,7 @@ blockdev_test_long_running(void)
 			if (batch->elements[q].is_write) {
 				// printf("Submitting write %d %p\n", batch->elements[q].write_id, &batch->elements[q]);
 				// TODO: need to consider write fail
+				total_write_io_cnt++;
 				blockdev_write_many(
 					target,
 					batch->elements[q].buf,
@@ -1436,6 +1440,7 @@ blockdev_test_long_running(void)
 					// 2. the region is not readable before the batch. Since the read and 
 					// write thread are separated, the read may still fail when a previous 
 					// write in the batch succeeded.
+					total_failed_read_io_cnt++;
 					bool expected = false;
 					for (int i = 0; i < io->block_cnt; i++) {
 						if (g_last_written_id[io->offset + i] == 0) {
@@ -1463,6 +1468,9 @@ blockdev_test_long_running(void)
 					}
 				}
 			}
+			else if (!io->result) {
+				total_failed_write_io_cnt++;
+			}
 		}
 
 		// update g_last_written_id for each write
@@ -1475,7 +1483,7 @@ blockdev_test_long_running(void)
 					}
 				}
 				else {
-					printf("Write IO %d failed\n", io->write_id);
+					printf("Write IO %ld failed\n", io->write_id);
 					// check if there is newer successful write io.
 					// if there is not, then the block is not readable.
 					for (int i = 0; i < io->block_cnt; i++) {
@@ -1496,6 +1504,11 @@ end:
 		printf("Failure reason is %d\n", failure_reason);
 	}
 	spdk_free(buf);
+	printf("#IO: %ld, #Write IO: %ld, #Failed write IO: %ld, #Failed read IO: %ld\n", 
+		total_io_cnt,
+		total_write_io_cnt,
+		total_failed_write_io_cnt,
+		total_failed_read_io_cnt);
 	CU_ASSERT(ok);
 	return;
 }
