@@ -7,7 +7,7 @@
       file: task/build.yaml
   
 - name: gen
-  hosts: data_nodes
+  hosts: all
   any_errors_fatal: true
   tasks:
   - name: gen
