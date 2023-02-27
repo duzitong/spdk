@@ -58,8 +58,7 @@ if __name__ == "__main__":
 
     print("IOPS:")
     print('\n'.join([str(x) for x in iops]))
-    print("Lat:")
+    print("Average Lat:")
     print('\n'.join([str(x) for x in average_latency]))
-
-
-
+    print("Medium Lat:")
+    print('\n'.join([str(x) for x in medium_latency]))
