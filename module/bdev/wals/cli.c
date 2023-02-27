@@ -784,6 +784,7 @@ static int
 nvmf_cli_connection_poller(void* ctx) {
     // TODO: do I need pthread_setcancelstate?
     int rc;
+    enum spdk_thread_poller_rc poller_rc = SPDK_POLLER_IDLE;
     for (int i = 0; i < NUM_TARGETS; i++) {
         if (g_nvmf_cli_conns[i].status != NVMF_CLI_INITIALIZED) {
             continue;
@@ -800,9 +801,10 @@ nvmf_cli_connection_poller(void* ctx) {
             else {
                 SPDK_NOTICELOG("Nvmf ctrlr %d reset successfully\n", i);
             }
+            poller_rc = SPDK_POLLER_BUSY;
         }
     }
-    return SPDK_POLLER_BUSY;
+    return poller_rc;
 }
 
 // READ THREAD
@@ -897,6 +899,7 @@ static int
 rdma_cq_poller(void* ctx) {
     struct ibv_wc wc_buf[WC_BATCH_SIZE];
     struct wals_bdev* wals_bdev = ctx;
+    enum spdk_thread_poller_rc poller_rc = SPDK_POLLER_IDLE;
     spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_RDMA_CQ, 0, 0, (uintptr_t)ctx);
     for (int target_id = 0; target_id < NUM_TARGETS; target_id++) {
         struct slice_rdma_context* rdma_context = g_rdma_conns[target_id]->rdma_context;
@@ -906,7 +909,8 @@ rdma_cq_poller(void* ctx) {
                 // hopefully the reconnection poller will spot the error and try to reconnect
 				SPDK_ERRLOG("ibv_poll_cq failed\n");
             }
-            else {
+            else if (cnt > 0) {
+                poller_rc = SPDK_POLLER_BUSY;
                 for (int j = 0; j < cnt; j++) {
                     bool success = true;
 					struct pending_io_context* io_context = (void*)wc_buf[j].wr_id;
@@ -947,23 +951,32 @@ rdma_cq_poller(void* ctx) {
         }
     }
     spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_RDMA_CQ, 0, 0, (uintptr_t)ctx);
-    return SPDK_POLLER_IDLE;
+    return poller_rc;
 }
 
 // READ THREAD
 static int
 nvmf_cq_poller(void* ctx) {
+    int rc;
+    enum spdk_thread_poller_rc poller_rc = SPDK_POLLER_IDLE;
     for (int i = 0; i < NUM_TARGETS; i++) {
         if (g_nvmf_cli_conns[i].status == NVMF_CLI_INITIALIZED) {
-            spdk_nvme_qpair_process_completions(g_nvmf_cli_conns[i].qp, 0);
+            rc = spdk_nvme_qpair_process_completions(g_nvmf_cli_conns[i].qp, 0);
+            if (rc < 0) {
+                SPDK_ERRLOG("NVMf request failed for conn %d\n", i);
+            }
+            else if (rc > 0) {
+                poller_rc = SPDK_POLLER_BUSY;
+            }
         }
     }
-    return SPDK_POLLER_IDLE;
+    return poller_rc;
 }
 
 // READ/WRITE THREAD
 static int 
 pending_io_timeout_poller(void* ctx) {
+    enum spdk_thread_poller_rc poller_rc = SPDK_POLLER_IDLE;
     struct pending_io_queue* io_queue = ctx;
 
     uint64_t current_ticks = spdk_get_ticks();
@@ -976,6 +989,7 @@ pending_io_timeout_poller(void* ctx) {
 
         if (timeout_ticks < current_ticks) {
             // timeout.
+            poller_rc = SPDK_POLLER_BUSY;
             SPDK_NOTICELOG("IO (%p, %p, %p %d, %d, %d, %d, %d, %d) timeout\n",
                 io,
                 io->orig_io,
@@ -1002,7 +1016,7 @@ pending_io_timeout_poller(void* ctx) {
     }
     io_queue->head = j;
 
-    return SPDK_POLLER_IDLE;
+    return poller_rc;
 }
 
 static struct wals_target_module g_rdma_cli_module = {
