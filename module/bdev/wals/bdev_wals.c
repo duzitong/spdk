@@ -878,6 +878,9 @@ wals_target_write_complete(struct wals_bdev_io *wals_io, bool success, int targe
 	}
 
 	if (wals_io->targets_completed == NUM_TARGETS) {
+		if (wals_io->targets_failed == 0 && wals_io->failed_target_id != 0) {
+			SPDK_ERRLOG("Failed target id %d when all four targets are successful\n", wals_io->failed_target_id);
+		}
 		wals_bdev_write_complete_all(wals_io);
 	}
 
