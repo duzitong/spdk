@@ -198,6 +198,7 @@ struct wals_lp_firo {
 };
 
 struct wals_target {
+	// 1-based
 	int id;
 
 	volatile uint64_t			log_blockcnt;
@@ -282,6 +283,11 @@ struct wals_bdev_io {
 	int		target_index;
 
 	bool	io_completed;
+
+	// first failed target id.
+	// initialization: sum of the target ids.
+	// if three out of four targets completes, then treat the last one as failed.
+	int failed_target_id;
 };
 
 typedef int (*wals_target_fn)(struct wals_target* target, struct wals_bdev *wals_bdev);
@@ -493,6 +499,8 @@ struct wals_index_msg {
 
 	bool				failed;
 
+	int failed_target_id;
+
 	struct wals_bdev	*wals_bdev;
 };
 
@@ -561,7 +569,7 @@ wals_bdev_calc_crc(void *data, size_t len);
 void
 wals_target_read_complete(struct wals_bdev_io *wals_io, bool success);
 void
-wals_target_write_complete(struct wals_bdev_io *wals_io, bool success);
+wals_target_write_complete(struct wals_bdev_io *wals_io, bool success, int target_id);
 void
 wals_bdev_io_complete(struct wals_bdev_io *wals_io, enum spdk_bdev_io_status status);
 

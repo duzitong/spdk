@@ -510,7 +510,7 @@ static void rdma_operation_done(void* arg, bool success) {
                 wals_target_read_complete(io_context->io, success);
                 break;
             case WALS_RDMA_WRITE:
-                wals_target_write_complete(io_context->io, success);
+                wals_target_write_complete(io_context->io, success, io_queue->target_id);
                 break;
             default:
                 SPDK_ERRLOG("Code bug. IO type %d should be handled by other function\n", io_queue->io_type);
@@ -585,19 +585,19 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
     struct pending_io_queue* io_queue = &g_pending_write_io_queue[target->id];
 
     if (!rdma_connection_is_connected(slice->rdma_conn)) {
-        wals_target_write_complete(wals_io, false);
+        wals_target_write_complete(wals_io, false, target->id);
         return 0;
     }
 
     if (is_io_queue_full(io_queue)) {
         SPDK_ERRLOG("Should not happen: rdma write io queue is full\n");
-        wals_target_write_complete(wals_io, false);
+        wals_target_write_complete(wals_io, false, target->id);
         return 0;
     }
 
     if (offset + cnt > slice->rdma_conn->handshake_buf[1].block_cnt) {
         SPDK_ERRLOG("Write out of remote PMEM range: %ld %ld\n", offset, cnt);
-        wals_target_write_complete(wals_io, false);
+        wals_target_write_complete(wals_io, false, target->id);
         return 0;
     }
 
@@ -654,7 +654,7 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
 		SPDK_NOTICELOG("Local: %p %d; Remote: %p %d; Len = %d\n",
 			(void*)sge.addr, sge.lkey, (void*)wr.wr.rdma.remote_addr, wr.wr.rdma.rkey,
 			sge.length);
-		wals_target_write_complete(wals_io, false);
+		wals_target_write_complete(wals_io, false, target->id);
         io_queue->tail = (io_queue->tail + PENDING_IO_MAX_CNT - 1) % PENDING_IO_MAX_CNT;
         return 0;
 	}
@@ -1002,7 +1002,7 @@ pending_io_timeout_poller(void* ctx) {
                 j);
             switch (io_queue->io_type) {
                 case WALS_RDMA_WRITE:
-                    wals_target_write_complete(io, false);
+                    wals_target_write_complete(io, false, io_queue->target_id);
                     break;
                 case WALS_RDMA_READ:
                 case WALS_NVMF_READ:

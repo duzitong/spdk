@@ -59,7 +59,7 @@ null_submit_log_write_request(struct wals_target* target, void *data, uint64_t o
     }
     target->head.offset = offset+cnt;
     SPDK_DEBUGLOG(bdev_wals_null, "target head updated: %ld(%ld)\n", target->head.offset, target->head.round);
-    wals_target_write_complete(wals_io, true);
+    wals_target_write_complete(wals_io, true, target->id);
     return 0;
 }
 

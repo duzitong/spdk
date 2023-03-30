@@ -504,6 +504,7 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 		if (spdk_likely(wals_io->status == SPDK_BDEV_IO_STATUS_SUCCESS)) {
 			wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_SUCCESS);
 		} else {
+			// TODO: the retry logic may read failed_target_id, which leads to corrupted data.
 			wals_io->targets_failed++;
 			wals_io->target_index = (wals_io->target_index + 1) % QUORUM_TARGETS;
 			if (wals_io->targets_failed < QUORUM_TARGETS) {
@@ -628,12 +629,17 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 
 			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_R_T, 0, 0, (uintptr_t)wals_io, wals_io->target_index, 0);
 
-			ret = wals_bdev->module->submit_log_read_request(slice->targets[wals_io->target_index],
-				buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
-				bn->ele->l.bdevOffset + read_cur - bn->ele->begin,
-				tmp - read_cur + 1,
-				checksum_offset,
-				wals_io);
+			for (int i = 0; i < NUM_TARGETS; i++) {
+				if (bn->ele->failed_target_id != slice->targets[i]->id) {
+					ret = wals_bdev->module->submit_log_read_request(slice->targets[i],
+						buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
+						bn->ele->l.bdevOffset + read_cur - bn->ele->begin,
+						tmp - read_cur + 1,
+						checksum_offset,
+						wals_io);
+					break;
+				}
+			}
 			
 			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_R_T, 0, 0, (uintptr_t)wals_io, wals_io->target_index, 0);
 
@@ -672,6 +678,7 @@ wals_bdev_insert_read_index(void *arg)
 	bstat = bstatBdevCreate(msg->begin, msg->end, msg->round, msg->offset, wals_bdev->bstat_pool);
 	bstat->failed = msg->failed;
 	bstat->mdOffset = msg->md_offset;
+	bstat->failed_target_id = msg->failed_target_id;
 	
 	bslInsert(wals_bdev->bsl, msg->begin, msg->end, bstat, wals_bdev->bslfn);
 	spdk_mempool_put(wals_bdev->index_msg_pool, msg);
@@ -735,6 +742,7 @@ wals_bdev_write_complete_quorum(struct wals_bdev_io *wals_io)
 	msg->md_offset = msg->offset - metadata->md_blocknum;
 	msg->round = metadata->round;
 	msg->failed = false;
+	msg->failed_target_id = wals_io->failed_target_id;
 	msg->wals_bdev = wals_bdev;
 	SPDK_DEBUGLOG(bdev_wals, "msg begin: %ld, end: %ld\n", msg->begin, msg->end);
 	
@@ -825,17 +833,28 @@ wals_bdev_write_complete_all(struct wals_bdev_io *wals_io)
 }
 
 void
-wals_target_write_complete(struct wals_bdev_io *wals_io, bool success)
+wals_target_write_complete(struct wals_bdev_io *wals_io, bool success, int target_id)
 {
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_COMP_W_T, 0, 0, (uintptr_t)wals_io);
 
 	wals_io->targets_completed++;
 	wals_io->orig_io->can_free = false;
 
+	// if some targets already fail, then failed_target_id must have a valid value.
+	if (wals_io->targets_failed == 0) {
+		if (success) {
+			// if all four targets are successful, then failed_target_id will be 0 eventually.
+			// but we don't revert the failed_target_id which was sent to read thread.
+			wals_io->failed_target_id -= target_id;
+		}
+		else {
+			// only track first failure.
+			wals_io->failed_target_id = target_id;
+		}
+	}
+
 	if (((struct wals_metadata*) wals_io->dma_page->buf)->version != METADATA_VERSION) {
-
         SPDK_ERRLOG("%p %d %ld\n", wals_io->dma_page, success, wals_io->dma_page->data_size);
-
     }
 
 	if (spdk_unlikely(!success)) {
@@ -944,6 +963,11 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_CALC_CRC, 0, 0, (uintptr_t)wals_io);
 
 	wals_io->firo_entry = wals_bdev_firo_insert(slice->write_firo, slice_tail);
+
+	// must happen before sending write IOs to avoid sync return.
+	for (i = 0; i < NUM_TARGETS; i++) {
+		wals_io->failed_target_id += slice->targets[i]->id;
+	}
 
 	// call module to submit to all targets
 	for (i = 0; i < NUM_TARGETS; i++) {
@@ -1095,6 +1119,7 @@ wals_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 	wals_io->targets_completed = 0;
 	wals_io->target_index = 0;  // TODO: round-robin?
 	wals_io->io_completed = false;
+	wals_io->failed_target_id = 0;
 
 	/*
 	 * Write requests are sent to write_thread, read requests are sent to read_thread.
@@ -1646,10 +1671,12 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 		for (j = 0; j < NUM_TARGETS; j++) {
 			wals_bdev->slices[i].targets[j] = wals_bdev->module->start(&wals_cfg->slices[i].targets[j], wals_bdev, &wals_bdev->slices[i]);
 			if (wals_bdev->slices[i].targets[j] == NULL) {
-				SPDK_ERRLOG("Failed to start target '%ld' in slice '%ld'.", j, i);
+				SPDK_ERRLOG("Failed to start target '%ld' in slice '%ld'.", j + 1, i);
 				return -EFAULT;
 			}
-			wals_bdev->slices[i].targets[j]->id = j;
+			// 1-based
+			// TODO: target allocation should be done by MDS
+			wals_bdev->slices[i].targets[j]->id = j + 1;
 			if (wals_bdev->slices[i].targets[j]->log_blockcnt < wals_bdev->slices[i].log_blockcnt) {
 				wals_bdev->slices[i].log_blockcnt = wals_bdev->slices[i].targets[j]->log_blockcnt;
 			}
