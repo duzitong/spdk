@@ -30,3 +30,7 @@
   shell:
     cmd: make
     chdir: spdk
+- name: apply setup.sh
+  shell:
+    cmd: HUGEMEM=32768 ./scripts/setup.sh
+    chdir: spdk

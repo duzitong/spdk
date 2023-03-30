@@ -1,6 +1,6 @@
 - name: run binary
   shell:
-    cmd: ./bdevio -c conf-jinja.json -r /var/tmp/spdk2.sock -t 10 2>&1
+    cmd: ./bdevperf -m 0x5 -q 1 -o 4096 -t 3600 -w randwrite -c conf-jinja.json -T Wals1 -C -S 30 2>&1
     chdir: spdk/test/bdev/bdevio
     executable: /bin/bash
   register: result
