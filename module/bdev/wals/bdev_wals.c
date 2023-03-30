@@ -1674,9 +1674,9 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 				SPDK_ERRLOG("Failed to start target '%ld' in slice '%ld'.", j + 1, i);
 				return -EFAULT;
 			}
-			// 1-based
+
 			// TODO: target allocation should be done by MDS
-			wals_bdev->slices[i].targets[j]->id = j + 1;
+			wals_bdev->slices[i].targets[j]->id = j;
 			if (wals_bdev->slices[i].targets[j]->log_blockcnt < wals_bdev->slices[i].log_blockcnt) {
 				wals_bdev->slices[i].log_blockcnt = wals_bdev->slices[i].targets[j]->log_blockcnt;
 			}
