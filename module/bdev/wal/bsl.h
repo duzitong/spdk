@@ -54,6 +54,7 @@ bstat *bstatMemCreate(long begin, long end, long round, void *memPointer, struct
 bskiplist *bslCreate(struct spdk_mempool *node_pool, struct spdk_mempool *bstat_pool);
 bskiplistFreeNodes *bslfnCreate(struct spdk_mempool *pool, struct spdk_mempool *bstat_pool);
 void bslPrint(bskiplist *bsl, char full);
+void bslPrintNode(bskiplistNode *bn, char* buf, size_t size);
 void bslfnPrint(bskiplistFreeNodes *bslfn);
 int bslfnFree(bskiplistFreeNodes *bslfn, int max);
 bskiplistNode *bslInsert(bskiplist *bsl, long begin, long end, bstat *ele, bskiplistFreeNodes *bslfn);

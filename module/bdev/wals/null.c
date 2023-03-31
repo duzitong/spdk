@@ -87,6 +87,18 @@ null_unregister_read_pollers(struct wals_target *target, struct wals_bdev *wals_
     return 0;
 }
 
+static int
+null_diagnose_unregister_read_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
+{
+    return 0;
+}
+
+static int
+null_diagnose_unregister_write_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
+{
+    return 0;
+}
+
 
 static struct wals_target_module g_null_module = {
 	.name = "null",
@@ -99,6 +111,8 @@ static struct wals_target_module g_null_module = {
     .unregister_write_pollers = null_unregister_write_pollers,
     .register_read_pollers = null_register_read_pollers,
     .unregister_read_pollers = null_unregister_read_pollers,
+    .diagnose_unregister_read_pollers = null_diagnose_unregister_read_pollers,
+    .diagnose_unregister_write_pollers = null_diagnose_unregister_write_pollers,
 };
 TARGET_MODULE_REGISTER(&g_null_module)
 

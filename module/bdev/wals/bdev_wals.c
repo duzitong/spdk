@@ -123,6 +123,12 @@ wals_bdev_foreach_target_call(struct wals_bdev *wals_bdev, wals_target_fn fn, ch
 	return 0;
 }
 
+static void wals_log_skip_list_node(struct bskiplistNode* node) {
+	char buf[128];
+	bslPrintNode(buf, 128, node);
+	SPDK_INFOLOG(bdev_wals, "%s\n", buf);
+}
+
 static struct wals_lp_firo*
 wals_bdev_firo_alloc(const char *name, uint32_t pool_size)
 {
@@ -547,7 +553,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_R, 0, 0, (uintptr_t)wals_io, spdk_thread_get_id(spdk_get_thread()));
 
-	SPDK_DEBUGLOG(bdev_wals, "submit read: %ld+%ld\n", bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks);
+	SPDK_INFOLOG(bdev_wals, "submit read: %ld+%ld\n", bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks);
 
 	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
 	slice = &wals_bdev->slices[wals_io->slice_index];
@@ -561,13 +567,14 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	buf = dma_page_get_buf(wals_io->dma_page);
 
 	valid_pos = wals_bdev_get_targets_log_head_min(slice);
-	SPDK_DEBUGLOG(bdev_wals, "valid pos: %ld(%ld)\n", valid_pos.offset, valid_pos.round);
+	SPDK_INFOLOG(bdev_wals, "valid pos: (%ld, %ld)\n", valid_pos.offset, valid_pos.round);
 	wals_io->firo_entry = wals_bdev_firo_insert(slice->read_firo, valid_pos);
 
 	read_begin = bdev_io->u.bdev.offset_blocks;
     read_end = bdev_io->u.bdev.offset_blocks + bdev_io->u.bdev.num_blocks - 1;
 
 	bn = bslFirstNodeAfterBegin(wals_bdev->bsl, read_begin);
+	wals_log_skip_list_node(bn);
 	/*
 	 * Completion in read submit request leads to complete the whole read request every time.
 	 * Add the initial remaining read requests by 1 to avoid this.
@@ -580,6 +587,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 		while (bn && !wals_bdev_is_valid_entry(valid_pos, bn->ele)) {
 			bn = bn->level[0].forward;
 		}
+		wals_log_skip_list_node(bn);
 
 		if (!bn || read_cur < bn->begin) {
 			if (!bn) {
@@ -597,6 +605,8 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 			 */
 
 			spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_R_T, 0, 0, (uintptr_t)wals_io, wals_io->target_index, 1);
+
+			SPDK_INFOLOG(bdev_wals, "Read from disk: [%ld, %ld]\n", read_cur, tmp);
 
 			ret = wals_bdev->module->submit_core_read_request(slice->targets[wals_io->target_index], buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
 															read_cur, tmp - read_cur + 1, wals_io);
@@ -631,6 +641,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 
 			for (int i = 0; i < NUM_TARGETS; i++) {
 				if (bn->ele->failed_target_id != slice->targets[i]->id) {
+					SPDK_INFOLOG(bdev_wals, "Read from log: [%ld, %ld]\n", read_cur, tmp);
 					ret = wals_bdev->module->submit_log_read_request(slice->targets[i],
 						buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
 						bn->ele->l.bdevOffset + read_cur - bn->ele->begin,
@@ -1095,6 +1106,47 @@ wals_bdev_io_get_buf(void *arg)
 				     bdev_io->u.bdev.num_blocks * bdev_io->bdev->blocklen);
 }
 
+static void wals_bdev_diagnose_unregister_write_pollers(struct wals_bdev* wals_bdev) {
+	wals_bdev_foreach_target_call(wals_bdev,
+		wals_bdev->module->diagnose_unregister_write_pollers,
+		"diagnose_unregister_write_pollers");
+}
+
+static void wals_bdev_diagnose_unregister_read_pollers(struct wals_bdev* wals_bdev) {
+	spdk_poller_unregister(&wals_bdev->log_head_update_poller);
+	spdk_poller_unregister(&wals_bdev->cleaner_poller);
+	spdk_poller_unregister(&wals_bdev->stat_poller);
+
+	wals_bdev_foreach_target_call(wals_bdev,
+		wals_bdev->module->diagnose_unregister_read_pollers,
+		"diagnose_unregister_read_pollers");
+}
+
+static void wals_bdev_enter_diagnostic_mode(struct wals_bdev* wals_bdev) {
+	wals_bdev->in_diagnostic_mode = true;
+	if (spdk_get_thread() == wals_bdev->write_thread) {
+		wals_bdev_diagnose_unregister_write_pollers(wals_bdev);
+	}
+	else {
+		spdk_thread_send_msg(wals_bdev->write_thread,
+			wals_bdev_diagnose_unregister_write_pollers,
+			wals_bdev);
+	}
+
+	if (spdk_get_thread() == wals_bdev->read_thread) {
+		wals_bdev_diagnose_unregister_read_pollers(wals_bdev);
+	}
+	else {
+		spdk_thread_send_msg(wals_bdev->read_thread,
+			wals_bdev_diagnose_unregister_read_pollers,
+			wals_bdev);
+	}
+
+	spdk_log_set_flag("bdev_wals");
+	// Debug logs should not be seen unless compiled with DEBUG macro.
+	spdk_log_set_level(SPDK_LOG_DEBUG);
+}
+
 /*
  * brief:
  * wals_bdev_submit_request function is the submit_request function pointer of
@@ -1145,8 +1197,12 @@ wals_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 			wals_bdev_submit_write_request(wals_io);
 		}
 		break;
-	case SPDK_BDEV_IO_TYPE_RESET:
 	case SPDK_BDEV_IO_TYPE_FLUSH:
+		// use it as internal diagnostic
+		SPDK_NOTICELOG("Enter diagnostic mode.\n");
+		wals_bdev_enter_diagnostic_mode(wals_io->wals_bdev);
+		break;
+	case SPDK_BDEV_IO_TYPE_RESET:
 	case SPDK_BDEV_IO_TYPE_UNMAP:
 	default:
 		SPDK_ERRLOG("submit request, invalid io type %u\n", bdev_io->type);
@@ -1175,9 +1231,9 @@ wals_bdev_io_type_supported(void *ctx, enum spdk_bdev_io_type io_type)
 	switch (io_type) {
 	case SPDK_BDEV_IO_TYPE_READ:
 	case SPDK_BDEV_IO_TYPE_WRITE:
+	case SPDK_BDEV_IO_TYPE_FLUSH:
 		return true;
 
-	case SPDK_BDEV_IO_TYPE_FLUSH:
 	case SPDK_BDEV_IO_TYPE_RESET:
 	case SPDK_BDEV_IO_TYPE_UNMAP:
 	default:

@@ -332,8 +332,14 @@ struct wals_target_module {
 	/* register read pollers */
 	int (*register_read_pollers)(struct wals_target *target, struct wals_bdev *wals_bdev);
 
-	/* register read pollers */
+	/* unregister read pollers */
 	int (*unregister_read_pollers)(struct wals_target *target, struct wals_bdev *wals_bdev);
+
+	// unregister read pollers for diagnostic purpose
+	int (*diagnose_unregister_read_pollers)(struct wals_target *target, struct wals_bdev *wals_bdev);
+
+	// unregister write pollers for diagnostic purpose
+	int (*diagnose_unregister_write_pollers)(struct wals_target *target, struct wals_bdev *wals_bdev);
 
 	TAILQ_ENTRY(wals_target_module) link;
 };
@@ -430,6 +436,8 @@ struct wals_bdev {
 	struct wals_target_module	*module;
 
 	uint64_t		ch_create_tsc;
+
+	bool in_diagnostic_mode;
 };
 
 struct wals_slice_config {

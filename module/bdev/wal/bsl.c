@@ -5,7 +5,6 @@
 bstat *bstatClone(bstat *pb, struct spdk_mempool *pool);
 int bslRandomLevel(void);
 bskiplistNode *bslCreateNode(int level, long begin, long end, bstat *ele, struct spdk_mempool *pool);
-void bslPrintNode(bskiplistNode *bsln);
 void bslFreeNode(bskiplistNode *bsln, struct spdk_mempool *bstat_pool, struct spdk_mempool *node_pool);
 void bslAdjustNodeBegin(bskiplistNode *bn, long end);
 void bslAdjustNodeEnd(bskiplistNode *bn, long begin);
@@ -111,11 +110,21 @@ void bslPrint(bskiplist *bsl, char full) {
     }
 }
 
-void bslPrintNode(bskiplistNode *bsln) {
+void bslPrintNode(bskiplistNode *bsln, char* buf, size_t size) {
     if (bsln) {
-        printf("%02d: [%ld, %ld]\n", bsln->height, bsln->begin, bsln->end);
+        snprintf(buf,
+            size,
+            "%02d: [%ld, %ld] -> [%ld, %ld, %ld]: [%d, %d]\n",
+            bsln->height,
+            bsln->begin,
+            bsln->end,
+            bsln->ele->begin,
+            bsln->ele->end,
+            bsln->ele->round,
+            bsln->ele->failed,
+            bsln->ele->failed_target_id);
     } else {
-        printf("NULL bsl node\n");
+        snprintf(buf, size, "NULL bsl node\n");
     }
 }
 
