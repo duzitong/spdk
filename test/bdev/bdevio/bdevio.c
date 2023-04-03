@@ -135,13 +135,14 @@ io_test_batch_alloc(int qd, void* buf, void* md_buf, double write_prob) {
 	struct io_test_unit* elements = calloc(qd, sizeof(struct io_test_unit));
 	for (int i = 0; i < qd; i++) {
 		bool is_write = ((double)rand() / RAND_MAX) < write_prob;
+		int block_cnt = g_block_cnt_arr[rand() % SPDK_COUNTOF(g_block_cnt_arr)];
 		io_test_unit_alloc(&elements[i],
 			buf,
 			md_buf,
 			is_write,
 			is_write ? g_write_id : 0,
-			g_block_cnt_arr[rand() % SPDK_COUNTOF(g_block_cnt_arr)],
-			rand() % (DEFAULT_BLOCK_CNT - elements[i].block_cnt));
+			block_cnt,
+			rand() % (DEFAULT_BLOCK_CNT - block_cnt));
 
 		if (is_write) {
 			g_write_id++;
@@ -355,8 +356,8 @@ __blockdev_write_many(void *arg)
 	int rc;
 
 	// printf("Submit IO %p %p %d %d %d\n", io, io->buf, io->write_id, io->offset, io->block_cnt);
-	rc = spdk_bdev_write(g_current_io_target->bdev_desc, g_current_io_target->ch, io->buf, io->offset * DEFAULT_BLOCK_SIZE,
-					io->block_cnt * DEFAULT_BLOCK_SIZE, quick_test_complete_many, io);
+	rc = spdk_bdev_write_blocks(g_current_io_target->bdev_desc, g_current_io_target->ch, io->buf, io->offset,
+					io->block_cnt, quick_test_complete_many, io);
 
 	if (rc) {
 		printf("Call bdev write failed with %d\n", rc);
@@ -537,9 +538,9 @@ __blockdev_read_many(void *arg)
 	struct io_test_unit *io = arg;
 	int rc;
 
-	printf("Submit IO %p %d %d %d\n", io, io->write_id, io->offset, io->block_cnt);
+	// printf("Submit IO %p %d %d %d\n", io, io->write_id, io->offset, io->block_cnt);
 	if (io->md_buf) {
-		printf("Read with md\n");
+		// printf("Read with md\n");
 		rc = spdk_bdev_read_blocks_with_md(g_current_io_target->bdev_desc, g_current_io_target->ch, io->buf, io->md_buf, io->offset,
 					io->block_cnt, quick_test_complete_many, io);
 	}
