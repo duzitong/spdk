@@ -537,14 +537,15 @@ __blockdev_read_many(void *arg)
 	struct io_test_unit *io = arg;
 	int rc;
 
-		// printf("Submit IO %p %d %d %d\n", req->io, req->io->write_id, req->io->offset, req->io->block_cnt);
+	printf("Submit IO %p %d %d %d\n", io, io->write_id, io->offset, io->block_cnt);
 	if (io->md_buf) {
-		rc = spdk_bdev_read_blocks_with_md(g_current_io_target->bdev_desc, g_current_io_target->ch, io->buf, io->md_buf, io->offset * DEFAULT_BLOCK_SIZE,
-					io->block_cnt * DEFAULT_BLOCK_SIZE, quick_test_complete_many, io);
+		printf("Read with md\n");
+		rc = spdk_bdev_read_blocks_with_md(g_current_io_target->bdev_desc, g_current_io_target->ch, io->buf, io->md_buf, io->offset,
+					io->block_cnt, quick_test_complete_many, io);
 	}
 	else {
-		rc = spdk_bdev_read(g_current_io_target->bdev_desc, g_current_io_target->ch, io->buf, io->offset * DEFAULT_BLOCK_SIZE,
-					io->block_cnt * DEFAULT_BLOCK_SIZE, quick_test_complete_many, io);
+		rc = spdk_bdev_read_blocks(g_current_io_target->bdev_desc, g_current_io_target->ch, io->buf, io->offset,
+					io->block_cnt, quick_test_complete_many, io);
 	}
 
 	if (rc) {
@@ -1152,8 +1153,9 @@ __blockdev_flush(void *arg)
 	int rc;
 
 	// offset and length not relevant for diagnostics 
-	rc = spdk_bdev_flush(target->bdev_desc, target->ch, 0, 1, quick_test_complete, NULL);
+	rc = spdk_bdev_flush_blocks(target->bdev_desc, target->ch, 0, 1, quick_test_complete, NULL);
 	if (rc < 0) {
+		printf("Call bdev flush failed with %d\n", rc);
 		g_completion_success = false;
 		wake_ut_thread();
 	}

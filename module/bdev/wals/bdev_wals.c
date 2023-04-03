@@ -1222,6 +1222,7 @@ wals_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 		// use it as internal diagnostic
 		SPDK_NOTICELOG("Enter diagnostic mode.\n");
 		wals_bdev_enter_diagnostic_mode(wals_io->wals_bdev);
+		wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_SUCCESS);
 		break;
 	case SPDK_BDEV_IO_TYPE_RESET:
 	case SPDK_BDEV_IO_TYPE_UNMAP:
@@ -1584,6 +1585,8 @@ wals_bdev_create(struct wals_bdev_config *wals_cfg)
 		return -ENOMEM;
 	}
 
+	// explicitly specify it to avoid confusion.
+	wals_bdev->in_diagnostic_mode = false;
 	wals_bdev->slicecnt = wals_cfg->slicecnt;
 	wals_bdev->slices = calloc(wals_bdev->slicecnt, sizeof(struct wals_slice));
 
