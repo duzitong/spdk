@@ -9,7 +9,8 @@ extern "C" {
 #endif
 
 struct diagnostic_read_md {
-
+    int target_id;
+    bool force_read_from_disk;
 };
 
 #ifdef __cplusplus
