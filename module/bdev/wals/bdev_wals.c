@@ -1167,6 +1167,17 @@ static void wals_bdev_enter_diagnostic_mode(struct wals_bdev* wals_bdev) {
 	spdk_log_set_flag("bdev_wals");
 	// Debug logs should not be seen unless compiled with DEBUG macro.
 	spdk_log_set_level(SPDK_LOG_DEBUG);
+	SPDK_NOTICELOG("Enter diagnostic mode.\n");
+	for (int slice_id = 0; slice_id < wals_bdev->slicecnt; slice_id++) {
+		SPDK_INFOLOG(bdev_wals, "Slice %d: PMEM Head = (%ld, %ld), Tail = (%ld, %ld), Committed tail = (%ld, %ld)\n",
+			slice_id,
+			wals_bdev->slices[slice_id].head.offset,
+			wals_bdev->slices[slice_id].head.round,
+			wals_bdev->slices[slice_id].tail.offset,
+			wals_bdev->slices[slice_id].tail.round,
+			wals_bdev->slices[slice_id].committed_tail.offset,
+			wals_bdev->slices[slice_id].committed_tail.round);
+	}
 }
 
 /*
@@ -1221,7 +1232,6 @@ wals_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 		break;
 	case SPDK_BDEV_IO_TYPE_FLUSH:
 		// use it as internal diagnostic
-		SPDK_NOTICELOG("Enter diagnostic mode.\n");
 		wals_bdev_enter_diagnostic_mode(wals_io->wals_bdev);
 		wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_SUCCESS);
 		break;
