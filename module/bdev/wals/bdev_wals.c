@@ -662,8 +662,8 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 				}
 			}
 
-			SPDK_INFOLOG(bdev_wals, "Read from log: [%ld, %ld]\n", read_cur, tmp);
-			SPDK_NOTICELOG("Read from log: [%ld, %ld]\n", read_cur, tmp);
+			// SPDK_INFOLOG(bdev_wals, "Read from log: [%ld, %ld]\n", read_cur, tmp);
+			// SPDK_NOTICELOG("Read from log: [%ld, %ld]\n", read_cur, tmp);
 
 			ret = wals_bdev->module->submit_log_read_request(slice->targets[target_id],
 				buf + (read_cur - read_begin) * wals_bdev->bdev.blocklen, 
