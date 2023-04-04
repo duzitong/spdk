@@ -1595,6 +1595,7 @@ end:
 			0,
 			1,
 			failed_offset);
+		g_remaining_io = 1;
 		blockdev_read_many(true, io_unit);
 
 		printf("Result from target %d: %ld\n", target, ((uint64_t*)buf)[0]);
