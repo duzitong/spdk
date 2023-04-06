@@ -14,6 +14,7 @@ typedef enum {
 } locationType;
 
 typedef struct bstat {
+    // can be larger intervals than the one in bskiplistNode due to node split.
     long begin, end;
     locationType type;
     long unsigned int round;
