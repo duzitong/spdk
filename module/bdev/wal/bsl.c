@@ -114,12 +114,13 @@ void bslPrintNode(bskiplistNode *bsln, char* buf, size_t size) {
     if (bsln) {
         snprintf(buf,
             size,
-            "%02d: [%ld, %ld] -> [%ld, %ld, %ld]: [%d, %d]\n",
+            "%02d: [%ld, %ld] -> [%ld, %ld, %ld, %ld]: [%d, %d]\n",
             bsln->height,
             bsln->begin,
             bsln->end,
             bsln->ele->begin,
             bsln->ele->end,
+            bsln->ele->l.bdevOffset,
             bsln->ele->round,
             bsln->ele->failed,
             bsln->ele->failed_target_id);
