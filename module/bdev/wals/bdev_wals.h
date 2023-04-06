@@ -581,4 +581,20 @@ wals_target_write_complete(struct wals_bdev_io *wals_io, bool success, int targe
 void
 wals_bdev_io_complete(struct wals_bdev_io *wals_io, enum spdk_bdev_io_status status);
 
+static inline bool log_position_gt(struct wals_log_position* lhs, struct wals_log_position* rhs) {
+	return (lhs->round > rhs->round) || (lhs->offset > rhs->offset && lhs->round == rhs->round);
+}
+
+static inline bool log_position_geq(struct wals_log_position* lhs, struct wals_log_position* rhs) {
+	return log_position_gt(lhs, rhs) || (lhs->round == rhs->round && lhs->offset == rhs->offset);
+}
+
+static inline bool log_position_lt(struct wals_log_position* lhs, struct wals_log_position* rhs) {
+	return !log_position_geq(lhs, rhs);
+}
+
+static inline bool log_position_leq(struct wals_log_position* lhs, struct wals_log_position* rhs) {
+	return !log_position_gt(lhs, rhs);
+}
+
 #endif /* SPDK_BDEV_WALS_INTERNAL_H */

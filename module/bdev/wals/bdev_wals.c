@@ -1879,6 +1879,12 @@ wals_bdev_log_head_update(void *ctx)
 	for (i = 0; i < wals_bdev->slicecnt; i++) {
 		slice = &wals_bdev->slices[i];
 		if (wals_bdev_firo_empty(slice->read_firo)) {
+			struct wals_log_position new_head = wals_bdev_get_targets_log_head_min(slice);
+
+			if (log_position_gt(&slice->head, &new_head)) {
+				SPDK_ERRLOG("Received half head information\n");
+				continue;
+			}
 			slice->head = wals_bdev_get_targets_log_head_min(slice);
 			cnt++;
 		}
