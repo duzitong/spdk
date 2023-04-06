@@ -27,6 +27,7 @@
 #define MAX_QD 32
 #define DEFAULT_BLOCK_SIZE 512
 #define DEFAULT_BLOCK_CNT 2097152
+#define LAST_WRITTEN_ID_RECALL_CNT 10
 
 pthread_mutex_t g_test_mutex;
 pthread_cond_t g_test_cond;
@@ -46,7 +47,8 @@ static int g_remaining_io = 0;
 // 512B, 4K, 8K, 16K, 32K, 64K, 1M, 2M
 static const int g_block_cnt_arr[] = {1, 8, 16, 32, 64, 128, 1024 * 2, 1024 * 4};
 static int g_write_id = 1;
-static uint64_t g_last_written_id[DEFAULT_BLOCK_CNT];
+static uint64_t g_last_written_id_pos[DEFAULT_BLOCK_CNT];
+static uint64_t g_last_written_id[DEFAULT_BLOCK_CNT][LAST_WRITTEN_ID_RECALL_CNT];
 
 enum io_failure_reason {
 	IO_FAILURE_NO_FAILURE,
@@ -1467,16 +1469,25 @@ blockdev_test_long_running(void)
 
 						// 2. should not read outdated data
 						uint64_t cur_id = cur_buf[0];
-						if (cur_id < g_last_written_id[io->offset + i]) {
+						int recall_pos = (g_last_written_id_pos[io->offset + i] + LAST_WRITTEN_ID_RECALL_CNT - 1) % LAST_WRITTEN_ID_RECALL_CNT;
+						uint64_t last_written_id = g_last_written_id[io->offset + i][recall_pos];
+						if (cur_id < last_written_id) {
 							ok = false;
 							failed_offset = io->offset + i;
 							printf("Outdated IO: %ld, %ld, %ld, %ld, %d, %d\n",
 								cur_id,
-								g_last_written_id[io->offset + i],
+								last_written_id,
 								total_io_cnt,
 								total_write_io_cnt,
 								io->offset,
 								io->block_cnt);
+							
+							printf("Last %d written ids: \n", LAST_WRITTEN_ID_RECALL_CNT);
+							for (int k = 0; k < LAST_WRITTEN_ID_RECALL_CNT; k++) {
+								printf("%ld, ", g_last_written_id[io->offset + i][k]);
+							}
+							printf("\n");
+
 							failure_reason = IO_FAILURE_OUTDATED;
 							goto end;
 						}
@@ -1485,9 +1496,7 @@ blockdev_test_long_running(void)
 						// a) last written id of the previous batches
 						// b) the id of any write io in the batch; if the write io fails,
 						// then set it to be successful.
-						// c) if g_last_written_id is zero, then normally it shouldn't be 
-						// successful. One corner case is that
-						if (cur_id != g_last_written_id[io->offset + i]) {
+						if (cur_id != last_written_id) {
 							bool found = false;
 							for (int j = 0; j < qd; j++) {
 								if (cur_id == batch->elements[j].write_id) {
@@ -1503,7 +1512,7 @@ blockdev_test_long_running(void)
 								goto end;
 							}
 
-							g_last_written_id[io->offset + i] = cur_id;
+							// g_last_written_id[io->offset + i] = cur_id;
 						}
 					}
 				}
@@ -1554,7 +1563,11 @@ blockdev_test_long_running(void)
 			if (io->is_write) {
 				if (io->result) {
 					for (int i = 0; i < io->block_cnt; i++) {
-						g_last_written_id[io->offset + i] = spdk_max(g_last_written_id[io->offset + i], io->write_id);
+						int new_pos = g_last_written_id_pos[io->offset + i];
+						int recall_pos = (g_last_written_id_pos[io->offset + i] + LAST_WRITTEN_ID_RECALL_CNT - 1) % LAST_WRITTEN_ID_RECALL_CNT;
+						g_last_written_id[io->offset + i][new_pos] = 
+							spdk_max(g_last_written_id[io->offset + i][recall_pos], io->write_id);
+						g_last_written_id_pos[io->offset + i] = (new_pos + 1) % LAST_WRITTEN_ID_RECALL_CNT;
 					}
 				}
 				else {
@@ -1562,9 +1575,12 @@ blockdev_test_long_running(void)
 					// check if there is newer successful write io.
 					// if there is not, then the block is not readable.
 					for (int i = 0; i < io->block_cnt; i++) {
-						if (g_last_written_id[io->offset + i] < io->write_id) {
-							g_last_written_id[io->offset + i] = 0;
+						int new_pos = g_last_written_id_pos[io->offset + i];
+						int recall_pos = (g_last_written_id_pos[io->offset + i] + LAST_WRITTEN_ID_RECALL_CNT - 1) % LAST_WRITTEN_ID_RECALL_CNT;
+						if (g_last_written_id[io->offset + i][recall_pos] < io->write_id) {
+							g_last_written_id[io->offset + i][new_pos] = 0;
 						}
+						g_last_written_id_pos[io->offset + i] = (new_pos + 1) % LAST_WRITTEN_ID_RECALL_CNT;
 					}
 				}
 			}
