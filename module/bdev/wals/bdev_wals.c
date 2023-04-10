@@ -1195,6 +1195,11 @@ static void wals_bdev_enter_diagnostic_mode(struct wals_bdev* wals_bdev) {
 			wals_bdev->slices[slice_id].committed_tail.offset,
 			wals_bdev->slices[slice_id].committed_tail.round);
 	}
+
+	bslPrint(wals_bdev->bsl, true);
+	if (wals_bdev->bsl->enable_track) {
+		bsl_print_events();
+	}
 }
 
 /*
@@ -1823,7 +1828,9 @@ wals_bdev_start(struct wals_bdev *wals_bdev)
 	wals_bdev->index_msg_pool = spdk_mempool_create("WALS_INDEX_MSG_POOL", 128, sizeof(struct wals_index_msg), 0, SPDK_ENV_SOCKET_ID_ANY);
 
 	wals_bdev->bsl = bslCreate(wals_bdev->bsl_node_pool, wals_bdev->bstat_pool);
-	wals_bdev->bslfn = bslfnCreate(wals_bdev->bsl_node_pool, wals_bdev->bstat_pool);
+	wals_bdev->bslfn = bslfnCreate(wals_bdev->bsl_node_pool, wals_bdev->bstat_pool, wals_bdev->bsl);
+	// disable for better perf
+	bsl_enable_track(wals_bdev->bsl);
 
 	for (i = 0; i < wals_bdev->slicecnt; i++) {
 		snprintf(pool_name, sizeof(pool_name), "WALS_WRITE_FIRO_%ld", i);
@@ -1930,6 +1937,9 @@ wals_bdev_cleaner(void *ctx)
 		for (j = 0; j < x->height; j++) {
 			update[j]->level[j].forward = x->level[j].forward;
 			x->level[j].forward = NULL;
+		}
+		if (wals_bdev->bsl->enable_track) {
+			bsl_record_event(x, B_NODE_FREE);
 		}
 		wals_bdev->bslfn->tail->level[0].forward = x;
 		wals_bdev->bslfn->tail = x;

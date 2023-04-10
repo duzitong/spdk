@@ -4,11 +4,55 @@
 
 bstat *bstatClone(bstat *pb, struct spdk_mempool *pool);
 int bslRandomLevel(void);
-bskiplistNode *bslCreateNode(int level, long begin, long end, bstat *ele, struct spdk_mempool *pool);
+bskiplistNode *bslCreateNode(int level, long begin, long end, bstat *ele, bskiplist *bsl);
 void bslFreeNode(bskiplistNode *bsln, struct spdk_mempool *bstat_pool, struct spdk_mempool *node_pool);
 void bslAdjustNodeBegin(bskiplistNode *bn, long end);
 void bslAdjustNodeEnd(bskiplistNode *bn, long begin);
 
+
+struct b_node_event_track_list g_track_list;
+
+void bsl_enable_track(bskiplist* bsl) {
+    bsl->enable_track = true;
+}
+
+void bsl_record_event(bskiplistNode* node, b_node_event_type event_type) {
+    struct b_node_event_track* cur_event_track = &g_track_list.event_track[g_track_list.cur_idx];
+    cur_event_track->begin = node->begin;
+    cur_event_track->end = node->end;
+    // ele is NULL for header node
+    if (node->ele) {
+        cur_event_track->ele_begin = node->ele->begin;
+        cur_event_track->ele_end = node->ele->end;
+        cur_event_track->round = node->ele->round;
+        cur_event_track->mem_offset = node->ele->l.bdevOffset;
+    }
+    cur_event_track->event_type = event_type;
+    g_track_list.cur_idx = (g_track_list.cur_idx + 1) % BSKIPLIST_TRACK_LEN;
+}
+
+void bsl_print_events(void) {
+    printf("Last %d events: \n", BSKIPLIST_TRACK_LEN);
+    int i = g_track_list.cur_idx;
+    do {
+        struct b_node_event_track* cur_event_track = &g_track_list.event_track[i];
+        if (cur_event_track->event_type == B_NODE_NONE) {
+            break;
+        }
+
+        printf("Type: %d, Node: [%ld, %ld], Ele: [%ld, %ld, %ld, %ld]\n",
+            cur_event_track->event_type,
+            cur_event_track->begin,
+            cur_event_track->end,
+            cur_event_track->ele_begin,
+            cur_event_track->ele_end,
+            cur_event_track->mem_offset,
+            cur_event_track->round
+            );
+        
+        i = (i + 1) % BSKIPLIST_TRACK_LEN;
+    } while (i != g_track_list.cur_idx);
+}
 
 bstat *bstatBdevCreate(long begin, long end, long round, long unsigned int bdevOffset, struct spdk_mempool *pool) {
     bstat *pb = spdk_mempool_get(pool);
@@ -52,12 +96,16 @@ int bslRandomLevel(void) {
 }
 
 /* Create a skiplist node with the specified number of levels. */
-bskiplistNode *bslCreateNode(int level, long begin, long end, bstat *ele, struct spdk_mempool *pool) {
-    bskiplistNode *bn = spdk_mempool_get(pool);
+bskiplistNode *bslCreateNode(int level, long begin, long end, bstat *ele, bskiplist *bsl) {
+    bskiplistNode *bn = spdk_mempool_get(bsl->node_pool);
     bn->begin = begin;
     bn->end = end;
     bn->ele = ele;
     bn->height = level;
+
+    if (bsl->enable_track) {
+        bsl_record_event(bn, B_NODE_CREATE);
+    }
     return bn;
 }
 
@@ -70,43 +118,48 @@ bskiplist *bslCreate(struct spdk_mempool *node_pool, struct spdk_mempool *bstat_
     bsl->level = 1;
     bsl->node_pool = node_pool;
     bsl->bstat_pool = bstat_pool;
-    bsl->header = bslCreateNode(BSKIPLIST_MAXLEVEL,-1, -1, NULL, node_pool);
+    bsl->header = bslCreateNode(BSKIPLIST_MAXLEVEL,-1, -1, NULL, bsl);
+    bsl->enable_track = false;
     for (j = 0; j < BSKIPLIST_MAXLEVEL; j++) {
         bsl->header->level[j].forward = NULL;
     }
     return bsl;
 }
 
-bskiplistFreeNodes *bslfnCreate(struct spdk_mempool *node_pool, struct spdk_mempool *bstat_pool) {
+bskiplistFreeNodes *bslfnCreate(struct spdk_mempool *node_pool, struct spdk_mempool *bstat_pool, bskiplist* bsl) {
     bskiplistFreeNodes *bslfn;
     bslfn = calloc(1, sizeof(*bslfn));
     bslfn->node_pool = node_pool;
     bslfn->bstat_pool = bstat_pool;
-    bslfn->header = bslfn->tail = bslCreateNode(BSKIPLIST_MAXLEVEL,-1, -1, NULL, node_pool);
+    bslfn->header = bslfn->tail = bslCreateNode(BSKIPLIST_MAXLEVEL,-1, -1, NULL, bsl);
     bslfn->header->level[0].forward = NULL;
     return bslfn;
 }
 
-void bslPrint(bskiplist *bsl, char full) {
+void bslPrint(bskiplist *bsl, bool full) {
     bskiplistNode *x = bsl->header->level[0].forward;
     int i;
+    char buf[128];
     
-    if (full) {
-        while (x) {
-            printf("[%ld, %ld]->[%ld, %ld] ", x->begin, x->end, x->ele->begin, x->ele->end);
-            x = x->level[0].forward;
-        }
-        printf("\n");
-    }
+    // if (full) {
+    //     printf("Level 0: \n");
+    //     while (x) {
+    //         bslPrintNode(x, buf, 128);
+    //         printf("%s\n", buf);
+    //         x = x->level[0].forward;
+    //     }
+    //     printf("\n");
+    // }
 
     for (i = 0; i < bsl->level; i++) {
-        printf("%2d: ", i+1);
+        printf("Level %2d:\n", i+1);
         x = bsl->header;
         while (x) {
-            printf("[%ld, %ld] ", x->begin, x->end);
+            bslPrintNode(x, buf, 128);
+            printf("%s\n", buf);
             x = x->level[i].forward;
         }
-        printf("\n");
+        printf("\n\n");
     }
 }
 
@@ -114,7 +167,7 @@ void bslPrintNode(bskiplistNode *bsln, char* buf, size_t size) {
     if (bsln) {
         snprintf(buf,
             size,
-            "%02d: [%ld, %ld] -> [%ld, %ld, %ld, %ld]: [%d, %d]\n",
+            "%02d: [%ld, %ld] -> [%ld, %ld, %ld, %ld]: [%d, %d]",
             bsln->height,
             bsln->begin,
             bsln->end,
@@ -125,7 +178,7 @@ void bslPrintNode(bskiplistNode *bsln, char* buf, size_t size) {
             bsln->ele->failed,
             bsln->ele->failed_target_id);
     } else {
-        snprintf(buf, size, "NULL bsl node\n");
+        snprintf(buf, size, "NULL bsl node");
     }
 }
 
@@ -208,11 +261,11 @@ bskiplistNode *bslInsert(bskiplist *bsl, long begin, long end, bstat *ele, bskip
         bsl->level = level;
     }
 
-    x = bslCreateNode(level, begin, end, ele, bsl->node_pool);
+    x = bslCreateNode(level, begin, end, ele, bsl);
 
     if (updatee[0]->level[0].forward == updateb[0]) {
         // in updateb[0] scope, split to 3 nodes
-        y = bslCreateNode(updateb[0]->height, end + 1, updateb[0]->end, bstatClone(updateb[0]->ele, bsl->bstat_pool), bsl->node_pool);
+        y = bslCreateNode(updateb[0]->height, end + 1, updateb[0]->end, bstatClone(updateb[0]->ele, bsl->bstat_pool), bsl);
         updateb[0]->end = begin - 1;
 
         if (level < updateb[0]->height) {
@@ -247,6 +300,11 @@ bskiplistNode *bslInsert(bskiplist *bsl, long begin, long end, bstat *ele, bskip
         }
     } else {
         // outer ub.forward scope; remove nodes [ub.forward, ue]; adjust ub & ue.forward
+        if (bsl->enable_track) {
+            for (y = updateb[0]->level[0].forward; y != updatee[0]->level[0].forward; y = y->level[0].forward) {
+                bsl_record_event(y, B_NODE_FREE);
+            }
+        }
         bslfn->tail->level[0].forward = updateb[0]->level[0].forward;
         bslfn->tail = updatee[0];
 
@@ -268,6 +326,7 @@ bskiplistNode *bslInsert(bskiplist *bsl, long begin, long end, bstat *ele, bskip
             updateb[i]->level[i].forward = x;
         }
 
+        // for free nodes list
         updatee[0]->level[0].forward = NULL;
     }
 
