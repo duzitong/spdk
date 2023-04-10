@@ -78,6 +78,9 @@ bstat *bstatClone(bstat *pb, struct spdk_mempool *pool) {
     bstat *clone = spdk_mempool_get(pool);
     clone->begin = pb->begin;
     clone->end = pb->end;
+    clone->round = pb->round;
+    clone->failed = pb->failed;
+    clone->failed_target_id = pb->failed_target_id;
     clone->type = pb->type;
     clone->l = pb->l;
     return clone;
