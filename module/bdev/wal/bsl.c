@@ -152,7 +152,7 @@ void bslPrint(bskiplist *bsl, bool full) {
     // }
 
     for (i = 0; i < bsl->level; i++) {
-        printf("Level %2d:\n", i+1);
+        printf("Level %2d:\n", i);
         x = bsl->header;
         while (x) {
             bslPrintNode(x, buf, 128);
@@ -165,18 +165,28 @@ void bslPrint(bskiplist *bsl, bool full) {
 
 void bslPrintNode(bskiplistNode *bsln, char* buf, size_t size) {
     if (bsln) {
-        snprintf(buf,
-            size,
-            "%02d: [%ld, %ld] -> [%ld, %ld, %ld, %ld]: [%d, %d]",
-            bsln->height,
-            bsln->begin,
-            bsln->end,
-            bsln->ele->begin,
-            bsln->ele->end,
-            bsln->ele->l.bdevOffset,
-            bsln->ele->round,
-            bsln->ele->failed,
-            bsln->ele->failed_target_id);
+        if (bsln->ele) {
+            snprintf(buf,
+                size,
+                "%02d: [%ld, %ld] -> [%ld, %ld, %ld, %ld]: [%d, %d]",
+                bsln->height,
+                bsln->begin,
+                bsln->end,
+                bsln->ele->begin,
+                bsln->ele->end,
+                bsln->ele->l.bdevOffset,
+                bsln->ele->round,
+                bsln->ele->failed,
+                bsln->ele->failed_target_id);
+        }
+        else {
+            snprintf(buf,
+                size,
+                "%02d: [%ld, %ld] -> NULL",
+                bsln->height,
+                bsln->begin,
+                bsln->end);
+        }
     } else {
         snprintf(buf, size, "NULL bsl node");
     }
