@@ -767,6 +767,17 @@ cli_unregister_read_pollers(struct wals_target *target, struct wals_bdev *wals_b
     return 0;
 }
 
+static int
+cli_diagnose_unregister_read_pollers(struct wals_target *target, struct wals_bdev *wals_bdev) {
+    spdk_poller_unregister(&g_destage_info_poller);
+    return 0;
+}
+
+static int
+cli_diagnose_unregister_write_pollers(struct wals_target *target, struct wals_bdev *wals_bdev) {
+    return 0;
+}
+
 // WRITE THREAD
 static int
 rdma_cli_connection_poller(void* ctx) {
@@ -1030,6 +1041,8 @@ static struct wals_target_module g_rdma_cli_module = {
     .unregister_write_pollers = cli_unregister_write_pollers,
     .register_read_pollers = cli_register_read_pollers,
     .unregister_read_pollers = cli_unregister_read_pollers,
+    .diagnose_unregister_read_pollers = cli_diagnose_unregister_read_pollers,
+    .diagnose_unregister_write_pollers = cli_diagnose_unregister_write_pollers,
 };
 
 TARGET_MODULE_REGISTER(&g_rdma_cli_module)

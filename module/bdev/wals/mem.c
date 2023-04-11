@@ -136,6 +136,18 @@ mem_unregister_read_pollers(struct wals_target *target, struct wals_bdev *wals_b
     return 0;
 }
 
+static int
+mem_diagnose_unregister_read_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
+{
+    return 0;
+}
+
+static int
+mem_diagnose_unregister_write_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
+{
+    return 0;
+}
+
 
 static struct wals_target_module g_mem_module = {
 	.name = "mem",
@@ -148,6 +160,8 @@ static struct wals_target_module g_mem_module = {
     .unregister_write_pollers = mem_unregister_write_pollers,
     .register_read_pollers = mem_register_read_pollers,
     .unregister_read_pollers = mem_unregister_read_pollers,
+    .diagnose_unregister_read_pollers = mem_diagnose_unregister_read_pollers,
+    .diagnose_unregister_write_pollers = mem_diagnose_unregister_write_pollers,
 };
 TARGET_MODULE_REGISTER(&g_mem_module)
 

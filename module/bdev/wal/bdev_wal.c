@@ -1508,7 +1508,7 @@ wal_bdev_start(struct wal_bdev *wal_bdev)
 	wal_bdev->bsl_node_pool = spdk_mempool_create("WAL_BSL_NODE_POOL", mempool_size, sizeof(bskiplistNode), SPDK_MEMPOOL_DEFAULT_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
 
 	wal_bdev->bsl = bslCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
-	wal_bdev->bslfn = bslfnCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool);
+	wal_bdev->bslfn = bslfnCreate(wal_bdev->bsl_node_pool, wal_bdev->bstat_pool, wal_bdev->bsl);
 	TAILQ_INIT(&wal_bdev->pending_writes);
 	for (i = 0; i < MAX_OUTSTANDING_MOVES; i++) {
 		wal_bdev->mover_context[i].state = MOVER_IDLE;

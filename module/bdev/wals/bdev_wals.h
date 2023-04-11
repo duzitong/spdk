@@ -332,8 +332,14 @@ struct wals_target_module {
 	/* register read pollers */
 	int (*register_read_pollers)(struct wals_target *target, struct wals_bdev *wals_bdev);
 
-	/* register read pollers */
+	/* unregister read pollers */
 	int (*unregister_read_pollers)(struct wals_target *target, struct wals_bdev *wals_bdev);
+
+	// unregister read pollers for diagnostic purpose
+	int (*diagnose_unregister_read_pollers)(struct wals_target *target, struct wals_bdev *wals_bdev);
+
+	// unregister write pollers for diagnostic purpose
+	int (*diagnose_unregister_write_pollers)(struct wals_target *target, struct wals_bdev *wals_bdev);
 
 	TAILQ_ENTRY(wals_target_module) link;
 };
@@ -430,6 +436,8 @@ struct wals_bdev {
 	struct wals_target_module	*module;
 
 	uint64_t		ch_create_tsc;
+
+	bool in_diagnostic_mode;
 };
 
 struct wals_slice_config {
@@ -572,5 +580,21 @@ void
 wals_target_write_complete(struct wals_bdev_io *wals_io, bool success, int target_id);
 void
 wals_bdev_io_complete(struct wals_bdev_io *wals_io, enum spdk_bdev_io_status status);
+
+static inline bool log_position_gt(struct wals_log_position* lhs, struct wals_log_position* rhs) {
+	return (lhs->round > rhs->round) || (lhs->offset > rhs->offset && lhs->round == rhs->round);
+}
+
+static inline bool log_position_geq(struct wals_log_position* lhs, struct wals_log_position* rhs) {
+	return log_position_gt(lhs, rhs) || (lhs->round == rhs->round && lhs->offset == rhs->offset);
+}
+
+static inline bool log_position_lt(struct wals_log_position* lhs, struct wals_log_position* rhs) {
+	return !log_position_geq(lhs, rhs);
+}
+
+static inline bool log_position_leq(struct wals_log_position* lhs, struct wals_log_position* rhs) {
+	return !log_position_gt(lhs, rhs);
+}
 
 #endif /* SPDK_BDEV_WALS_INTERNAL_H */
