@@ -429,16 +429,7 @@ wals_bdev_get_targets_log_head_min(struct wals_slice *slice)
 	}
 
 	for (i = 1; i < NUM_TARGETS; i++) {
-		if (head[i].round > head[min].round) {
-			continue;
-		}
-
-		if (head[i].round < head[min].round) {
-			min = i;
-			continue;
-		}
-
-		if (head[i].offset < head[min].offset) {
+		if (log_position_lt(&head[i], &head[min])) {
 			min = i;
 		}
 	}
@@ -668,7 +659,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 			int target_id = fixed_target_id;
 			if (fixed_target_id == -1) {
 				for (int i = 0; i < NUM_TARGETS; i++) {
-					if (bn->ele->failed_target_id != slice->targets[i]->id) {
+					if (bn->ele->failed_target_id != slice->targets[i]->target_id) {
 						target_id = i;
 						break;
 					}
@@ -1017,7 +1008,7 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 
 	// must happen before sending write IOs to avoid sync return.
 	for (i = 0; i < NUM_TARGETS; i++) {
-		wals_io->failed_target_id += slice->targets[i]->id;
+		wals_io->failed_target_id += slice->targets[i]->target_id;
 	}
 
 	// call module to submit to all targets
@@ -1793,8 +1784,7 @@ wals_bdev_start_all(struct wals_bdev_config *wals_cfg)
 				return -EFAULT;
 			}
 
-			// TODO: target allocation should be done by MDS
-			wals_bdev->slices[i].targets[j]->id = j;
+			wals_bdev->slices[i].targets[j]->target_id = j;
 			if (wals_bdev->slices[i].targets[j]->log_blockcnt < wals_bdev->slices[i].log_blockcnt) {
 				wals_bdev->slices[i].log_blockcnt = wals_bdev->slices[i].targets[j]->log_blockcnt;
 			}

@@ -197,9 +197,14 @@ struct wals_lp_firo {
 	struct spdk_mempool					*entry_pool;
 };
 
+// actually mean 'target per slice', i.e. two slices will have 8 targets.
 struct wals_target {
-	// 1-based
-	int id;
+	// target_id: always range from 0 to 3 (inclusive).
+	int target_id;
+	// node_id: can be any int
+	// wals should never touch node_id field!
+	// TODO: make it in private_info
+	int node_id;
 
 	volatile uint64_t			log_blockcnt;
 
