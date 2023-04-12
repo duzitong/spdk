@@ -368,6 +368,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 		case RDMA_SERVER_DISCONNECTED:
 		{
 			// TODO: async disconnection gc
+			break;
 		}
 		case RDMA_CLI_ADDR_RESOLVING:
 		case RDMA_CLI_ROUTE_RESOLVING:
