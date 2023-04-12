@@ -105,6 +105,18 @@ static int wals_bdev_log_head_update(void *ctx);
 static int wals_bdev_cleaner(void *ctx);
 static int wals_bdev_stat_report(void *ctx);
 
+static void wals_slice_update_head(struct wals_slice* slice, struct wals_log_position* new_pos) {
+	if (log_position_gt(&slice->head, new_pos)) {
+		SPDK_NOTICELOG("Not updating slice head backward: [%ld, %ld] -> [%ld, %ld] is rejected\n",
+			slice->head.offset,
+			slice->head.round,
+			new_pos->offset,
+			new_pos->round);
+	}
+
+	slice->head = *new_pos;
+}
+
 static int
 wals_bdev_foreach_target_call(struct wals_bdev *wals_bdev, wals_target_fn fn, char *name)
 {
@@ -508,7 +520,7 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 
 		temp = slice->head;
 		wals_bdev_firo_remove(slice->read_firo, wals_io->firo_entry, &temp);
-		slice->head = temp;
+		wals_slice_update_head(slice, &temp);
 
 		dma_heap_put_page(wals_io->wals_bdev->read_heap, wals_io->dma_page);
 
@@ -1877,12 +1889,7 @@ wals_bdev_log_head_update(void *ctx)
 		slice = &wals_bdev->slices[i];
 		if (wals_bdev_firo_empty(slice->read_firo)) {
 			struct wals_log_position new_head = wals_bdev_get_targets_log_head_min(slice);
-
-			if (log_position_gt(&slice->head, &new_head)) {
-				SPDK_ERRLOG("Received half head information\n");
-				continue;
-			}
-			slice->head = wals_bdev_get_targets_log_head_min(slice);
+			wals_slice_update_head(slice, &new_head);
 			cnt++;
 		}
 	}

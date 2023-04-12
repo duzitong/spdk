@@ -230,6 +230,7 @@ struct wals_slice {
 	// 
 	// It should be the minimum of destage tail of all four data nodes, 
 	// because it can be useful for a data node to recover from other nodes.
+	// NOTE: DO NOT directly update it! Use wals_slice_update_head instead.
 	volatile wals_log_position	head;
 
 	wals_log_position			committed_tail;
