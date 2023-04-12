@@ -509,8 +509,8 @@ static void cli_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
         io_queue->head = (io_queue->head + 1) % PENDING_IO_MAX_CNT;
     }
     else {
-        SPDK_NOTICELOG("Ignoring io (%p, %d) due to already timeout\n",
-            io_context->io, io_queue->node_id);
+        SPDK_NOTICELOG("Ignoring io (%p, %d, %d) due to already timeout\n",
+            io_context->io, io_queue->node_id, io_context->target_id);
     }
 }
 
@@ -533,8 +533,8 @@ static void rdma_operation_done(void* arg, bool success) {
         io_queue->head = (io_queue->head + 1) % PENDING_IO_MAX_CNT;
     }
     else {
-        SPDK_NOTICELOG("Ignoring io (%p, %d) due to already timeout\n",
-            io_context->io, io_queue->node_id);
+        SPDK_NOTICELOG("Ignoring io (%p, %d, %d) due to already timeout\n",
+            io_context->io, io_queue->node_id, io_context->target_id);
     }
 }
 
@@ -599,19 +599,19 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
     struct pending_io_queue* io_queue = &g_pending_write_io_queue[target->node_id];
 
     if (!rdma_connection_is_connected(slice->rdma_conn)) {
-        wals_target_write_complete(wals_io, false, target->node_id);
+        wals_target_write_complete(wals_io, false, target->target_id);
         return 0;
     }
 
     if (is_io_queue_full(io_queue)) {
         SPDK_ERRLOG("Should not happen: rdma write io queue is full\n");
-        wals_target_write_complete(wals_io, false, target->node_id);
+        wals_target_write_complete(wals_io, false, target->target_id);
         return 0;
     }
 
     if (offset + cnt > slice->rdma_conn->handshake_buf[1].block_cnt) {
         SPDK_ERRLOG("Write out of remote PMEM range: %ld %ld\n", offset, cnt);
-        wals_target_write_complete(wals_io, false, target->node_id);
+        wals_target_write_complete(wals_io, false, target->target_id);
         return 0;
     }
 
@@ -668,7 +668,7 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
 		SPDK_NOTICELOG("Local: %p %d; Remote: %p %d; Len = %d\n",
 			(void*)sge.addr, sge.lkey, (void*)wr.wr.rdma.remote_addr, wr.wr.rdma.rkey,
 			sge.length);
-		wals_target_write_complete(wals_io, false, target->node_id);
+		wals_target_write_complete(wals_io, false, target->target_id);
         io_queue->tail = (io_queue->tail + PENDING_IO_MAX_CNT - 1) % PENDING_IO_MAX_CNT;
         return 0;
 	}
@@ -942,9 +942,10 @@ rdma_cq_poller(void* ctx) {
 					if (wc_buf[j].status != IBV_WC_SUCCESS) {
                         // TODO: should set the qp state to error, or reconnect?
                         if (rdma_context->io_fail_cnt % 10000 == 0) {
-                            SPDK_ERRLOG("IO (%p, %d) RDMA op %d failed with status %d\n",
+                            SPDK_ERRLOG("IO (%p, %d, %d) RDMA op %d failed with status %d\n",
                                 io_context->io,
                                 node_id,
+                                io_context->target_id,
                                 wc_buf[j].opcode,
                                 wc_buf[j].status);
                         }
@@ -1009,8 +1010,9 @@ pending_io_timeout_poller(void* ctx) {
     for (j = io_queue->head;
         j != io_queue->tail;
         j = (j + 1) % PENDING_IO_MAX_CNT) {
-        struct wals_bdev_io* io = io_queue->pending_ios[j].io;
-        uint64_t timeout_ticks = io_queue->pending_ios[j].timeout_ticks;
+        struct pending_io_context* io_context = &io_queue->pending_ios[j];
+        struct wals_bdev_io* io = io_context->io;
+        uint64_t timeout_ticks = io_context->timeout_ticks;
 
         if (timeout_ticks < current_ticks) {
             // timeout.
@@ -1027,7 +1029,7 @@ pending_io_timeout_poller(void* ctx) {
                 j);
             switch (io_queue->io_type) {
                 case WALS_RDMA_WRITE:
-                    wals_target_write_complete(io, false, io_queue->node_id);
+                    wals_target_write_complete(io, false, io_context->target_id);
                     break;
                 case WALS_RDMA_READ:
                 case WALS_NVMF_READ:
