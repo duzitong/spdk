@@ -656,6 +656,7 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
     io_queue->pending_ios[io_queue->tail] =
     (struct pending_io_context) {
         .io = wals_io,
+        .target_id = target->target_id,
         .timeout_ticks = calc_timeout_ticks(wals_io),
         .io_queue = io_queue
     };
