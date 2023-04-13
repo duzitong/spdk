@@ -19,7 +19,7 @@
 // currently a fake one, to make sure that it fully RDMA reads the struct
 #define DESTAGE_INFO_CHECKSUM 666
 // 1ms should be enough for 512-byte payload.
-#define TIMEOUT_MS_PER_BLOCK 10
+#define TIMEOUT_MS_PER_BLOCK 1000
 
 // must be greater or equal to NUM_TARGETS
 #define NUM_NODES 4
@@ -493,7 +493,7 @@ end:
     return 0;
 }
 
-static void cli_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
+static void nvmf_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
 	struct pending_io_context *io_context = ref;
     struct pending_io_queue* io_queue = io_context->io_queue;
 
@@ -568,7 +568,7 @@ cli_submit_core_read_request(struct wals_target* target, void *data, uint64_t of
         data,
         slice->nvmf_block_offset + offset * multiplier,
         cnt * multiplier,
-        cli_read_done,
+        nvmf_read_done,
         &io_queue->pending_ios[io_queue->tail],
         0);
 
