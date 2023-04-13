@@ -934,6 +934,7 @@ rdma_cq_poller(void* ctx) {
     spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_RDMA_CQ, 0, 0, (uintptr_t)ctx);
     for (int node_id = 0; node_id < NUM_NODES; node_id++) {
         struct cli_rdma_context* rdma_context = g_rdma_conns[node_id]->rdma_context;
+        pthread_rwlock_rdlock(&g_rdma_conns[node_id]->lock);
         if (rdma_connection_is_connected(g_rdma_conns[node_id])) {
             int cnt = ibv_poll_cq(g_rdma_conns[node_id]->cq, WC_BATCH_SIZE, wc_buf);
             if (cnt < 0) {
@@ -965,7 +966,7 @@ rdma_cq_poller(void* ctx) {
                     if (wc_buf[j].wr_id == 0) {
                         // special case: the wr is for reading destage tail or writing commit tail.
                         // do nothing
-                        continue;
+                        goto end_for;
                     }
 
                     if (wc_buf[j].opcode == IBV_WC_RDMA_READ) {
@@ -981,7 +982,10 @@ rdma_cq_poller(void* ctx) {
                 }
             }
         }
+end_for:
+        pthread_rwlock_unlock(&g_rdma_conns[node_id]->lock);
     }
+
     spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_RDMA_CQ, 0, 0, (uintptr_t)ctx);
     return poller_rc;
 }
