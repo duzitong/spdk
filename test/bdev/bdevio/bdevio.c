@@ -1593,30 +1593,30 @@ blockdev_test_long_running(void)
 end:
 	if (!ok) {
 		printf("Failure reason is %d\n", failure_reason);
-	}
-	printf("#IO: %ld, #Write IO: %ld, #Failed write IO: %ld, #Failed read IO: %ld\n", 
-		total_io_cnt,
-		total_write_io_cnt,
-		total_failed_write_io_cnt,
-		total_failed_read_io_cnt);
-	
-	printf("Entering diagnostic mode\n");
-	blockdev_flush();
+		printf("#IO: %ld, #Write IO: %ld, #Failed write IO: %ld, #Failed read IO: %ld\n", 
+			total_io_cnt,
+			total_write_io_cnt,
+			total_failed_write_io_cnt,
+			total_failed_read_io_cnt);
+		
+		printf("Entering diagnostic mode\n");
+		blockdev_flush();
 
-	for (int target = 0; target < 4; target++) {
-		read_md->force_read_from_disk = false;
-		read_md->target_id = target;
-		struct io_test_unit* io_unit = io_test_unit_alloc(NULL,
-			buf,
-			read_md,
-			false,
-			0,
-			1,
-			failed_offset);
-		g_remaining_io = 1;
-		blockdev_read_many(true, io_unit);
+		for (int target = 0; target < 4; target++) {
+			read_md->force_read_from_disk = false;
+			read_md->target_id = target;
+			struct io_test_unit* io_unit = io_test_unit_alloc(NULL,
+				buf,
+				read_md,
+				false,
+				0,
+				1,
+				failed_offset);
+			g_remaining_io = 1;
+			blockdev_read_many(true, io_unit);
 
-		printf("Result from target %d: %ld\n", target, ((uint64_t*)buf)[0]);
+			printf("Result from target %d: %ld\n", target, ((uint64_t*)buf)[0]);
+		}
 	}
 
 	spdk_free(buf);
