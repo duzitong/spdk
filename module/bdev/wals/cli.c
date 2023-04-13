@@ -19,7 +19,7 @@
 // currently a fake one, to make sure that it fully RDMA reads the struct
 #define DESTAGE_INFO_CHECKSUM 666
 // 1ms should be enough for 512-byte payload.
-#define TIMEOUT_MS_PER_BLOCK 1000
+#define TIMEOUT_MS_PER_BLOCK 10
 
 // must be greater or equal to NUM_TARGETS
 #define NUM_NODES 4
@@ -934,9 +934,10 @@ rdma_cq_poller(void* ctx) {
     spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_RDMA_CQ, 0, 0, (uintptr_t)ctx);
     for (int node_id = 0; node_id < NUM_NODES; node_id++) {
         struct cli_rdma_context* rdma_context = g_rdma_conns[node_id]->rdma_context;
-        pthread_rwlock_rdlock(&g_rdma_conns[node_id]->lock);
         if (rdma_connection_is_connected(g_rdma_conns[node_id])) {
+            pthread_rwlock_rdlock(&g_rdma_conns[node_id]->lock);
             int cnt = ibv_poll_cq(g_rdma_conns[node_id]->cq, WC_BATCH_SIZE, wc_buf);
+            pthread_rwlock_unlock(&g_rdma_conns[node_id]->lock);
             if (cnt < 0) {
                 // hopefully the reconnection poller will spot the error and try to reconnect
 				SPDK_ERRLOG("ibv_poll_cq failed\n");
@@ -966,7 +967,7 @@ rdma_cq_poller(void* ctx) {
                     if (wc_buf[j].wr_id == 0) {
                         // special case: the wr is for reading destage tail or writing commit tail.
                         // do nothing
-                        goto end_for;
+                        continue;
                     }
 
                     if (wc_buf[j].opcode == IBV_WC_RDMA_READ) {
@@ -982,8 +983,6 @@ rdma_cq_poller(void* ctx) {
                 }
             }
         }
-end_for:
-        pthread_rwlock_unlock(&g_rdma_conns[node_id]->lock);
     }
 
     spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_RDMA_CQ, 0, 0, (uintptr_t)ctx);
