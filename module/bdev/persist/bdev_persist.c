@@ -465,8 +465,9 @@ persist_nvme_poller(void* ctx) {
 
 // async, no guarentee when the memcpy actually completes.
 static int persist_peer_memcpy(int peer_id, struct persist_disk* pdisk, uint64_t start_offset, uint64_t end_offset) {
+	pthread_rwlock_rdlock(&pdisk->peer_conns[peer_id]->lock);
 	if (start_offset == end_offset) {
-		return 0;
+		goto end;
 	}
 	struct ibv_send_wr read_wr, *bad_read_wr = NULL;
 	struct ibv_sge read_sge;
@@ -493,7 +494,11 @@ static int persist_peer_memcpy(int peer_id, struct persist_disk* pdisk, uint64_t
 	int rc = ibv_post_send(pdisk->peer_conns[peer_id]->cm_id->qp, &read_wr, &bad_read_wr);
 	if (rc != 0) {
 		SPDK_ERRLOG("post send failed\n");
+		goto end;
 	}
+
+end:
+	pthread_rwlock_unlock(&pdisk->peer_conns[peer_id]->lock);
 	return rc;
 }
 

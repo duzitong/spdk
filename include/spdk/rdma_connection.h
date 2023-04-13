@@ -71,6 +71,7 @@ enum rdma_status {
 };
 
 struct rdma_connection {
+	pthread_rwlock_t lock;
 	// one node acts as recover server,
 	// the other one acts as the client.
 	// both should support reconnection.

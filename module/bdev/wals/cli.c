@@ -241,7 +241,6 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
         return NULL;
     }
 
-
     int rc;
     // TODO: error case should recycle resources
     struct wals_target *target = calloc(1, sizeof(struct wals_target));
@@ -428,22 +427,23 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     int rc;
     struct wals_cli_slice* slice = target->private_info;
     struct pending_io_queue* io_queue = &g_pending_read_io_queue[target->node_id];
+    pthread_rwlock_rdlock(&slice->rdma_conn->lock);
 
     if (!rdma_connection_is_connected(slice->rdma_conn)) {
         wals_target_read_complete(wals_io, false);
-        return 0;
+        goto end;
     }
 
     if (is_io_queue_full(io_queue)) {
         SPDK_ERRLOG("Should not happen: rdma read io queue is full\n");
         wals_target_read_complete(wals_io, false);
-        return 0;
+        goto end;
     }
 
     if (offset + cnt > slice->rdma_conn->handshake_buf[1].block_cnt) {
         SPDK_ERRLOG("READ out of remote PMEM range: %ld %ld\n", offset, cnt);
         wals_target_read_complete(wals_io, false);
-        return 0;
+        goto end;
     }
 
     struct ibv_send_wr wr, *bad_wr = NULL;
@@ -485,9 +485,11 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
             sge.length);
         wals_target_read_complete(wals_io, false);
         io_queue->tail = (io_queue->tail + PENDING_IO_MAX_CNT - 1) % PENDING_IO_MAX_CNT;
-        return 0;
+        goto end;
     }
 
+end:
+    pthread_rwlock_unlock(&slice->rdma_conn->lock);
     return 0;
 }
 
@@ -597,22 +599,23 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
     struct wals_cli_slice* slice = target->private_info;
     struct cli_rdma_context* rdma_context = slice->rdma_conn->rdma_context;
     struct pending_io_queue* io_queue = &g_pending_write_io_queue[target->node_id];
+    pthread_rwlock_rdlock(&slice->rdma_conn->lock);
 
     if (!rdma_connection_is_connected(slice->rdma_conn)) {
         wals_target_write_complete(wals_io, false, target->target_id);
-        return 0;
+        goto end;
     }
 
     if (is_io_queue_full(io_queue)) {
         SPDK_ERRLOG("Should not happen: rdma write io queue is full\n");
         wals_target_write_complete(wals_io, false, target->target_id);
-        return 0;
+        goto end;
     }
 
     if (offset + cnt > slice->rdma_conn->handshake_buf[1].block_cnt) {
         SPDK_ERRLOG("Write out of remote PMEM range: %ld %ld\n", offset, cnt);
         wals_target_write_complete(wals_io, false, target->target_id);
-        return 0;
+        goto end;
     }
 
     struct wals_metadata* metadata = data;
@@ -671,9 +674,11 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
 			sge.length);
 		wals_target_write_complete(wals_io, false, target->target_id);
         io_queue->tail = (io_queue->tail + PENDING_IO_MAX_CNT - 1) % PENDING_IO_MAX_CNT;
-        return 0;
+        goto end;
 	}
 
+end:
+    pthread_rwlock_unlock(&slice->rdma_conn->lock);
     return 0;
 }
 
@@ -1018,7 +1023,7 @@ pending_io_timeout_poller(void* ctx) {
         if (timeout_ticks < current_ticks) {
             // timeout.
             poller_rc = SPDK_POLLER_BUSY;
-            SPDK_NOTICELOG("IO (%p, %p, %p %d, %d, %d, %d, %d, %d) timeout\n",
+            SPDK_NOTICELOG("IO (%p, %p, %p %d, %d, %ld, %d, %d, %d) timeout\n",
                 io,
                 io->orig_io,
                 io_queue,

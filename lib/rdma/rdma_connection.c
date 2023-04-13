@@ -3,6 +3,7 @@
  *   All rights reserved.
  */
 
+#include "pthread.h"
 #include "spdk/stdinc.h"
 
 #include "spdk/rdma_connection.h"
@@ -23,6 +24,7 @@ struct rdma_connection* rdma_connection_alloc(
 	rdma_connection_connected_cb connected_cb)
 {
     struct rdma_connection* rdma_conn = calloc(1, sizeof(struct rdma_connection));
+	pthread_rwlock_init(&rdma_conn->lock, NULL);
     void* rdma_context = calloc(1, context_length);
     void* handshake_buffer = spdk_zmalloc(VALUE_2MB, VALUE_2MB, NULL,
                     SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
@@ -65,8 +67,19 @@ struct rdma_connection* rdma_connection_alloc(
     return rdma_conn;
 }
 
+// Must not hold any lock when entering the function!
 int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 	int rc = 0;
+
+	rc = pthread_rwlock_trywrlock(&rdma_conn->lock);
+	
+	if (rc != 0) {
+		if (rc != EBUSY) {
+			SPDK_NOTICELOG("Unexpected error %d when trying to write-lock\n", rc);
+		}
+		return 0;
+	}
+
 	switch (rdma_conn->status) {
 		case RDMA_CLI_INITIALIZED:
 		case RDMA_SERVER_INITIALIZED:
@@ -75,7 +88,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 			rc = rdma_create_id(rdma_conn->channel, &cm_id, NULL, RDMA_PS_TCP);
 			if (rc != 0) {
 				SPDK_ERRLOG("rdma_create_id failed\n");
-				return -1;
+				goto end;
 			}
 			if (rdma_conn->is_server) {
 				rdma_conn->parent_cm_id = cm_id;
@@ -85,13 +98,13 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				if (rc != 0) {
 					SPDK_ERRLOG("rdma bind addr failed\n");
 					rdma_conn->status = RDMA_SERVER_ERROR;
-					break;
+					goto end;
 				}
 				rc = rdma_listen(cm_id, 3);
 				if (rc != 0) {
 					SPDK_ERRLOG("rdma listen failed\n");
 					rdma_conn->status = RDMA_SERVER_ERROR;
-					break;
+					goto end;
 				}
 
 				SPDK_NOTICELOG("RDMA conn %p listening on port %d\n", rdma_conn, ntohs(addr.sin_port));
@@ -103,7 +116,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
                 if (rc != 0) {
                     SPDK_ERRLOG("rdma_resolve_addr failed\n");
                     rdma_conn->status = RDMA_CLI_ERROR;
-                    break;
+                    goto end;
                 }
                 rdma_conn->status = RDMA_CLI_ADDR_RESOLVING;
 			}
@@ -116,18 +129,17 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 			if (rc != 0) {
 				if (errno == EAGAIN) {
 					// waiting for connection
-                    return 0;
 				}
 				else {
 					SPDK_ERRLOG("Unexpected CM error %d\n", errno);
-                    return -1;
 				}
+				goto end;
 			}
 
 			if (connect_event->event != RDMA_CM_EVENT_CONNECT_REQUEST) {
 				// TODO: reconnection
 				SPDK_ERRLOG("invalid event type %d\n", connect_event->event);
-				return -1;
+				goto end;
 			}
 
 			SPDK_NOTICELOG("RDMA conn %p received conn request\n", rdma_conn);
@@ -181,10 +193,6 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 					rdma_conn->handshake_buf->base_addr,
 					rdma_conn->handshake_buf->block_cnt * rdma_conn->handshake_buf->block_size + VALUE_2MB);
 			}
-			// struct ibv_mr* ibv_mr_handshake = ibv_reg_mr(child_cm_id->qp->pd,
-			// 	handshake_buffer,
-			// 	2 * sizeof(struct rdma_handshake),
-			// 	IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
 
 			struct ibv_recv_wr wr, *bad_wr = NULL;
 			struct ibv_sge sge;
@@ -200,7 +208,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 			rc = ibv_post_recv(child_cm_id->qp, &wr, &bad_wr);
 			if (rc != 0) {
 				SPDK_ERRLOG("post recv failed\n");
-				return -1;
+				goto end;
 			}
 
 			struct rdma_conn_param conn_param = {};
@@ -213,10 +221,10 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 
 			if (rc != 0) {
 				SPDK_ERRLOG("accept err\n");
-				return -EINVAL;
+				goto end;
 			}
 			rdma_conn->status = RDMA_SERVER_ACCEPTED;
-			break;
+			goto end;
 		}
 		case RDMA_SERVER_ACCEPTED:
 		{
@@ -225,17 +233,17 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 			if (rc != 0) {
 				if (errno == EAGAIN) {
 					// waiting for establish event
-                    return 0;
+                    goto end;
 				}
 				else {
 					SPDK_ERRLOG("Unexpected CM error %d\n", errno);
-                    return -1;
+                    goto end;
 				}
 			}
 
 			if (established_event->event != RDMA_CM_EVENT_ESTABLISHED) {
 				SPDK_ERRLOG("incorrect established event %d\n", established_event->event);
-				return -1;
+				goto end;
 			}
 
 			SPDK_NOTICELOG("RDMA conn %p established. sending handshake ...\n", rdma_conn);
@@ -260,7 +268,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 			rc = ibv_post_send(rdma_conn->cm_id->qp, &send_wr, &bad_send_wr);
 			if (rc != 0) {
 				SPDK_ERRLOG("post send failed\n");
-				return 1;
+				goto end;
 			}
 			SPDK_NOTICELOG("RDMA conn %p sent local addr %p rkey %d length %ld\n",
 				rdma_conn,
@@ -269,7 +277,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				rdma_conn->handshake_buf->block_cnt * rdma_conn->handshake_buf->block_size);
 
 			rdma_conn->status = RDMA_SERVER_ESTABLISHED;
-			break;
+			goto end;
 		}
 		case RDMA_SERVER_ESTABLISHED:
 		{
@@ -277,16 +285,16 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 			int ret = ibv_poll_cq(rdma_conn->cq, 1, &wc);
 			if (ret < 0) {
 				SPDK_ERRLOG("ibv_poll_cq failed\n");
-				return -1;
+				goto end;
 			}
 
 			if (ret == 0) {
-				return 0;
+				goto end;
 			}
 
 			if (wc.status != IBV_WC_SUCCESS) {
 				SPDK_ERRLOG("WC bad status %d\n", wc.status);
-				return -1;
+				goto end;
 			}
 
 			if (wc.wr_id == 1) {
@@ -327,7 +335,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				rdma_conn->status = RDMA_SERVER_CONNECTED;
 			}
 
-			break;
+			goto end;
 		}
 		case RDMA_SERVER_CONNECTED:
 		{
@@ -341,14 +349,14 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				else {
 					SPDK_ERRLOG("Unexpected CM error %d\n", errno);
 				}
-				return 0;
+				goto end;
 			}
 
 			rc = rdma_ack_cm_event(event);
 			if (rc != 0) {
 				SPDK_ERRLOG("failed to ack event\n");
 				rdma_conn->status = RDMA_SERVER_ERROR;
-				break;
+				goto end;
 			}
 
 			if (event->event == RDMA_CM_EVENT_DISCONNECTED) {
@@ -358,17 +366,19 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 			else {
 				SPDK_ERRLOG("Should not receive event %d when connected\n", event->event);
 			}
-			break;
+			goto end;
 		}
 		case RDMA_SERVER_ERROR:
 		{
-			// no way to recover now.
-			break;
+			rdma_connection_free(rdma_conn);
+			rdma_conn->status = RDMA_SERVER_INITIALIZED;
+			goto end;
 		}
 		case RDMA_SERVER_DISCONNECTED:
 		{
-			// TODO: async disconnection gc
-			break;
+			rdma_connection_free(rdma_conn);
+			rdma_conn->status = RDMA_SERVER_INITIALIZED;
+			goto end;
 		}
 		case RDMA_CLI_ADDR_RESOLVING:
 		case RDMA_CLI_ROUTE_RESOLVING:
@@ -383,7 +393,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				else {
 					SPDK_ERRLOG("Unexpected CM error %d\n", errno);
 				}
-				break;
+				goto end;
 			}
 			enum rdma_cm_event_type expected_event_type;
 			if (rdma_conn->status == RDMA_CLI_ADDR_RESOLVING) {
@@ -396,7 +406,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				// should not happen
 				SPDK_ERRLOG("ERROR\n");
 				rdma_conn->status = RDMA_CLI_ERROR;
-				break;
+				goto end;
 			}
 
 			// suppose addr and resolving never fails
@@ -405,18 +415,18 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 					event->event,
 					expected_event_type);
 				rdma_conn->status = RDMA_CLI_ERROR;
-				break;
+				goto end;
 			}
 			if (rdma_conn->cm_id != event->id) {
 				SPDK_ERRLOG("CM id mismatch\n");
 				rdma_conn->status = RDMA_CLI_ERROR;
-				break;
+				goto end;
 			}
 			rc = rdma_ack_cm_event(event);
 			if (rc != 0) {
 				SPDK_ERRLOG("ack cm event failed\n");
 				rdma_conn->status = RDMA_CLI_ERROR;
-				break;
+				goto end;
 			}
 
 			if (rdma_conn->status == RDMA_CLI_ADDR_RESOLVING) {
@@ -424,7 +434,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				if (rc != 0) {
 					SPDK_ERRLOG("resolve route failed\n");
 					rdma_conn->status = RDMA_CLI_ERROR;
-					break;
+					goto end;
 				}
 				rdma_conn->status = RDMA_CLI_ROUTE_RESOLVING;
 			}
@@ -438,7 +448,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				if (ibv_cq == NULL) {
 					SPDK_ERRLOG("Failed to create cq\n");
 					rdma_conn->status = RDMA_CLI_ERROR;
-					break;
+					goto end;
 				}
 				rdma_conn->cq = ibv_cq;
 				// no SRQ here - only one qp
@@ -459,7 +469,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				if (rc != 0) {
 					SPDK_ERRLOG("rdma_create_qp fails %d\n", rc);
 					rdma_conn->status = RDMA_CLI_ERROR;
-					break;
+					goto end;
 				}
 
 				struct ibv_recv_wr wr, *bad_wr = NULL;
@@ -495,7 +505,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				if (rc != 0) {
 					SPDK_ERRLOG("post recv failed\n");
 					rdma_conn->status = RDMA_CLI_ERROR;
-					break;
+					goto end;
 				}
 
 				struct rdma_conn_param conn_param = {};
@@ -509,11 +519,11 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				if (rc != 0) {
 					SPDK_ERRLOG("rdma_connect failed\n");
 					rdma_conn->status = RDMA_CLI_ERROR;
-					break;
+					goto end;
 				}
 				rdma_conn->status = RDMA_CLI_CONNECTING;
 			}
-			break;
+			goto end;
 		}
 		case RDMA_CLI_CONNECTING:
 		{
@@ -527,13 +537,13 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				else {
 					SPDK_ERRLOG("Unexpected CM error %d\n", errno);
 				}
-				break;
+				goto end;
 			}
 			rc = rdma_ack_cm_event(connect_event);
 			if (rc != 0) {
 				SPDK_ERRLOG("failed to ack event\n");
 				rdma_conn->status = RDMA_CLI_ERROR;
-				break;
+				goto end;
 			}
 
 			if (connect_event->event == RDMA_CM_EVENT_REJECTED) {
@@ -546,11 +556,11 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				rdma_connection_free(rdma_conn);
 
 				rdma_conn->status = RDMA_CLI_INITIALIZED;
-				break;
+				goto end;
 			}
 			else if (connect_event->event != RDMA_CM_EVENT_ESTABLISHED) {
 				SPDK_ERRLOG("invalid event type %d\n", connect_event->event);
-				break;
+				goto end;
 			}
 
 			SPDK_NOTICELOG("connected. posting send...\n");
@@ -574,10 +584,10 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 			rc = ibv_post_send(rdma_conn->cm_id->qp, &send_wr, &bad_send_wr);
 			if (rc != 0) {
 				SPDK_ERRLOG("post send failed\n");
-				break;
+				goto end;
 			}
 			rdma_conn->status = RDMA_CLI_ESTABLISHED;
-			break;
+			goto end;
 		}
 		case RDMA_CLI_ESTABLISHED:
 		{
@@ -586,16 +596,16 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 			int cnt = ibv_poll_cq(rdma_conn->cq, 1, &wc);
 			if (cnt < 0) {
 				SPDK_ERRLOG("ibv_poll_cq failed\n");
-				break;
+				goto end;
 			}
 
 			if (cnt == 0) {
-				break;
+				goto end;
 			}
 
 			if (wc.status != IBV_WC_SUCCESS) {
 				SPDK_ERRLOG("WC bad status %d\n", wc.status);
-				break;
+				goto end;
 			}
 
 			if (wc.wr_id == 2) {
@@ -625,7 +635,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 
 				rdma_conn->status = RDMA_CLI_CONNECTED;
 			}
-			break;
+			goto end;
 		}
 		case RDMA_CLI_CONNECTED:
 		{
@@ -638,13 +648,13 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				else {
 					SPDK_ERRLOG("Unexpected CM error %d\n", errno);
 				}
-				return 0;
+				goto end;
 			}
 			rc = rdma_ack_cm_event(cm_event);
 			if (rc != 0) {
 				SPDK_ERRLOG("failed to ack event\n");
 				rdma_conn->status = RDMA_CLI_ERROR;
-				break;
+				goto end;
 			}
 
 			if (cm_event->event == RDMA_CM_EVENT_DISCONNECTED) {
@@ -654,23 +664,30 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 			else {
 				SPDK_ERRLOG("Should not receive event %d when connected\n", cm_event->event);
 			}
-			break;
+			goto end;
 		}
 		case RDMA_CLI_ERROR:
 		{
-			// SPDK_NOTICELOG("In error state. Cannot recover by now\n");
-			break;
+			rdma_connection_free(rdma_conn);
+			rdma_conn->status = RDMA_CLI_INITIALIZED;
+			goto end;
 		}
 		case RDMA_CLI_DISCONNECTED:
 		{
-			// TODO: async disconnect gc
-			break;
+			rdma_connection_free(rdma_conn);
+			rdma_conn->status = RDMA_CLI_INITIALIZED;
+			goto end;
 		}
 	}
 
+end:
+	if (pthread_rwlock_unlock(&rdma_conn->lock) != 0) {
+		SPDK_ERRLOG("Failed to release rwlock\n");
+	}
 	return rc;
 }
 
+// Must hold write lock before entering the function.
 void rdma_connection_free(struct rdma_connection* rdma_conn) {
 	int rc;
 	if (rdma_conn->is_server) {
@@ -809,6 +826,7 @@ uint32_t rdma_connection_get_rkey(struct rdma_connection* rdma_conn, void* addr,
 	return mr->rkey;
 }
 
+// no need to hold read lock, as the status will always change in the last phase.
 bool rdma_connection_is_connected(struct rdma_connection* rdma_conn) {
 	return rdma_conn != NULL && (rdma_conn->status == RDMA_SERVER_CONNECTED || rdma_conn->status == RDMA_CLI_CONNECTED);
 }
