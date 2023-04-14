@@ -22,6 +22,7 @@ enum rdma_handshake_status {
 struct rdma_connection;
 
 typedef void (*rdma_connection_connected_cb)(void *cb_ctx, struct rdma_connection* rdma_conn);
+typedef void (*rdma_connection_disconnect_cb)(void *cb_ctx, struct rdma_connection* rdma_conn);
 
 struct destage_info {
 	uint64_t offset;
@@ -43,11 +44,14 @@ struct rdma_handshake {
 	// client tells server about the block size and count
 	uint64_t block_size;
 	uint64_t block_cnt;
-	// the reconnect counter that client believes
-	// if data node receives a number that is greater than itself, 
-	// then it should do fully recovery
-	// TODO: add more fields to support half-recovery
-	uint64_t reconnect_cnt;
+
+	// maintain a counter is pointless, as the other end may simply shutdown and lose all information.
+	// Instead, when the connection receives a disconnect event (excluding error state), set the field to
+	// true. After it is re-connected, reset the field.
+	// TODO: how to deal with a connection is intentionally closed due to error state?
+	bool is_reconnected;
+
+	// Not used
 	struct destage_info destage_tail;
 };
 
@@ -91,6 +95,7 @@ struct rdma_connection {
 	int rdma_context_length;
 	void* rdma_context;
 	rdma_connection_connected_cb connected_cb;
+	rdma_connection_disconnect_cb disconnect_cb;
 	int reject_cnt;
 	bool handshake_sent;
 	bool handshake_received;
@@ -105,7 +110,8 @@ struct rdma_connection* rdma_connection_alloc(
 	void* base_addr,
 	uint64_t block_size,
 	uint64_t block_cnt,
-	rdma_connection_connected_cb connected_cb);
+	rdma_connection_connected_cb connected_cb,
+	rdma_connection_disconnect_cb disconnect_cb);
 
 int rdma_connection_connect(struct rdma_connection* rdma_conn);
 void rdma_connection_free(struct rdma_connection* rdma_conn);

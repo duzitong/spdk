@@ -77,7 +77,6 @@ struct nvmf_cli_connection {
 
 struct cli_rdma_context {
     uint64_t io_fail_cnt;
-    uint64_t reconnect_cnt;
     struct wals_target* wals_target;
     TAILQ_HEAD(, wals_cli_slice) slices;
 };
@@ -141,6 +140,19 @@ void target_connected_cb(void *cb_ctx, struct rdma_connection* rdma_conn) {
     struct wals_cli_slice* cli_slice = TAILQ_FIRST(&context->slices);
     rdma_connection_register(rdma_conn, cli_slice->wals_bdev->write_heap->buf, cli_slice->wals_bdev->write_heap->buf_size);
     rdma_connection_register(rdma_conn, cli_slice->wals_bdev->read_heap->buf, cli_slice->wals_bdev->read_heap->buf_size);
+}
+
+void target_disconnect_cb(void* cb_ctx, struct rdma_connection* rdma_conn) {
+    struct cli_rdma_context* context = cb_ctx;
+
+    struct wals_cli_slice* cli_slice;
+    TAILQ_FOREACH(cli_slice, &context->slices, tailq_rdma) {
+        SPDK_NOTICELOG("Slice (%d, %d) disconnected. Set the head to MAX\n",
+            cli_slice->id,
+            cli_slice->wals_target->node_id);
+        cli_slice->wals_target->head.round = UINT64_MAX;
+        cli_slice->wals_target->head.offset = UINT64_MAX;
+    }
 }
 
 static bool
@@ -296,7 +308,8 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                     NULL,
                     0,
                     0,
-                    target_connected_cb);
+                    target_connected_cb,
+                    target_disconnect_cb);
                 cli_slice->rdma_conn = g_rdma_conns[i];
                 rdma_context = g_rdma_conns[i]->rdma_context;
                 TAILQ_INIT(&rdma_context->slices);
@@ -865,6 +878,7 @@ static int slice_destage_info_poller(void* ctx) {
             read_wr.wr.rdma.remote_addr = (uint64_t)remote_handshake->base_addr + remote_handshake->block_cnt * remote_handshake->block_size;
             read_wr.wr.rdma.rkey = remote_handshake->rkey;
 
+            pthread_rwlock_rdlock(&cli_slice->rdma_conn->lock);
             rdma_connection_construct_sge(cli_slice->rdma_conn,
                 &read_sge,
                 &g_destage_tail[cli_slice->id],
@@ -875,8 +889,8 @@ static int slice_destage_info_poller(void* ctx) {
                 SPDK_ERRLOG("post send read failed for slice %d: error %d\n",
                     cli_slice->id,
                     rc);
-                continue;
             }
+            pthread_rwlock_unlock(&cli_slice->rdma_conn->lock);
         } 
         else if (g_destage_tail[cli_slice->id].checksum == 0) {
             // RDMA read is successful
@@ -909,6 +923,7 @@ static int slice_destage_info_poller(void* ctx) {
             sizeof(struct destage_info);
         write_wr.wr.rdma.rkey = remote_handshake->rkey;
 
+        pthread_rwlock_rdlock(&cli_slice->rdma_conn->lock);
         rdma_connection_construct_sge(cli_slice->rdma_conn,
             &write_sge,
             &g_commit_tail[cli_slice->id],
@@ -919,8 +934,8 @@ static int slice_destage_info_poller(void* ctx) {
             SPDK_ERRLOG("post send write failed for slice %d: error %d\n",
                 cli_slice->id,
                 rc);
-            continue;
         }
+        pthread_rwlock_unlock(&cli_slice->rdma_conn->lock);
     }
     return SPDK_POLLER_BUSY;
 }
@@ -935,9 +950,13 @@ rdma_cq_poller(void* ctx) {
     for (int node_id = 0; node_id < NUM_NODES; node_id++) {
         struct cli_rdma_context* rdma_context = g_rdma_conns[node_id]->rdma_context;
         if (rdma_connection_is_connected(g_rdma_conns[node_id])) {
-            pthread_rwlock_rdlock(&g_rdma_conns[node_id]->lock);
+            if (pthread_rwlock_rdlock(&g_rdma_conns[node_id]->lock) != 0) {
+                SPDK_ERRLOG("Failed to acquire read lock\n");
+            }
             int cnt = ibv_poll_cq(g_rdma_conns[node_id]->cq, WC_BATCH_SIZE, wc_buf);
-            pthread_rwlock_unlock(&g_rdma_conns[node_id]->lock);
+            if (pthread_rwlock_unlock(&g_rdma_conns[node_id]->lock) != 0) {
+                SPDK_ERRLOG("Failed to release read lock\n");
+            }
             if (cnt < 0) {
                 // hopefully the reconnection poller will spot the error and try to reconnect
 				SPDK_ERRLOG("ibv_poll_cq failed\n");

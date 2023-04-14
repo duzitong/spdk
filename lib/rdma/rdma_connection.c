@@ -21,7 +21,8 @@ struct rdma_connection* rdma_connection_alloc(
     void* base_addr,
     uint64_t block_size,
     uint64_t block_cnt,
-	rdma_connection_connected_cb connected_cb)
+	rdma_connection_connected_cb connected_cb,
+	rdma_connection_disconnect_cb disconnect_cb)
 {
     struct rdma_connection* rdma_conn = calloc(1, sizeof(struct rdma_connection));
 	pthread_rwlock_init(&rdma_conn->lock, NULL);
@@ -36,6 +37,7 @@ struct rdma_connection* rdma_connection_alloc(
     rdma_conn->rdma_context = rdma_context;
     rdma_conn->rdma_context_length = context_length;
 	rdma_conn->connected_cb = connected_cb;
+	rdma_conn->disconnect_cb = disconnect_cb;
 	rdma_conn->mem_map = spdk_mem_map_alloc(0, NULL, NULL);
 
 	struct rdma_event_channel* channel = rdma_create_event_channel();
@@ -306,18 +308,6 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 					remote_handshake->rkey);
 
 				rdma_conn->handshake_received = true;
-
-				// if (remote_handshake->reconnect_cnt > 0) {
-				// 	// TODO
-				// 	SPDK_NOTICELOG("The node is reconnected\n");
-				// 	if (remote_handshake->destage_tail.offset != 0 || remote_handshake->destage_tail.round != 0) {
-				// 		pdisk->destage_tail->offset = remote_handshake->destage_tail.offset;
-				// 		pdisk->destage_tail->round = remote_handshake->destage_tail.round;
-				// 		pdisk->recover_tail.offset = remote_handshake->destage_tail.offset;
-				// 		pdisk->recover_tail.round = remote_handshake->destage_tail.round;
-				// 	}
-				// }
-
 			}
 			else if (wc.wr_id == 2) {
 				SPDK_NOTICELOG("send req complete\n");
@@ -332,6 +322,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				if (rdma_conn->connected_cb) {
 					rdma_conn->connected_cb(rdma_conn->rdma_context, rdma_conn);
 				}
+				rdma_conn->handshake_buf->is_reconnected = false;
 				rdma_conn->status = RDMA_SERVER_CONNECTED;
 			}
 
@@ -372,12 +363,19 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 		{
 			rdma_connection_free(rdma_conn);
 			rdma_conn->status = RDMA_SERVER_INITIALIZED;
+			if (rdma_conn->disconnect_cb) {
+				rdma_conn->disconnect_cb(rdma_conn->rdma_context, rdma_conn);
+			}
 			goto end;
 		}
 		case RDMA_SERVER_DISCONNECTED:
 		{
 			rdma_connection_free(rdma_conn);
 			rdma_conn->status = RDMA_SERVER_INITIALIZED;
+			rdma_conn->handshake_buf->is_reconnected = true;
+			if (rdma_conn->disconnect_cb) {
+				rdma_conn->disconnect_cb(rdma_conn->rdma_context, rdma_conn);
+			}
 			goto end;
 		}
 		case RDMA_CLI_ADDR_RESOLVING:
@@ -632,7 +630,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				if (rdma_conn->connected_cb) {
 					rdma_conn->connected_cb(rdma_conn->rdma_context, rdma_conn);
 				}
-
+				rdma_conn->handshake_buf->is_reconnected = false;
 				rdma_conn->status = RDMA_CLI_CONNECTED;
 			}
 			goto end;
@@ -670,12 +668,19 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 		{
 			rdma_connection_free(rdma_conn);
 			rdma_conn->status = RDMA_CLI_INITIALIZED;
+			if (rdma_conn->disconnect_cb) {
+				rdma_conn->disconnect_cb(rdma_conn->rdma_context, rdma_conn);
+			}
 			goto end;
 		}
 		case RDMA_CLI_DISCONNECTED:
 		{
 			rdma_connection_free(rdma_conn);
 			rdma_conn->status = RDMA_CLI_INITIALIZED;
+			rdma_conn->handshake_buf->is_reconnected = true;
+			if (rdma_conn->disconnect_cb) {
+				rdma_conn->disconnect_cb(rdma_conn->rdma_context, rdma_conn);
+			}
 			goto end;
 		}
 	}
@@ -746,6 +751,10 @@ void rdma_connection_free(struct rdma_connection* rdma_conn) {
 		ibv_dereg_mr(rdma_conn->mr_arr[i]);
 	}
 	rdma_conn->mr_cnt = 0;
+
+	rdma_conn->handshake_sent = false;
+	rdma_conn->handshake_received = false;
+	rdma_conn->reject_cnt = 0;
 }
 
 int rdma_connection_register(struct rdma_connection* rdma_conn, void* addr, uint32_t len) {
