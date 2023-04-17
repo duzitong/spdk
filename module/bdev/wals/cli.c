@@ -959,6 +959,9 @@ static int
 rdma_cq_poller(void* ctx) {
     struct ibv_wc wc_buf[WC_BATCH_SIZE];
     struct wals_bdev* wals_bdev = ctx;
+    if (spdk_get_thread() != wals_bdev->write_thread) {
+        SPDK_ERRLOG("Exe cq poller on other thread: %p\n", spdk_get_thread());
+    }
     enum spdk_thread_poller_rc poller_rc = SPDK_POLLER_IDLE;
     spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_RDMA_CQ, 0, 0, (uintptr_t)ctx);
     for (int node_id = 0; node_id < NUM_NODES; node_id++) {
@@ -980,6 +983,12 @@ rdma_cq_poller(void* ctx) {
                 for (int j = 0; j < cnt; j++) {
                     bool success = true;
 					struct pending_io_context* io_context = (void*)wc_buf[j].wr_id;
+                    if (wc_buf[j].wr_id == 0) {
+                        // special case: the wr is for reading destage tail or writing commit tail.
+                        // do nothing
+                        continue;
+                    }
+
 					if (wc_buf[j].status != IBV_WC_SUCCESS) {
                         SPDK_ERRLOG("IO (%p, %p, %d, %d) RDMA op %d failed with status %d\n",
                             io_context,
@@ -994,12 +1003,6 @@ rdma_cq_poller(void* ctx) {
 					}
 
                     spdk_msg_fn cb_fn = success ? rdma_operation_success : rdma_operation_failure;
-
-                    if (wc_buf[j].wr_id == 0) {
-                        // special case: the wr is for reading destage tail or writing commit tail.
-                        // do nothing
-                        continue;
-                    }
 
                     if (wc_buf[j].opcode == IBV_WC_RDMA_READ) {
                         spdk_thread_send_msg(
