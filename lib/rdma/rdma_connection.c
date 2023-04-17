@@ -548,7 +548,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 				// remote not ready yet
 				// destroy all rdma resources and try again
 				rdma_conn->reject_cnt++;
-				if (rdma_conn->reject_cnt % 1000 == 1) {
+				if (rdma_conn->reject_cnt % 1000000 == 1) {
 					SPDK_NOTICELOG("RDMA conn %p Rejected %d. Try again...\n", rdma_conn, rdma_conn->reject_cnt);
 				}
 				rdma_connection_free(rdma_conn);

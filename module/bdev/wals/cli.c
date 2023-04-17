@@ -69,6 +69,7 @@ struct nvmf_cli_connection {
     // when multiple slices connected to it, record the last one's tail (in blocks).
     // not trying to reuse a slice if it is deleted.
     uint64_t last_block_offset;
+    int reset_failed_cnt;
 
     struct spdk_nvme_ctrlr* ctrlr;
     struct spdk_nvme_ns* ns;
@@ -835,23 +836,31 @@ nvmf_cli_connection_poller(void* ctx) {
     int rc;
     enum spdk_thread_poller_rc poller_rc = SPDK_POLLER_IDLE;
     for (int i = 0; i < NUM_NODES; i++) {
-        if (g_nvmf_cli_conns[i].status != NVMF_CLI_INITIALIZED) {
-            continue;
+        if (g_nvmf_cli_conns[i].status == NVMF_CLI_INITIALIZED) {
+            rc = spdk_nvme_ctrlr_process_admin_completions(g_nvmf_cli_conns[i].ctrlr);
+            if (rc == -ENXIO) {
+                g_nvmf_cli_conns[i].status = NVMF_CLI_DISCONNECTED;
+            }
+            poller_rc = SPDK_POLLER_BUSY;
         }
-
-        rc = spdk_nvme_ctrlr_process_admin_completions(g_nvmf_cli_conns[i].ctrlr);
-        if (rc == -ENXIO) {
+        else if (g_nvmf_cli_conns[i].status == NVMF_CLI_DISCONNECTED) {
             // nvmf already has poller to reset the ctrlr.
             // assume that the transport id doesn't change
             rc = spdk_nvme_ctrlr_reset(g_nvmf_cli_conns[i].ctrlr);
             if (rc != 0) {
-                SPDK_WARNLOG("Cannot reset nvmf ctrlr %d: %d\n", i, rc);
+                g_nvmf_cli_conns[i].reset_failed_cnt++;
+                if (g_nvmf_cli_conns[i].reset_failed_cnt % 1000000 == 0) {
+                    SPDK_WARNLOG("Cannot reset nvmf ctrlr %d: %d\n", i, rc);
+                }
             }
             else {
                 SPDK_NOTICELOG("Nvmf ctrlr %d reset successfully\n", i);
+                g_nvmf_cli_conns[i].reset_failed_cnt = 0;
+                g_nvmf_cli_conns[i].status = NVMF_CLI_INITIALIZED;
             }
             poller_rc = SPDK_POLLER_BUSY;
         }
+
     }
     return poller_rc;
 }
