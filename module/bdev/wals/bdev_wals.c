@@ -527,18 +527,17 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 		if (spdk_likely(wals_io->status == SPDK_BDEV_IO_STATUS_SUCCESS)) {
 			wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_SUCCESS);
 		} else {
-			// TODO: simply retry here leads to deadlock
 			// TODO: the retry logic may read failed_target_id, which leads to corrupted data.
-			// wals_io->targets_failed++;
-			// wals_io->target_index = (wals_io->target_index + 1) % QUORUM_TARGETS;
-			// if (wals_io->targets_failed < QUORUM_TARGETS) {
-			// 	wals_io->status = SPDK_BDEV_IO_STATUS_SUCCESS;
-			// 	wals_bdev_submit_read_request(wals_io);
-			// } else {
-			// 	SPDK_ERRLOG("read request failed on all targets.\n");
-			// 	wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
-			// }
-			wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
+			wals_io->targets_failed++;
+			wals_io->target_index = (wals_io->target_index + 1) % QUORUM_TARGETS;
+			if (wals_io->targets_failed < QUORUM_TARGETS) {
+				wals_io->status = SPDK_BDEV_IO_STATUS_SUCCESS;
+				wals_bdev_submit_read_request(wals_io);
+			} else {
+				SPDK_ERRLOG("read request failed on all targets.\n");
+				wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
+			}
+			// wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
 		}
 
 		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_COMP_R_A, 0, 0, (uintptr_t)wals_io);
@@ -673,8 +672,8 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 			int target_id = fixed_target_id;
 			if (fixed_target_id == -1) {
 				for (int i = 0; i < NUM_TARGETS; i++) {
-					if (bn->ele->failed_target_id != slice->targets[i]->target_id) {
-						target_id = i;
+					target_id = (wals_io->target_index + i) % NUM_TARGETS;
+					if (bn->ele->failed_target_id != target_id) {
 						break;
 					}
 				}

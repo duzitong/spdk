@@ -27,7 +27,7 @@
 enum nvmf_cli_status {
     NVMF_CLI_UNINITIALIZED,
     NVMF_CLI_INITIALIZED,
-    NVMF_CLI_ERROR,
+    NVMF_CLI_DISCONNECTED,
 };
 
 enum wals_io_type {
@@ -576,6 +576,11 @@ cli_submit_core_read_request(struct wals_target* target, void *data, uint64_t of
         return 0;
     }
 
+    if (g_nvmf_cli_conns[target->node_id].status != NVMF_CLI_INITIALIZED) {
+        wals_target_read_complete(wals_io, false);
+        return 0;
+    }
+
     rc = spdk_nvme_ns_cmd_read(slice->nvmf_conn->ns,
         slice->nvmf_conn->qp,
         data,
@@ -708,10 +713,6 @@ cli_register_write_pollers(struct wals_target *target, struct wals_bdev *wals_bd
         g_rdma_connection_poller = SPDK_POLLER_REGISTER(rdma_cli_connection_poller, wals_bdev, 5 * 1000);
     }
 
-    if (g_nvmf_connection_poller == NULL) {
-        g_nvmf_connection_poller = SPDK_POLLER_REGISTER(nvmf_cli_connection_poller, wals_bdev, 5 * 1000);
-    }
-
     for (int node_id = 0; node_id < NUM_NODES; node_id++) {
         if (g_pending_write_io_queue[node_id].poller == NULL) {
             g_pending_write_io_queue[node_id].node_id = node_id;
@@ -737,10 +738,6 @@ cli_unregister_write_pollers(struct wals_target *target, struct wals_bdev *wals_
         spdk_poller_unregister(&g_rdma_connection_poller);
     }
 
-    if (g_nvmf_connection_poller != NULL) {
-        spdk_poller_unregister(&g_nvmf_connection_poller);
-    }
-
     for (int node_id = 0; node_id < NUM_NODES; node_id++) {
         if (g_pending_write_io_queue[node_id].poller != NULL) {
             spdk_poller_unregister(&g_pending_write_io_queue[node_id].poller);
@@ -757,6 +754,10 @@ cli_register_read_pollers(struct wals_target *target, struct wals_bdev *wals_bde
     }
     if (g_destage_info_poller == NULL) {
         g_destage_info_poller = SPDK_POLLER_REGISTER(slice_destage_info_poller, NULL, 2000);
+    }
+
+    if (g_nvmf_connection_poller == NULL) {
+        g_nvmf_connection_poller = SPDK_POLLER_REGISTER(nvmf_cli_connection_poller, wals_bdev, 5 * 1000);
     }
 
     for (int node_id = 0; node_id < NUM_NODES; node_id++) {
@@ -789,6 +790,10 @@ cli_unregister_read_pollers(struct wals_target *target, struct wals_bdev *wals_b
     if (g_destage_info_poller != NULL) {
         spdk_poller_unregister(&g_destage_info_poller);
     }
+    if (g_nvmf_connection_poller != NULL) {
+        spdk_poller_unregister(&g_nvmf_connection_poller);
+    }
+
     for (int node_id = 0; node_id < NUM_NODES; node_id++) {
         if (g_pending_read_io_queue[node_id].poller != NULL) {
             spdk_poller_unregister(&g_pending_read_io_queue[node_id].poller);
@@ -821,7 +826,7 @@ rdma_cli_connection_poller(void* ctx) {
     }
 }
 
-// WRITE THREAD
+// READ THREAD
 // same logic as the poller in examples/nvme/reconnect.c
 // assume that the namespace and io qpair don't need recreation.
 static int 
@@ -1017,7 +1022,10 @@ nvmf_cq_poller(void* ctx) {
         if (g_nvmf_cli_conns[i].status == NVMF_CLI_INITIALIZED) {
             rc = spdk_nvme_qpair_process_completions(g_nvmf_cli_conns[i].qp, 0);
             if (rc < 0) {
-                SPDK_ERRLOG("NVMf request failed for conn %d\n", i);
+                // NXIO is expected when the connection is down.
+                if (rc != -ENXIO) {
+                    SPDK_ERRLOG("NVMf request failed for conn %d: %d\n", i, rc);
+                }
             }
             else if (rc > 0) {
                 poller_rc = SPDK_POLLER_BUSY;

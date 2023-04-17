@@ -499,12 +499,14 @@ static int persist_rdma_cq_poller(void* ctx) {
 		if (wc_buf[i].wr_id == 1) {
 			SPDK_NOTICELOG("PMem initialize complete\n");
 			pdisk->pmem_status = PERSIST_PMEM_NORMAL;
+			return SPDK_POLLER_BUSY;
+
 		}
 		else {
 			SPDK_ERRLOG("Unknown wr_id %ld\n", wc_buf[i].wr_id);
 		}
 	}
-	
+	return SPDK_POLLER_IDLE;
 }
 
 static int persist_peer_memcpy(int peer_id, struct persist_disk* pdisk, uint64_t start_offset, uint64_t end_offset, bool need_signal) {
