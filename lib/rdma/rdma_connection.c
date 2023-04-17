@@ -677,8 +677,8 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 		case RDMA_CLI_DISCONNECTED:
 		{
 			rdma_connection_free(rdma_conn);
-			rdma_conn->status = RDMA_CLI_INITIALIZED;
-			rdma_conn->handshake_buf->is_reconnected = true;
+			// rdma_conn->status = RDMA_CLI_INITIALIZED;
+			// rdma_conn->handshake_buf->is_reconnected = true;
 			if (rdma_conn->disconnect_cb) {
 				rdma_conn->disconnect_cb(rdma_conn->rdma_context, rdma_conn);
 			}
