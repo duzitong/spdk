@@ -959,9 +959,6 @@ static int
 rdma_cq_poller(void* ctx) {
     struct ibv_wc wc_buf[WC_BATCH_SIZE];
     struct wals_bdev* wals_bdev = ctx;
-    if (spdk_get_thread() != wals_bdev->write_thread) {
-        SPDK_ERRLOG("Exe cq poller on other thread: %p\n", spdk_get_thread());
-    }
     enum spdk_thread_poller_rc poller_rc = SPDK_POLLER_IDLE;
     spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_RDMA_CQ, 0, 0, (uintptr_t)ctx);
     for (int node_id = 0; node_id < NUM_NODES; node_id++) {
