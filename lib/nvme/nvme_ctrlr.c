@@ -1008,7 +1008,8 @@ nvme_ctrlr_fail(struct spdk_nvme_ctrlr *ctrlr, bool hot_remove)
 	}
 
 	if (ctrlr->is_failed) {
-		NVME_CTRLR_NOTICELOG(ctrlr, "already in failed state\n");
+		// LOG_DEMO
+		// NVME_CTRLR_NOTICELOG(ctrlr, "already in failed state\n");
 		return;
 	}
 
@@ -1019,7 +1020,8 @@ nvme_ctrlr_fail(struct spdk_nvme_ctrlr *ctrlr, bool hot_remove)
 
 	ctrlr->is_failed = true;
 	nvme_transport_ctrlr_disconnect_qpair(ctrlr, ctrlr->adminq);
-	NVME_CTRLR_ERRLOG(ctrlr, "in failed state.\n");
+	// LOG_DEMO
+	// NVME_CTRLR_ERRLOG(ctrlr, "in failed state.\n");
 }
 
 /**
@@ -1618,7 +1620,8 @@ nvme_ctrlr_disconnect(struct spdk_nvme_ctrlr *ctrlr)
 	ctrlr->is_disconnecting = true;
 	ctrlr->prepare_for_reset = true;
 
-	NVME_CTRLR_NOTICELOG(ctrlr, "resetting controller\n");
+	// LOG_DEMO
+	// NVME_CTRLR_NOTICELOG(ctrlr, "resetting controller\n");
 
 	/* Disable keep-alive, it'll be re-enabled as part of the init process */
 	ctrlr->keep_alive_interval_ticks = 0;
@@ -1689,7 +1692,8 @@ spdk_nvme_ctrlr_reconnect_poll_async(struct spdk_nvme_ctrlr *ctrlr)
 	bool async;
 
 	if (nvme_ctrlr_process_init(ctrlr) != 0) {
-		NVME_CTRLR_ERRLOG(ctrlr, "controller reinitialization failed\n");
+		// LOG_DEMO
+		// NVME_CTRLR_ERRLOG(ctrlr, "controller reinitialization failed\n");
 		rc = -1;
 	}
 	if (ctrlr->state != NVME_CTRLR_STATE_READY && rc != -1) {
@@ -3964,7 +3968,8 @@ nvme_ctrlr_process_init(struct spdk_nvme_ctrlr *ctrlr)
 		return 0;
 
 	case NVME_CTRLR_STATE_ERROR:
-		NVME_CTRLR_ERRLOG(ctrlr, "Ctrlr is in error state\n");
+		// LOG_DEMO
+		// NVME_CTRLR_ERRLOG(ctrlr, "Ctrlr is in error state\n");
 		return -1;
 
 	case NVME_CTRLR_STATE_READ_VS_WAIT_FOR_VS:
