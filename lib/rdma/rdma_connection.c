@@ -631,6 +631,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 					rdma_conn->connected_cb(rdma_conn->rdma_context, rdma_conn);
 				}
 				rdma_conn->handshake_buf->is_reconnected = false;
+				rdma_conn->reject_cnt = 0;
 				rdma_conn->status = RDMA_CLI_CONNECTED;
 			}
 			goto end;
@@ -754,7 +755,6 @@ void rdma_connection_free(struct rdma_connection* rdma_conn) {
 
 	rdma_conn->handshake_sent = false;
 	rdma_conn->handshake_received = false;
-	rdma_conn->reject_cnt = 0;
 }
 
 int rdma_connection_register(struct rdma_connection* rdma_conn, void* addr, uint32_t len) {
