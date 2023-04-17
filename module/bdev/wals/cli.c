@@ -18,7 +18,7 @@
 #define MAX_SLICES 256
 // currently a fake one, to make sure that it fully RDMA reads the struct
 #define DESTAGE_INFO_CHECKSUM 666
-// 1ms should be enough for 512-byte payload.
+// 10ms should be enough for 512-byte payload.
 #define TIMEOUT_MS_PER_BLOCK 10
 
 // must be greater or equal to NUM_TARGETS
@@ -846,19 +846,19 @@ nvmf_cli_connection_poller(void* ctx) {
         else if (g_nvmf_cli_conns[i].status == NVMF_CLI_DISCONNECTED) {
             // nvmf already has poller to reset the ctrlr.
             // assume that the transport id doesn't change
-            rc = spdk_nvme_ctrlr_reset(g_nvmf_cli_conns[i].ctrlr);
-            if (rc != 0) {
-                g_nvmf_cli_conns[i].reset_failed_cnt++;
-                if (g_nvmf_cli_conns[i].reset_failed_cnt % 1000000 == 0) {
-                    SPDK_WARNLOG("Cannot reset nvmf ctrlr %d: %d\n", i, rc);
-                }
-            }
-            else {
-                SPDK_NOTICELOG("Nvmf ctrlr %d reset successfully\n", i);
-                g_nvmf_cli_conns[i].reset_failed_cnt = 0;
-                g_nvmf_cli_conns[i].status = NVMF_CLI_INITIALIZED;
-            }
-            poller_rc = SPDK_POLLER_BUSY;
+            // rc = spdk_nvme_ctrlr_reset(g_nvmf_cli_conns[i].ctrlr);
+            // if (rc != 0) {
+            //     g_nvmf_cli_conns[i].reset_failed_cnt++;
+            //     if (g_nvmf_cli_conns[i].reset_failed_cnt % 1000000 == 0) {
+            //         SPDK_WARNLOG("Cannot reset nvmf ctrlr %d: %d\n", i, rc);
+            //     }
+            // }
+            // else {
+            //     SPDK_NOTICELOG("Nvmf ctrlr %d reset successfully\n", i);
+            //     g_nvmf_cli_conns[i].reset_failed_cnt = 0;
+            //     g_nvmf_cli_conns[i].status = NVMF_CLI_INITIALIZED;
+            // }
+            // poller_rc = SPDK_POLLER_BUSY;
         }
 
     }
@@ -1068,7 +1068,7 @@ pending_io_timeout_poller(void* ctx) {
         if (timeout_ticks < current_ticks) {
             // timeout.
             poller_rc = SPDK_POLLER_BUSY;
-            SPDK_NOTICELOG("IO (%p, %p, %p %d, %d, %ld, %d, %d, %d) timeout\n",
+            SPDK_NOTICELOG("IO (%p, %p, %p, %d, %d, %ld, %d, %d, %d) timeout\n",
                 io,
                 io->orig_io,
                 io_queue,
