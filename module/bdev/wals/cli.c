@@ -1007,9 +1007,12 @@ rdma_cq_poller(void* ctx) {
                             cb_fn,
                             io_context);
                     }
-                    else {
+                    else if (wc_buf[j].opcode == IBV_WC_RDMA_WRITE) {
                         // we are already in write thread.
                         cb_fn(io_context);
+                    }
+                    else {
+                        SPDK_NOTICELOG("Unsupported opcode %d\n", wc_buf[j].opcode);
                     }
                 }
             }
