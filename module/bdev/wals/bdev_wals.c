@@ -885,8 +885,8 @@ void
 wals_target_write_complete(struct wals_bdev_io *wals_io, bool success, int target_id)
 {
 	if (spdk_get_thread() != wals_io->wals_bdev->write_thread) {
-		SPDK_ERRLOG("Only write thread can finish write IO, but get thread %p\n",
-			spdk_get_thread());
+		SPDK_ERRLOG("Only write thread can finish write IO %p, but get thread %p\n",
+			wals_io, spdk_get_thread());
 	}
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_COMP_W_T, 0, 0, (uintptr_t)wals_io);
