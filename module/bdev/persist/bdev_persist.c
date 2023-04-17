@@ -82,6 +82,7 @@ struct persist_disk {
 	struct spdk_poller* destage_poller;
 	struct spdk_poller* rdma_poller;
 	struct spdk_poller* nvme_poller;
+	struct spdk_poller* cq_poller;
 	struct spdk_nvme_ctrlr* ctrlr;
 	struct spdk_nvme_ns* ns;
 	struct spdk_nvme_qpair* qpair;
@@ -966,8 +967,14 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 				persist_destroy_channel_cb, sizeof(struct persist_channel),
 				"bdev_persist");
 
-	pdisk->rdma_poller = SPDK_POLLER_REGISTER(persist_rdma_poller, pdisk, 100);
+	pdisk->rdma_poller = SPDK_POLLER_REGISTER(persist_rdma_poller, pdisk, 5 * 1000);
 	if (!pdisk->rdma_poller) {
+		SPDK_ERRLOG("Failed to register persist rdma poller\n");
+		return -ENOMEM;
+	}
+
+	pdisk->cq_poller = SPDK_POLLER_REGISTER(persist_rdma_cq_poller, pdisk, 5 * 1000);
+	if (!pdisk->cq_poller) {
 		SPDK_ERRLOG("Failed to register persist rdma poller\n");
 		return -ENOMEM;
 	}
