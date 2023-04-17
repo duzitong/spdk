@@ -488,6 +488,11 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 		SPDK_ERRLOG("Only read thread can finish read IO, but get %p\n",
 			spdk_get_thread());
 	}
+	if (wals_io->orig_io->type != SPDK_BDEV_IO_TYPE_READ) {
+		SPDK_ERRLOG("Calling read complete for other IO: (%p, %d)\n",
+			wals_io,
+			wals_io->orig_io->type);
+	}
 	struct spdk_bdev_io *orig_io = wals_io->orig_io;
 	int i;
 	void *copy = dma_page_get_buf(wals_io->dma_page);
@@ -887,6 +892,11 @@ wals_target_write_complete(struct wals_bdev_io *wals_io, bool success, int targe
 	if (spdk_get_thread() != wals_io->wals_bdev->write_thread) {
 		SPDK_ERRLOG("Only write thread can finish write IO %p, but get thread %p\n",
 			wals_io, spdk_get_thread());
+	}
+	if (wals_io->orig_io->type != SPDK_BDEV_IO_TYPE_WRITE) {
+		SPDK_ERRLOG("Calling write complete for other IO (%p, %d)\n",
+			wals_io,
+			wals_io->orig_io->type);
 	}
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_COMP_W_T, 0, 0, (uintptr_t)wals_io);
