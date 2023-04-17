@@ -981,15 +981,13 @@ rdma_cq_poller(void* ctx) {
                     bool success = true;
 					struct pending_io_context* io_context = (void*)wc_buf[j].wr_id;
 					if (wc_buf[j].status != IBV_WC_SUCCESS) {
-                        // TODO: should set the qp state to error, or reconnect?
-                        if (rdma_context->io_fail_cnt % 10000 == 0) {
-                            SPDK_ERRLOG("IO (%p, %d, %d) RDMA op %d failed with status %d\n",
-                                io_context->io,
-                                node_id,
-                                io_context->target_id,
-                                wc_buf[j].opcode,
-                                wc_buf[j].status);
-                        }
+                        SPDK_ERRLOG("IO (%p, %p, %d, %d) RDMA op %d failed with status %d\n",
+                            io_context,
+                            io_context->io,
+                            node_id,
+                            io_context->target_id,
+                            wc_buf[j].opcode,
+                            wc_buf[j].status);
                         
                         rdma_context->io_fail_cnt++;
                         success = false;

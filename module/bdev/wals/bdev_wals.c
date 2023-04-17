@@ -239,7 +239,7 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 	}
 
 	if (lcore == wals_bdev->write_lcore && wals_bdev->write_thread == NULL) {
-		SPDK_NOTICELOG("register write pollers\n");
+		SPDK_NOTICELOG("register write pollers %p\n", spdk_get_thread());
 
 		wals_bdev->write_thread = spdk_get_thread();
 
@@ -256,7 +256,7 @@ wals_bdev_create_cb(void *io_device, void *ctx_buf)
 		}
 	}
 	if (lcore == wals_bdev->read_lcore && (wals_bdev->read_thread == NULL || wals_bdev->read_thread == wals_bdev->write_thread)) {
-		SPDK_NOTICELOG("register read pollers\n");
+		SPDK_NOTICELOG("register read pollers %p\n", spdk_get_thread());
 
 		wals_bdev->log_head_update_poller = SPDK_POLLER_REGISTER(wals_bdev_log_head_update, wals_bdev, 5);
 		wals_bdev->cleaner_poller = SPDK_POLLER_REGISTER(wals_bdev_cleaner, wals_bdev, 1);
@@ -485,7 +485,8 @@ void
 wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 {
 	if (spdk_get_thread() != wals_io->wals_bdev->read_thread) {
-		SPDK_ERRLOG("Only read thread can finish read IO\n");
+		SPDK_ERRLOG("Only read thread can finish read IO, but get %p\n",
+			spdk_get_thread());
 	}
 	struct spdk_bdev_io *orig_io = wals_io->orig_io;
 	int i;
@@ -884,7 +885,8 @@ void
 wals_target_write_complete(struct wals_bdev_io *wals_io, bool success, int target_id)
 {
 	if (spdk_get_thread() != wals_io->wals_bdev->write_thread) {
-		SPDK_ERRLOG("Only write thread can finish write IO\n");
+		SPDK_ERRLOG("Only write thread can finish write IO, but get thread %p\n",
+			spdk_get_thread());
 	}
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_COMP_W_T, 0, 0, (uintptr_t)wals_io);
