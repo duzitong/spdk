@@ -667,11 +667,11 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 		}
 		case RDMA_CLI_ERROR:
 		{
-			rdma_connection_free(rdma_conn);
-			rdma_conn->status = RDMA_CLI_INITIALIZED;
-			if (rdma_conn->disconnect_cb) {
-				rdma_conn->disconnect_cb(rdma_conn->rdma_context, rdma_conn);
-			}
+			// rdma_connection_free(rdma_conn);
+			// rdma_conn->status = RDMA_CLI_INITIALIZED;
+			// if (rdma_conn->disconnect_cb) {
+			// 	rdma_conn->disconnect_cb(rdma_conn->rdma_context, rdma_conn);
+			// }
 			goto end;
 		}
 		case RDMA_CLI_DISCONNECTED:
@@ -682,6 +682,7 @@ int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 			if (rdma_conn->disconnect_cb) {
 				rdma_conn->disconnect_cb(rdma_conn->rdma_context, rdma_conn);
 			}
+			rdma_conn->status = RDMA_CLI_ERROR;
 			goto end;
 		}
 	}
