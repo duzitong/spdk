@@ -1001,21 +1001,23 @@ rdma_cq_poller(void* ctx) {
 
                     spdk_msg_fn cb_fn = success ? rdma_operation_success : rdma_operation_failure;
 
-                    if (wc_buf[j].opcode == IBV_WC_RDMA_READ) {
-                        if (io_context->io_queue->io_type == WALS_RDMA_WRITE) {
-                            SPDK_ERRLOG("Send write IO to read thread\n");
-                        }
+                    // if (wc_buf[j].opcode == IBV_WC_RDMA_READ) {
+                    if (io_context->io_queue->io_type == WALS_RDMA_READ) {
+                        // if (io_context->io_queue->io_type == WALS_RDMA_WRITE) {
+                        //     SPDK_ERRLOG("Send write IO to read thread\n");
+                        // }
                         spdk_thread_send_msg(
                             wals_bdev->read_thread,
                             cb_fn,
                             io_context);
                     }
-                    else if (wc_buf[j].opcode == IBV_WC_RDMA_WRITE) {
+                    // else if (wc_buf[j].opcode == IBV_WC_RDMA_WRITE) {
+                    else if (io_context->io_queue->io_type == WALS_RDMA_WRITE) {
                         // we are already in write thread.
                         cb_fn(io_context);
                     }
                     else {
-                        SPDK_NOTICELOG("Unsupported opcode %d\n", wc_buf[j].opcode);
+                        SPDK_NOTICELOG("Unsupported IO Type %d\n", io_context->io_queue->io_type);
                     }
                 }
             }
