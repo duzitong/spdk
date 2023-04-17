@@ -1517,6 +1517,7 @@ blockdev_test_long_running(void)
 					}
 				}
 				else {
+					printf("Read IO should not fail in test env\n");
 					// if failed, then the range must not be readable.
 					// it can happen if:
 					// 1. previous write fail. note that the write may be read by later
