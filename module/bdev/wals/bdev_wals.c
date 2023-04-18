@@ -507,7 +507,10 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 					: SPDK_BDEV_IO_STATUS_FAILED;
 
 	if (!success) {
-		SPDK_ERRLOG("Error reading data from target %d.\n", wals_io->read_target_id);
+		SPDK_ERRLOG("Error reading data from target %d: (%p, %d).\n",
+			wals_io->read_target_id,
+			wals_io,
+			wals_io->targets_failed);
 	}
 
 	if (wals_io->remaining_read_requests == 0) {
