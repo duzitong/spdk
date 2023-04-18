@@ -80,7 +80,7 @@ bstat *bstatClone(bstat *pb, struct spdk_mempool *pool) {
     clone->end = pb->end;
     clone->round = pb->round;
     clone->failed = pb->failed;
-    clone->failed_target_id = pb->failed_target_id;
+    clone->write_failed_target_id = pb->write_failed_target_id;
     clone->type = pb->type;
     clone->l = pb->l;
     return clone;
@@ -180,7 +180,7 @@ void bslPrintNode(bskiplistNode *bsln, char* buf, size_t size) {
                 bsln->ele->l.bdevOffset,
                 bsln->ele->round,
                 bsln->ele->failed,
-                bsln->ele->failed_target_id);
+                bsln->ele->write_failed_target_id);
         }
         else {
             snprintf(buf,

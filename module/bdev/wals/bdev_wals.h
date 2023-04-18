@@ -241,6 +241,9 @@ struct wals_slice {
 
 	// outstanding read requests offset
 	struct wals_lp_firo			*read_firo;
+
+	// use it to initialize wals_io->read_target_id.
+	int last_successful_read_target;
 };
 
 /*
@@ -286,14 +289,14 @@ struct wals_bdev_io {
 	int		targets_completed;
 
 	/* track read target */
-	int		target_index;
+	int		read_target_id;
 
 	bool	io_completed;
 
 	// first failed target id.
 	// initialization: sum of the target ids.
 	// if three out of four targets completes, then treat the last one as failed.
-	int failed_target_id;
+	int write_failed_target_id;
 };
 
 typedef int (*wals_target_fn)(struct wals_target* target, struct wals_bdev *wals_bdev);
@@ -513,7 +516,7 @@ struct wals_index_msg {
 
 	bool				failed;
 
-	int failed_target_id;
+	int write_failed_target_id;
 
 	struct wals_bdev	*wals_bdev;
 };
