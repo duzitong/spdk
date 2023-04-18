@@ -87,7 +87,7 @@ struct persist_disk {
 	struct spdk_nvme_ns* ns;
 	struct spdk_nvme_qpair* qpair;
 	struct destage_info* destage_tail;
-	struct destage_info* commit_tail;
+	volatile struct destage_info* commit_tail;
 	struct destage_info recover_tail;
 	struct persist_destage_context destage_context;
 	uint64_t prev_seq;
@@ -669,6 +669,8 @@ persist_destage_poller(void *ctx)
 				metadata->md_blocknum,
 				metadata->length);
 		}
+
+		// TODO: CRC check
 
 		if (pdisk->attach_disk) {
 			rc = spdk_nvme_ns_cmd_write(pdisk->ns,
