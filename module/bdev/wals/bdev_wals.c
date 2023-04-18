@@ -535,8 +535,8 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 			wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_SUCCESS);
 		} else {
 			wals_io->targets_failed++;
-			wals_io->read_target_id = (wals_io->read_target_id + 1) % QUORUM_TARGETS;
-			if (wals_io->targets_failed < QUORUM_TARGETS) {
+			wals_io->read_target_id = (wals_io->read_target_id + 1) % NUM_TARGETS;
+			if (wals_io->targets_failed < NUM_TARGETS) {
 				wals_io->status = SPDK_BDEV_IO_STATUS_SUCCESS;
 				wals_bdev_submit_read_request(wals_io);
 			} else {

@@ -514,12 +514,10 @@ static void nvmf_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
     if (io_context->io == io_queue->pending_ios[io_queue->head].io) {
         // it is the latest one
         if (spdk_nvme_cpl_is_success(cpl)) {
-            // SPDK_NOTICELOG("read successful\n");
             wals_target_read_complete(io_context->io, true);
         }
         else {
-            // TODO: if the read failed?
-            SPDK_ERRLOG("nvmf CLI failed to read from remote SSD\n");
+            SPDK_ERRLOG("NVMf client failed to read from remote SSD\n");
             wals_target_read_complete(io_context->io, false);
         }
         io_queue->head = (io_queue->head + 1) % PENDING_IO_MAX_CNT;
