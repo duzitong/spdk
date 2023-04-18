@@ -612,9 +612,10 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 
 	// only set fixed_target_id for non-retry IO.
 	int fixed_target_id = -1;
-	if (wals_io->targets_failed == 0 && bdev_io->u.bdev.md_buf) {
+	// bdevperf sends empty md
+	if (wals_io->targets_failed == 0 && bdev_io->u.bdev.md_buf && wals_bdev->in_diagnostic_mode) {
 		struct diagnostic_read_md* read_md = bdev_io->u.bdev.md_buf;
-		SPDK_INFOLOG(bdev_wals, "Fix the read to target %d\n", read_md->target_id);
+		SPDK_NOTICELOG("Fix the read to target %d\n", read_md->target_id);
 		fixed_target_id = read_md->target_id;
 	}
 
