@@ -582,8 +582,6 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
 	slice = &wals_bdev->slices[wals_io->slice_index];
 
-	wals_io->read_target_id = slice->last_successful_read_target;
-	
 	wals_io->dma_page = dma_heap_get_page(wals_bdev->read_heap, bdev_io->u.bdev.num_blocks * wals_bdev->blocklen);
 	if (!wals_io->dma_page) {
 		SPDK_NOTICELOG("No sufficient read buffer, size: %ld", bdev_io->u.bdev.num_blocks * wals_bdev->blocklen);
