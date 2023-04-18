@@ -534,7 +534,6 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 			slice->last_successful_read_target = wals_io->read_target_id;
 			wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_SUCCESS);
 		} else {
-			// TODO: the retry logic may read write_failed_target_id, which leads to corrupted data.
 			wals_io->targets_failed++;
 			wals_io->read_target_id = (wals_io->read_target_id + 1) % QUORUM_TARGETS;
 			if (wals_io->targets_failed < QUORUM_TARGETS) {
@@ -610,9 +609,9 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	wals_io->remaining_read_requests = 1;
 	read_cur = read_begin;
 
+	// only set fixed_target_id for non-retry IO.
 	int fixed_target_id = -1;
-
-	if (bdev_io->u.bdev.md_buf) {
+	if (wals_io->targets_failed == 0 && bdev_io->u.bdev.md_buf) {
 		struct diagnostic_read_md* read_md = bdev_io->u.bdev.md_buf;
 		SPDK_INFOLOG(bdev_wals, "Fix the read to target %d\n", read_md->target_id);
 		fixed_target_id = read_md->target_id;
@@ -1250,6 +1249,10 @@ wals_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 	wals_io->read_target_id = 0;  // TODO: round-robin?
 	wals_io->io_completed = false;
 	wals_io->write_failed_target_id = 0;
+
+	uint64_t slice_index = bdev_io->u.bdev.offset_blocks / wals_io->wals_bdev->slice_blockcnt;
+	struct wals_slice* slice = &wals_io->wals_bdev->slices[wals_io->slice_index];
+	wals_io->read_target_id = slice->last_successful_read_target;
 
 	/*
 	 * Write requests are sent to write_thread, read requests are sent to read_thread.
