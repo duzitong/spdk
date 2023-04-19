@@ -301,6 +301,8 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
             if (g_rdma_conns[i] == NULL) {
                 // this slot is empty. use it
                 SPDK_NOTICELOG("Using empty RDMA connection slot (aka. node id) %d\n", i);
+                cli_slice->rdma_conn = g_rdma_conns[i];
+                rdma_context = g_rdma_conns[i]->rdma_context;
                 target->node_id = i;
                 TAILQ_INIT(&rdma_context->slices);
                 TAILQ_INSERT_TAIL(&rdma_context->slices, cli_slice, tailq_rdma);
@@ -314,8 +316,6 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                     target_connected_cb,
                     target_disconnect_cb,
                     true);
-                cli_slice->rdma_conn = g_rdma_conns[i];
-                rdma_context = g_rdma_conns[i]->rdma_context;
 
                 // while (!rdma_connection_is_connected(g_rdma_conns[i])) {
                 //     rdma_connection_connect(g_rdma_conns[i]);
