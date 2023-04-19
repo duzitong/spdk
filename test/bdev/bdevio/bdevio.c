@@ -1353,7 +1353,7 @@ static bool has_overlap(int l1, int r1, int l2, int r2) {
 	return l1 <= r2 || l2 <= r1;
 }
 
-static int validate_block_is_consistent(uint64_t* ptr) {
+static bool validate_block_is_consistent(uint64_t* ptr) {
 	for (unsigned i = 1; i < DEFAULT_BLOCK_SIZE / sizeof(uint64_t); i++) {
 		if (ptr[i] != ptr[i - 1]) {
 			printf("Block inconsistent\n");
@@ -1361,10 +1361,10 @@ static int validate_block_is_consistent(uint64_t* ptr) {
 				printf("%d,", ptr[j]);
 			}
 			printf("\n");
-			return -1;
+			return false;
 		}
 	}
-	return 0;
+	return true;
 }
 
 static void 
