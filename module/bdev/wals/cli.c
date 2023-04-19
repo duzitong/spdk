@@ -310,7 +310,8 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                     0,
                     0,
                     target_connected_cb,
-                    target_disconnect_cb);
+                    target_disconnect_cb,
+                    true);
                 cli_slice->rdma_conn = g_rdma_conns[i];
                 rdma_context = g_rdma_conns[i]->rdma_context;
                 TAILQ_INIT(&rdma_context->slices);

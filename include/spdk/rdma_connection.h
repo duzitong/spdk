@@ -113,9 +113,10 @@ struct rdma_connection* rdma_connection_alloc(
 	uint64_t block_size,
 	uint64_t block_cnt,
 	rdma_connection_connected_cb connected_cb,
-	rdma_connection_disconnect_cb disconnect_cb);
+	rdma_connection_disconnect_cb disconnect_cb,
+	bool force_connect);
 
-int rdma_connection_connect(struct rdma_connection* rdma_conn);
+// int rdma_connection_connect(struct rdma_connection* rdma_conn);
 void rdma_connection_free(struct rdma_connection* rdma_conn);
 int rdma_connection_register(struct rdma_connection* rdma_conn, void* addr, uint32_t len);
 void rdma_connection_construct_sge(struct rdma_connection* rdma_conn, struct ibv_sge* sge, void* addr, uint32_t len);

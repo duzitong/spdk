@@ -923,7 +923,8 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 		LOG_BLOCKSIZE,
 	   	LOG_BLOCKCNT,
 		persist_rdma_cli_connected_cb,
-		persist_rdma_disconnect_cb);
+		persist_rdma_disconnect_cb,
+		false);
 
 	SPDK_NOTICELOG("num_peers = %ld\n", num_peers);
 
@@ -941,7 +942,8 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 				LOG_BLOCKSIZE,
 				LOG_BLOCKCNT,
 				persist_rdma_peer_connected_cb,
-				persist_rdma_disconnect_cb);
+				persist_rdma_disconnect_cb,
+				false);
 		}
 		else {
 			pdisk->peer_conns[i] = rdma_connection_alloc(false,
@@ -952,7 +954,8 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 				LOG_BLOCKSIZE,
 				LOG_BLOCKCNT,
 				persist_rdma_peer_connected_cb,
-				persist_rdma_disconnect_cb);
+				persist_rdma_disconnect_cb,
+				false);
 		}
 	}
 

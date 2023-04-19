@@ -13,6 +13,8 @@
 #include "spdk/likely.h"
 #include "spdk/util.h"
 
+static int rdma_connection_connect(struct rdma_connection* rdma_conn);
+
 struct rdma_connection* rdma_connection_alloc(
     bool is_server,
     const char* ip,
@@ -22,7 +24,8 @@ struct rdma_connection* rdma_connection_alloc(
     uint64_t block_size,
     uint64_t block_cnt,
 	rdma_connection_connected_cb connected_cb,
-	rdma_connection_disconnect_cb disconnect_cb)
+	rdma_connection_disconnect_cb disconnect_cb,
+	bool force_connect)
 {
     struct rdma_connection* rdma_conn = calloc(1, sizeof(struct rdma_connection));
 	pthread_rwlock_init(&rdma_conn->lock, NULL);
@@ -68,11 +71,17 @@ struct rdma_connection* rdma_connection_alloc(
 
 	rdma_conn->connection_poller = SPDK_POLLER_REGISTER(rdma_connection_connect, rdma_conn, 5 * 1000);
 
+	if (force_connect) {
+		while (!rdma_connection_is_connected(rdma_conn)) {
+			rdma_connection_connect(rdma_conn);
+		}
+	}
+
     return rdma_conn;
 }
 
 // Must not hold any lock when entering the function!
-int rdma_connection_connect(struct rdma_connection* rdma_conn) {
+static int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 	int rc = 0;
 
 	rc = pthread_rwlock_trywrlock(&rdma_conn->lock);
