@@ -780,19 +780,19 @@ static int persist_catchup_poller(void* ctx) {
 
 }
 
-static int persist_rdma_poller(void* ctx) {
-	struct persist_disk* pdisk = ctx;
+// static int persist_rdma_poller(void* ctx) {
+// 	struct persist_disk* pdisk = ctx;
 
-	rdma_connection_connect(pdisk->client_conn);
+// 	rdma_connection_connect(pdisk->client_conn);
 
-	// update_persist_rdma_connection(&pdisk->client_conn, pdisk);
-	for (size_t i = 0; i < pdisk->num_peers; i++) {
-		rdma_connection_connect(pdisk->peer_conns[i]);
-		// update_persist_rdma_connection(pdisk->peer_conns + i, pdisk);
-	}
+// 	// update_persist_rdma_connection(&pdisk->client_conn, pdisk);
+// 	for (size_t i = 0; i < pdisk->num_peers; i++) {
+// 		rdma_connection_connect(pdisk->peer_conns[i]);
+// 		// update_persist_rdma_connection(pdisk->peer_conns + i, pdisk);
+// 	}
 
-	return SPDK_POLLER_BUSY;
-}
+// 	return SPDK_POLLER_BUSY;
+// }
 
 static int
 persist_create_channel_cb(void *io_device, void *ctx)
@@ -971,11 +971,11 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 				persist_destroy_channel_cb, sizeof(struct persist_channel),
 				"bdev_persist");
 
-	pdisk->rdma_poller = SPDK_POLLER_REGISTER(persist_rdma_poller, pdisk, 5 * 1000);
-	if (!pdisk->rdma_poller) {
-		SPDK_ERRLOG("Failed to register persist rdma poller\n");
-		return -ENOMEM;
-	}
+	// pdisk->rdma_poller = SPDK_POLLER_REGISTER(persist_rdma_poller, pdisk, 5 * 1000);
+	// if (!pdisk->rdma_poller) {
+	// 	SPDK_ERRLOG("Failed to register persist rdma poller\n");
+	// 	return -ENOMEM;
+	// }
 
 	pdisk->cq_poller = SPDK_POLLER_REGISTER(persist_rdma_cq_poller, pdisk, 5 * 1000);
 	if (!pdisk->cq_poller) {

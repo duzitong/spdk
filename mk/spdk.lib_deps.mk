@@ -31,7 +31,7 @@ endif
 
 DEPDIRS-conf := log util
 DEPDIRS-json := log util
-DEPDIRS-rdma := log util
+DEPDIRS-rdma := log util thread
 DEPDIRS-reduce := log util
 DEPDIRS-thread := log util trace
 

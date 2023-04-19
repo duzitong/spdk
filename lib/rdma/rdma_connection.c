@@ -66,6 +66,8 @@ struct rdma_connection* rdma_connection_alloc(
 	rdma_conn->server_addr = addr_res;
 	SPDK_NOTICELOG("Alloc rdma conn %p: (%s:%s, is_server=%d)\n", rdma_conn, ip, port, is_server);
 
+	rdma_conn->connection_poller = SPDK_POLLER_REGISTER(rdma_connection_connect, rdma_conn, 5 * 1000);
+
     return rdma_conn;
 }
 

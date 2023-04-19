@@ -3,6 +3,7 @@
 
 #include "spdk/stdinc.h"
 #include "spdk/log.h"
+#include "spdk/thread.h"
 
 #include <infiniband/verbs.h>
 #include <rdma/rdma_cma.h>
@@ -99,6 +100,7 @@ struct rdma_connection {
 	int reject_cnt;
 	bool handshake_sent;
 	bool handshake_received;
+	struct spdk_poller* connection_poller;
 };
 
 

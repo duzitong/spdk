@@ -125,7 +125,7 @@ struct wals_cli_slice {
 	TAILQ_ENTRY(wals_cli_slice)	tailq_all_slices;
 };
 
-static int rdma_cli_connection_poller(void* ctx);
+// static int rdma_cli_connection_poller(void* ctx);
 static int nvmf_cli_connection_poller(void* ctx);
 static int rdma_cq_poller(void* ctx);
 static int nvmf_cq_poller(void* ctx);
@@ -708,9 +708,9 @@ cli_register_write_pollers(struct wals_target *target, struct wals_bdev *wals_bd
     }
 
     // only need one poller for connecting the qps
-    if (g_rdma_connection_poller == NULL) {
-        g_rdma_connection_poller = SPDK_POLLER_REGISTER(rdma_cli_connection_poller, wals_bdev, 5 * 1000);
-    }
+    // if (g_rdma_connection_poller == NULL) {
+    //     g_rdma_connection_poller = SPDK_POLLER_REGISTER(rdma_cli_connection_poller, wals_bdev, 5 * 1000);
+    // }
 
     for (int node_id = 0; node_id < NUM_NODES; node_id++) {
         if (g_pending_write_io_queue[node_id].poller == NULL) {
@@ -816,14 +816,14 @@ cli_diagnose_unregister_write_pollers(struct wals_target *target, struct wals_bd
 }
 
 // WRITE THREAD
-static int
-rdma_cli_connection_poller(void* ctx) {
-    for (int i = 0; i < NUM_NODES; i++) {
-        if (g_rdma_conns[i] != NULL) {
-            rdma_connection_connect(g_rdma_conns[i]);
-        }
-    }
-}
+// static int
+// rdma_cli_connection_poller(void* ctx) {
+//     for (int i = 0; i < NUM_NODES; i++) {
+//         if (g_rdma_conns[i] != NULL) {
+//             rdma_connection_connect(g_rdma_conns[i]);
+//         }
+//     }
+// }
 
 // READ THREAD
 // same logic as the poller in examples/nvme/reconnect.c

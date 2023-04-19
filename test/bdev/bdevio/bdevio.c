@@ -1358,7 +1358,7 @@ static bool validate_block_is_consistent(uint64_t* ptr) {
 		if (ptr[i] != ptr[i - 1]) {
 			printf("Block inconsistent\n");
 			for (unsigned j = 0; j < DEFAULT_BLOCK_CNT / sizeof(uint64_t); j++) {
-				printf("%d,", ptr[j]);
+				printf("%ld,", ptr[j]);
 			}
 			printf("\n");
 			return false;
@@ -1400,7 +1400,7 @@ blockdev_test_long_running(void)
 		return;
 	}
 
-	// One byte (char) for each block to save space
+	// One Int for each block to save space
 	// against 512B * (1024 * 1024 * 2)
 	bdev_block_cnt = DEFAULT_BLOCK_CNT;
 

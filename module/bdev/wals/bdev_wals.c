@@ -582,7 +582,6 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 
 	SPDK_INFOLOG(bdev_wals, "submit read: %ld+%ld\n", bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks);
 
-	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
 	slice = &wals_bdev->slices[wals_io->slice_index];
 
 	wals_io->dma_page = dma_heap_get_page(wals_bdev->read_heap, bdev_io->u.bdev.num_blocks * wals_bdev->blocklen);
@@ -1099,7 +1098,6 @@ wals_bdev_submit_write_request(void *arg)
 
 	SPDK_DEBUGLOG(bdev_wals, "submit write: %ld+%ld\n", bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks);
 
-	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_bdev->slice_blockcnt;
 	slice = &wals_bdev->slices[wals_io->slice_index];
 
 	md_size += bdev_io->u.bdev.num_blocks * sizeof(wals_crc);
@@ -1252,7 +1250,7 @@ wals_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 	wals_io->io_completed = false;
 	wals_io->write_failed_target_id = 0;
 
-	uint64_t slice_index = bdev_io->u.bdev.offset_blocks / wals_io->wals_bdev->slice_blockcnt;
+	wals_io->slice_index = bdev_io->u.bdev.offset_blocks / wals_io->wals_bdev->slice_blockcnt;
 	struct wals_slice* slice = &wals_io->wals_bdev->slices[wals_io->slice_index];
 	wals_io->read_target_id = slice->last_successful_read_target;
 
