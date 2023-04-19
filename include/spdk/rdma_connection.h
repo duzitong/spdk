@@ -22,8 +22,9 @@ enum rdma_handshake_status {
 
 struct rdma_connection;
 
-typedef void (*rdma_connection_connected_cb)(void *cb_ctx, struct rdma_connection* rdma_conn);
-typedef void (*rdma_connection_disconnect_cb)(void *cb_ctx, struct rdma_connection* rdma_conn);
+typedef void (*rdma_connection_context_created_cb)(void* context, void* cb_arg);
+typedef void (*rdma_connection_connected_cb)(struct rdma_connection* rdma_conn);
+typedef void (*rdma_connection_disconnect_cb)(struct rdma_connection* rdma_conn);
 
 struct destage_info {
 	uint64_t offset;
@@ -115,6 +116,8 @@ struct rdma_connection* rdma_connection_alloc(
 	void* base_addr,
 	uint64_t block_size,
 	uint64_t block_cnt,
+	rdma_connection_context_created_cb context_created_cb,
+	void* cb_arg,
 	rdma_connection_connected_cb connected_cb,
 	rdma_connection_disconnect_cb disconnect_cb,
 	bool force_connect);

@@ -132,8 +132,15 @@ static int nvmf_cq_poller(void* ctx);
 static int slice_destage_info_poller(void* ctx);
 static int pending_io_timeout_poller(void* ctx);
 
-void target_connected_cb(void *cb_ctx, struct rdma_connection* rdma_conn) {
-    struct cli_rdma_context* context = cb_ctx;
+static void target_context_created_cb(void* ctx, void* arg) {
+    struct cli_rdma_context* context = ctx;
+    struct wals_cli_slice* cli_slice = arg;
+    TAILQ_INIT(&context->slices);
+    TAILQ_INSERT_TAIL(&context->slices, cli_slice, tailq_rdma);
+}
+
+static void target_connected_cb(struct rdma_connection* rdma_conn) {
+    struct cli_rdma_context* context = rdma_conn->rdma_context;
 
     rdma_connection_register(rdma_conn, g_destage_tail, VALUE_2MB);
     rdma_connection_register(rdma_conn, g_commit_tail, VALUE_2MB);
@@ -143,8 +150,8 @@ void target_connected_cb(void *cb_ctx, struct rdma_connection* rdma_conn) {
     rdma_connection_register(rdma_conn, cli_slice->wals_bdev->read_heap->buf, cli_slice->wals_bdev->read_heap->buf_size);
 }
 
-void target_disconnect_cb(void* cb_ctx, struct rdma_connection* rdma_conn) {
-    struct cli_rdma_context* context = cb_ctx;
+static void target_disconnect_cb(struct rdma_connection* rdma_conn) {
+    struct cli_rdma_context* context = rdma_conn->rdma_context;
 
     struct wals_cli_slice* cli_slice;
     TAILQ_FOREACH(cli_slice, &context->slices, tailq_rdma) {
@@ -301,11 +308,7 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
             if (g_rdma_conns[i] == NULL) {
                 // this slot is empty. use it
                 SPDK_NOTICELOG("Using empty RDMA connection slot (aka. node id) %d\n", i);
-                cli_slice->rdma_conn = g_rdma_conns[i];
-                rdma_context = g_rdma_conns[i]->rdma_context;
                 target->node_id = i;
-                TAILQ_INIT(&rdma_context->slices);
-                TAILQ_INSERT_TAIL(&rdma_context->slices, cli_slice, tailq_rdma);
                 g_rdma_conns[i] = rdma_connection_alloc(false,
                     config->target_log_info.address,
                     port_buf,
@@ -313,10 +316,14 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                     NULL,
                     0,
                     0,
+                    target_context_created_cb,
+                    cli_slice,
                     target_connected_cb,
                     target_disconnect_cb,
                     true);
 
+                cli_slice->rdma_conn = g_rdma_conns[i];
+                rdma_context = g_rdma_conns[i]->rdma_context;
                 // while (!rdma_connection_is_connected(g_rdma_conns[i])) {
                 //     rdma_connection_connect(g_rdma_conns[i]);
                 // }
@@ -615,7 +622,6 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
     // SPDK_NOTICELOG("Writing to log %ld %ld\n", offset, cnt);
     int rc;
     struct wals_cli_slice* slice = target->private_info;
-    struct cli_rdma_context* rdma_context = slice->rdma_conn->rdma_context;
     struct pending_io_queue* io_queue = &g_pending_write_io_queue[target->node_id];
     pthread_rwlock_rdlock(&slice->rdma_conn->lock);
 

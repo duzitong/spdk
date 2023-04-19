@@ -24,6 +24,8 @@ struct rdma_connection* rdma_connection_alloc(
     void* base_addr,
     uint64_t block_size,
     uint64_t block_cnt,
+	rdma_connection_context_created_cb context_created_cb,
+	void* cb_arg,
 	rdma_connection_connected_cb connected_cb,
 	rdma_connection_disconnect_cb disconnect_cb,
 	bool force_connect)
@@ -31,6 +33,9 @@ struct rdma_connection* rdma_connection_alloc(
     struct rdma_connection* rdma_conn = calloc(1, sizeof(struct rdma_connection));
 	pthread_rwlock_init(&rdma_conn->lock, NULL);
     void* rdma_context = calloc(1, context_length);
+	if (context_created_cb) {
+		context_created_cb(rdma_context, cb_arg);
+	}
     void* handshake_buffer = spdk_zmalloc(VALUE_2MB, VALUE_2MB, NULL,
                     SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
     rdma_conn->handshake_buf = handshake_buffer;
@@ -355,7 +360,7 @@ static int rdma_connection_connect(void* ctx) {
 			if (rdma_conn->handshake_received && rdma_conn->handshake_sent) {
 				SPDK_NOTICELOG("rdma handshake complete\n");
 				if (rdma_conn->connected_cb) {
-					rdma_conn->connected_cb(rdma_conn->rdma_context, rdma_conn);
+					rdma_conn->connected_cb(rdma_conn);
 				}
 				rdma_conn->handshake_buf->is_reconnected = false;
 				rdma_conn->status = RDMA_SERVER_CONNECTED;
@@ -402,7 +407,7 @@ static int rdma_connection_connect(void* ctx) {
 		{
 			rdma_conn->handshake_buf->is_reconnected = true;
 			if (rdma_conn->disconnect_cb) {
-				rdma_conn->disconnect_cb(rdma_conn->rdma_context, rdma_conn);
+				rdma_conn->disconnect_cb(rdma_conn);
 			}
 			rdma_conn->status = RDMA_SERVER_ERROR;
 			goto end;
@@ -657,7 +662,7 @@ static int rdma_connection_connect(void* ctx) {
 			if (rdma_conn->handshake_received && rdma_conn->handshake_sent) {
 				SPDK_NOTICELOG("rdma handshake complete\n");
 				if (rdma_conn->connected_cb) {
-					rdma_conn->connected_cb(rdma_conn->rdma_context, rdma_conn);
+					rdma_conn->connected_cb(rdma_conn);
 				}
 				rdma_conn->handshake_buf->is_reconnected = false;
 				rdma_conn->reject_cnt = 0;
@@ -704,7 +709,7 @@ static int rdma_connection_connect(void* ctx) {
 		{
 			rdma_conn->handshake_buf->is_reconnected = true;
 			if (rdma_conn->disconnect_cb) {
-				rdma_conn->disconnect_cb(rdma_conn->rdma_context, rdma_conn);
+				rdma_conn->disconnect_cb(rdma_conn);
 			}
 			rdma_conn->status = RDMA_CLI_ERROR;
 			goto end;

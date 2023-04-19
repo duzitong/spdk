@@ -392,9 +392,14 @@ static const struct spdk_bdev_fn_table persist_fn_table = {
 	.write_config_json	= bdev_persist_write_json_config,
 };
 
-static void persist_rdma_cli_connected_cb(void* cb_ctx, struct rdma_connection* rdma_conn) {
+static void persist_rdma_context_created_cb(void* context, void* arg) {
+	struct persist_rdma_context* p_context = context;
+	p_context->pdisk = arg;
+}
+
+static void persist_rdma_cli_connected_cb(struct rdma_connection* rdma_conn) {
 	// TODO
-	struct persist_rdma_context* context = cb_ctx;
+	struct persist_rdma_context* context = rdma_conn->rdma_context;
 	struct rdma_handshake* remote_handshake = rdma_conn->handshake_buf + 1;
 	if (remote_handshake->is_reconnected) {
 		SPDK_NOTICELOG("Reconnected to client. Trigger reconnect routine\n");
@@ -402,11 +407,11 @@ static void persist_rdma_cli_connected_cb(void* cb_ctx, struct rdma_connection* 
 	}
 }
 
-static void persist_rdma_peer_connected_cb(void* cb_ctx, struct rdma_connection* rdma_conn) {
+static void persist_rdma_peer_connected_cb(struct rdma_connection* rdma_conn) {
 	// TODO
 }
 
-static void persist_rdma_disconnect_cb(void* cb_ctx, struct rdma_connection* rdma_conn) {
+static void persist_rdma_disconnect_cb(struct rdma_connection* rdma_conn) {
 	// TODO
 }
 
@@ -922,6 +927,8 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 		pdisk->malloc_buf,
 		LOG_BLOCKSIZE,
 	   	LOG_BLOCKCNT,
+		persist_rdma_context_created_cb,
+		pdisk,
 		persist_rdma_cli_connected_cb,
 		persist_rdma_disconnect_cb,
 		false);
@@ -941,6 +948,8 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 				pdisk->malloc_buf,
 				LOG_BLOCKSIZE,
 				LOG_BLOCKCNT,
+				persist_rdma_context_created_cb,
+				pdisk,
 				persist_rdma_peer_connected_cb,
 				persist_rdma_disconnect_cb,
 				false);
@@ -953,6 +962,8 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 				pdisk->malloc_buf,
 				LOG_BLOCKSIZE,
 				LOG_BLOCKCNT,
+				persist_rdma_context_created_cb,
+				pdisk,
 				persist_rdma_peer_connected_cb,
 				persist_rdma_disconnect_cb,
 				false);
