@@ -100,7 +100,10 @@ struct rdma_connection {
 	int reject_cnt;
 	bool handshake_sent;
 	bool handshake_received;
-	struct spdk_poller* connection_poller;
+	// connect_poller polls events for disconnect
+	struct spdk_poller* connect_poller;
+	// reconnect_poller recycles 
+	struct spdk_poller* reconnect_poller;
 };
 
 

@@ -317,9 +317,9 @@ cli_start(struct wals_target_config *config, struct wals_bdev *wals_bdev, struct
                 TAILQ_INIT(&rdma_context->slices);
                 TAILQ_INSERT_TAIL(&rdma_context->slices, cli_slice, tailq_rdma);
 
-                while (!rdma_connection_is_connected(g_rdma_conns[i])) {
-                    rdma_connection_connect(g_rdma_conns[i]);
-                }
+                // while (!rdma_connection_is_connected(g_rdma_conns[i])) {
+                //     rdma_connection_connect(g_rdma_conns[i]);
+                // }
 
                 break;
             }

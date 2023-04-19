@@ -13,7 +13,8 @@
 #include "spdk/likely.h"
 #include "spdk/util.h"
 
-static int rdma_connection_connect(struct rdma_connection* rdma_conn);
+static int rdma_connection_connect(void* ctx);
+static int rdma_connection_reconnect(void* ctx);
 
 struct rdma_connection* rdma_connection_alloc(
     bool is_server,
@@ -69,7 +70,8 @@ struct rdma_connection* rdma_connection_alloc(
 	rdma_conn->server_addr = addr_res;
 	SPDK_NOTICELOG("Alloc rdma conn %p: (%s:%s, is_server=%d)\n", rdma_conn, ip, port, is_server);
 
-	rdma_conn->connection_poller = SPDK_POLLER_REGISTER(rdma_connection_connect, rdma_conn, 5 * 1000);
+	rdma_conn->connect_poller = SPDK_POLLER_REGISTER(rdma_connection_connect, rdma_conn, 50 * 1000);
+	rdma_conn->reconnect_poller = SPDK_POLLER_REGISTER(rdma_connection_reconnect, rdma_conn, 5 * 1000 * 1000);
 
 	if (force_connect) {
 		while (!rdma_connection_is_connected(rdma_conn)) {
@@ -80,10 +82,32 @@ struct rdma_connection* rdma_connection_alloc(
     return rdma_conn;
 }
 
-// Must not hold any lock when entering the function!
-static int rdma_connection_connect(struct rdma_connection* rdma_conn) {
-	int rc = 0;
+static int rdma_connection_reconnect(void* ctx) {
+	struct rdma_connection* rdma_conn = ctx;
+	switch (rdma_conn->status) {
+		case RDMA_CLI_ERROR:
+		{
+			rdma_connection_free(rdma_conn);
+			rdma_conn->status = RDMA_CLI_INITIALIZED;
+			return SPDK_POLLER_BUSY;
+		}
+		case RDMA_SERVER_ERROR:
+		{
+			rdma_connection_free(rdma_conn);
+			rdma_conn->status = RDMA_SERVER_INITIALIZED;
+			return SPDK_POLLER_BUSY;
+		}
+		default:
+		{
+			return SPDK_POLLER_IDLE;
+		}
+	}
+}
 
+// Must not hold any lock when entering the function!
+static int rdma_connection_connect(void* ctx) {
+	int rc = 0;
+	struct rdma_connection* rdma_conn = ctx;
 	rc = pthread_rwlock_trywrlock(&rdma_conn->lock);
 	
 	if (rc != 0) {
@@ -372,21 +396,15 @@ static int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 		}
 		case RDMA_SERVER_ERROR:
 		{
-			rdma_connection_free(rdma_conn);
-			rdma_conn->status = RDMA_SERVER_INITIALIZED;
-			if (rdma_conn->disconnect_cb) {
-				rdma_conn->disconnect_cb(rdma_conn->rdma_context, rdma_conn);
-			}
 			goto end;
 		}
 		case RDMA_SERVER_DISCONNECTED:
 		{
-			rdma_connection_free(rdma_conn);
-			rdma_conn->status = RDMA_SERVER_INITIALIZED;
 			rdma_conn->handshake_buf->is_reconnected = true;
 			if (rdma_conn->disconnect_cb) {
 				rdma_conn->disconnect_cb(rdma_conn->rdma_context, rdma_conn);
 			}
+			rdma_conn->status = RDMA_SERVER_ERROR;
 			goto end;
 		}
 		case RDMA_CLI_ADDR_RESOLVING:
@@ -680,16 +698,11 @@ static int rdma_connection_connect(struct rdma_connection* rdma_conn) {
 		{
 			// rdma_connection_free(rdma_conn);
 			// rdma_conn->status = RDMA_CLI_INITIALIZED;
-			// if (rdma_conn->disconnect_cb) {
-			// 	rdma_conn->disconnect_cb(rdma_conn->rdma_context, rdma_conn);
-			// }
 			goto end;
 		}
 		case RDMA_CLI_DISCONNECTED:
 		{
-			rdma_connection_free(rdma_conn);
-			// rdma_conn->status = RDMA_CLI_INITIALIZED;
-			// rdma_conn->handshake_buf->is_reconnected = true;
+			rdma_conn->handshake_buf->is_reconnected = true;
 			if (rdma_conn->disconnect_cb) {
 				rdma_conn->disconnect_cb(rdma_conn->rdma_context, rdma_conn);
 			}
