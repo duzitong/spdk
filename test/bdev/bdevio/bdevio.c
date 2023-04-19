@@ -1353,6 +1353,20 @@ static bool has_overlap(int l1, int r1, int l2, int r2) {
 	return l1 <= r2 || l2 <= r1;
 }
 
+static int validate_block_is_consistent(uint64_t* ptr) {
+	for (unsigned i = 1; i < DEFAULT_BLOCK_SIZE / sizeof(uint64_t); i++) {
+		if (ptr[i] != ptr[i - 1]) {
+			printf("Block inconsistent\n");
+			for (unsigned j = 0; j < DEFAULT_BLOCK_CNT / sizeof(uint64_t); j++) {
+				printf("%d,", ptr[j]);
+			}
+			printf("\n");
+			return -1;
+		}
+	}
+	return 0;
+}
+
 static void 
 blockdev_test_long_running(void)
 {
@@ -1458,13 +1472,11 @@ blockdev_test_long_running(void)
 					for (int i = 0; i < io->block_cnt; i++) {
 						// 1. validate block integrity
 						uint64_t* cur_buf = io->buf + i * DEFAULT_BLOCK_SIZE;
-						for (unsigned j = 1; j < DEFAULT_BLOCK_SIZE / sizeof(uint64_t); j++) {
-							if (cur_buf[j] != cur_buf[j - 1]) {
-								ok = false;
-								failed_offset = io->offset + i;
-								failure_reason = IO_FAILURE_BLOCK_INCONSISTENT;
-								goto end;
-							}
+
+						if (!validate_block_is_consistent(cur_buf)) {
+							ok = false;
+							failure_reason = IO_FAILURE_BLOCK_INCONSISTENT;
+							goto end;
 						}
 
 						// 2. should not read outdated data
@@ -1617,6 +1629,7 @@ end:
 			blockdev_read_many(true, io_unit);
 
 			printf("Result from target %d: %ld\n", target, ((uint64_t*)buf)[0]);
+			validate_block_is_consistent(buf);
 		}
 	}
 
