@@ -75,6 +75,12 @@ enum persist_pmem_status {
 	PERSIST_PMEM_IN_CATCHUP,
 };
 
+struct persist_peer_memcpy_job {
+	uint64_t start_offset;
+	uint64_t end_offset;
+	bool ongoing;
+};
+
 struct persist_disk {
 	struct spdk_bdev		disk;
 	// act as circular buffer
@@ -88,13 +94,14 @@ struct persist_disk {
 	struct spdk_nvme_qpair* qpair;
 	struct destage_info* destage_tail;
 	volatile struct destage_info* commit_tail;
-	struct destage_info recover_tail;
+	// struct destage_info recover_tail;
 	struct persist_destage_context destage_context;
 	uint64_t prev_seq;
 	enum persist_pmem_status pmem_status;
 	struct rdma_connection* peer_conns[RPC_MAX_PEERS];
 	size_t num_peers;
 	struct rdma_connection* client_conn;
+	struct persist_peer_memcpy_job memcpy_job;
 	size_t pmem_total_size;
 	
 	// if false, then all nvme-related fields are null.
@@ -501,11 +508,13 @@ static int persist_rdma_cq_poller(void* ctx) {
 		SPDK_ERRLOG("Fail to poll ibv_cq\n");
 	}
 	for (int i = 0; i < cnt; i++) {
-		if (wc_buf[i].wr_id == 1) {
-			SPDK_NOTICELOG("PMem initialize complete\n");
+		if (wc_buf[i].wr_id == (uint64_t)&pdisk->memcpy_job) {
+			SPDK_NOTICELOG("Finish catchup from %ld to %ld\n",
+				pdisk->memcpy_job.start_offset,
+				pdisk->memcpy_job.end_offset);
 			pdisk->pmem_status = PERSIST_PMEM_NORMAL;
+			pdisk->memcpy_job.ongoing = false;
 			return SPDK_POLLER_BUSY;
-
 		}
 		else {
 			SPDK_ERRLOG("Unknown wr_id %ld\n", wc_buf[i].wr_id);
@@ -514,39 +523,46 @@ static int persist_rdma_cq_poller(void* ctx) {
 	return SPDK_POLLER_IDLE;
 }
 
-static int persist_peer_memcpy(int peer_id, struct persist_disk* pdisk, uint64_t start_offset, uint64_t end_offset, bool need_signal) {
-	pthread_rwlock_rdlock(&pdisk->peer_conns[peer_id]->lock);
+static int persist_peer_memcpy(int peer_id, struct persist_disk* pdisk, uint64_t start_offset, uint64_t end_offset) {
 	if (start_offset == end_offset) {
-		goto end;
+		return 0;
 	}
+
+	if (pdisk->memcpy_job.ongoing) {
+		// wait for previous one to complete.
+		return 0;
+	}
+
+	pdisk->memcpy_job.ongoing = true;
+	pdisk->memcpy_job.start_offset = start_offset;
+	pdisk->memcpy_job.end_offset = end_offset;
+
 	struct ibv_send_wr read_wr, *bad_read_wr = NULL;
 	struct ibv_sge read_sge;
 	memset(&read_wr, 0, sizeof(read_wr));
 	struct rdma_handshake* remote_handshake = pdisk->peer_conns[peer_id]->handshake_buf + 1;
 
 	// currently only initializing needs signal. Be lazy about wr_id.
-	read_wr.wr_id = need_signal ? 1 : 0;
-	read_wr.send_flags = need_signal ? IBV_SEND_SIGNALED : 0;
+	read_wr.wr_id = (uint64_t)&pdisk->memcpy_job;
+	read_wr.send_flags = IBV_SEND_SIGNALED;
 	read_wr.opcode = IBV_WR_RDMA_READ;
 	read_wr.sg_list = &read_sge;
 	read_wr.num_sge = 1;
-	read_wr.send_flags = 0;
 	read_wr.wr.rdma.remote_addr = (uint64_t)remote_handshake->base_addr + start_offset * LOG_BLOCKSIZE;
 	read_wr.wr.rdma.rkey = remote_handshake->rkey;
 
+	pthread_rwlock_rdlock(&pdisk->peer_conns[peer_id]->lock);
 	rdma_connection_construct_sge(pdisk->peer_conns[peer_id],
 		&read_sge,
-		pdisk->malloc_buf + start_offset * pdisk->disk.blocklen,
-		(end_offset - start_offset) * pdisk->disk.blocklen);
+		pdisk->malloc_buf + start_offset * LOG_BLOCKSIZE,
+		(end_offset - start_offset) * LOG_BLOCKSIZE);
 
 	int rc = ibv_post_send(pdisk->peer_conns[peer_id]->cm_id->qp, &read_wr, &bad_read_wr);
 	if (rc != 0) {
-		SPDK_ERRLOG("post send failed\n");
-		goto end;
+		SPDK_ERRLOG("post send failed: %d\n", rc);
 	}
-
-end:
 	pthread_rwlock_unlock(&pdisk->peer_conns[peer_id]->lock);
+
 	return rc;
 }
 
@@ -571,8 +587,9 @@ persist_destage_poller(void *ctx)
 			return SPDK_POLLER_IDLE;
 		}
 
-		persist_peer_memcpy(0, pdisk, 0, pdisk->pmem_total_size / LOG_BLOCKSIZE, true);
-
+		SPDK_NOTICELOG("Memcpy blocks from 0 to %ld\n", pdisk->pmem_total_size / LOG_BLOCKSIZE);
+		persist_peer_memcpy(0, pdisk, 0, pdisk->pmem_total_size / LOG_BLOCKSIZE);
+		pdisk->pmem_status = PERSIST_PMEM_IN_CATCHUP;
 	}
 
 	if (pdisk->pmem_status != PERSIST_PMEM_NORMAL) {
@@ -740,10 +757,10 @@ persist_destage_poller(void *ctx)
 			return SPDK_POLLER_IDLE;
 		}
 
-		if (destage_info_gt(&pdisk->recover_tail, pdisk->destage_tail)) {
-			// still recovering from previous catchup result
-			return SPDK_POLLER_BUSY;
-		}
+		// if (destage_info_gt(&pdisk->recover_tail, pdisk->destage_tail)) {
+		// 	// still recovering from previous catchup result
+		// 	return SPDK_POLLER_BUSY;
+		// }
 
 		// need catchup from destage_tail to commit_tail
 		if (pdisk->destage_tail->offset < commit_tail_copy.offset) {
@@ -754,7 +771,7 @@ persist_destage_poller(void *ctx)
 					pdisk->destage_tail->offset, pdisk->destage_tail->round,
 					commit_tail_copy.offset, commit_tail_copy.round);
 			}
-			persist_peer_memcpy(0, pdisk, pdisk->destage_tail->offset, commit_tail_copy.offset, false);
+			persist_peer_memcpy(0, pdisk, pdisk->destage_tail->offset, commit_tail_copy.offset);
 		}
 		else {
 			// case 2: need to wrap around
@@ -764,19 +781,19 @@ persist_destage_poller(void *ctx)
 					pdisk->destage_tail->offset, pdisk->destage_tail->round,
 					commit_tail_copy.offset, commit_tail_copy.round);
 			}
-			persist_peer_memcpy(0, pdisk, pdisk->destage_tail->offset, LOG_BLOCKCNT, false);
-			persist_peer_memcpy(0, pdisk, 0, commit_tail_copy.offset, false);
+			persist_peer_memcpy(0, pdisk, pdisk->destage_tail->offset, LOG_BLOCKCNT);
+			persist_peer_memcpy(0, pdisk, 0, commit_tail_copy.offset);
 		}
 
 		// Never look back.
 		// TODO: what will happen with peer memcpy fail? (low prob)
-		pdisk->recover_tail.offset = commit_tail_copy.offset;
-		pdisk->recover_tail.round = commit_tail_copy.round;
+		// pdisk->recover_tail.offset = commit_tail_copy.offset;
+		// pdisk->recover_tail.round = commit_tail_copy.round;
 	}
-	else {
-		pdisk->recover_tail.offset = pdisk->destage_tail->offset;
-		pdisk->recover_tail.round = pdisk->destage_tail->round;
-	}
+	// else {
+	// 	pdisk->recover_tail.offset = pdisk->destage_tail->offset;
+	// 	pdisk->recover_tail.round = pdisk->destage_tail->round;
+	// }
 
 	return SPDK_POLLER_BUSY;
 }

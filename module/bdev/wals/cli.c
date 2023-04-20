@@ -644,14 +644,16 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
 
     struct wals_metadata* metadata = data;
     if (metadata->seq != slice->prev_seq + 1) {
-        SPDK_ERRLOG("Seq jumped from %ld to %ld\n", slice->prev_seq, metadata->seq);
+        SPDK_NOTICELOG("Seq jumped from %ld to %ld. It is expected when the data node reconnects.\n",
+            slice->prev_seq,
+            metadata->seq);
     }
     if (offset != slice->prev_offset) {
         if (offset != 0) {
             SPDK_ERRLOG("Offset jumped from %ld to %ld\n", slice->prev_offset, offset);
         }
     }
-    slice->prev_seq++;
+    slice->prev_seq = metadata->seq;
     slice->prev_offset = offset + cnt;
     
     // SPDK_NOTICELOG("Sending md %ld %ld %ld %ld %ld %ld to slice %d\n",
