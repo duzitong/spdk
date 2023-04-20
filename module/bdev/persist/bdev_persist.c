@@ -673,7 +673,7 @@ persist_destage_poller(void *ctx)
 
 		if (metadata->seq != pdisk->prev_seq + 1) {
 			// TODO: what to do about it?
-			SPDK_ERRLOG("Possible data loss! Previous seq is %ld while the current is %ld. Offset: (%ld, %ld, %ld)\n",
+			SPDK_NOTICELOG("Reconnection or data loss! Previous seq is %ld while the current is %ld. Offset: (%ld, %ld, %ld)\n",
 				pdisk->prev_seq,
 				metadata->seq,
 				pdisk->destage_tail->offset,

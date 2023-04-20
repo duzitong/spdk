@@ -91,6 +91,7 @@ struct pending_io_queue g_pending_nvmf_read_io_queue[NUM_NODES];
 
 struct spdk_poller* g_rdma_connection_poller;
 struct spdk_poller* g_nvmf_connection_poller;
+struct spdk_poller* g_nvmf_reconnection_poller;
 struct spdk_poller* g_rdma_cq_poller;
 struct spdk_poller* g_nvmf_cq_poller;
 struct spdk_poller* g_destage_info_poller;
@@ -127,6 +128,7 @@ struct wals_cli_slice {
 
 // static int rdma_cli_connection_poller(void* ctx);
 static int nvmf_cli_connection_poller(void* ctx);
+static int nvmf_cli_reconnection_poller(void* ctx);
 static int rdma_cq_poller(void* ctx);
 static int nvmf_cq_poller(void* ctx);
 static int slice_destage_info_poller(void* ctx);
@@ -768,6 +770,10 @@ cli_register_read_pollers(struct wals_target *target, struct wals_bdev *wals_bde
         g_nvmf_connection_poller = SPDK_POLLER_REGISTER(nvmf_cli_connection_poller, wals_bdev, 5 * 1000);
     }
 
+    if (g_nvmf_reconnection_poller == NULL) {
+        g_nvmf_reconnection_poller = SPDK_POLLER_REGISTER(nvmf_cli_reconnection_poller, wals_bdev, 5 * 1000 * 1000);
+    }
+
     for (int node_id = 0; node_id < NUM_NODES; node_id++) {
         if (g_pending_read_io_queue[node_id].poller == NULL) {
             g_pending_read_io_queue[node_id].node_id = node_id;
@@ -800,6 +806,9 @@ cli_unregister_read_pollers(struct wals_target *target, struct wals_bdev *wals_b
     }
     if (g_nvmf_connection_poller != NULL) {
         spdk_poller_unregister(&g_nvmf_connection_poller);
+    }
+    if (g_nvmf_reconnection_poller != NULL) {
+        spdk_poller_unregister(&g_nvmf_reconnection_poller);
     }
 
     for (int node_id = 0; node_id < NUM_NODES; node_id++) {
@@ -870,6 +879,32 @@ nvmf_cli_connection_poller(void* ctx) {
 
     }
     return poller_rc;
+}
+
+// READ THREAD
+static int 
+nvmf_cli_reconnection_poller(void* ctx) {
+    int rc;
+    enum spdk_thread_poller_rc poller_rc = SPDK_POLLER_IDLE;
+    for (int i = 0; i < NUM_NODES; i++) {
+        if (g_nvmf_cli_conns[i].status == NVMF_CLI_DISCONNECTED) {
+            // assume that the transport id doesn't change
+            rc = spdk_nvme_ctrlr_reset(g_nvmf_cli_conns[i].ctrlr);
+            if (rc != 0) {
+                g_nvmf_cli_conns[i].reset_failed_cnt++;
+                SPDK_NOTICELOG("Cannot reset nvmf ctrlr %d: %d\n", i, rc);
+            }
+            else {
+                SPDK_NOTICELOG("Nvmf ctrlr %d reset successfully\n", i);
+                g_nvmf_cli_conns[i].reset_failed_cnt = 0;
+                g_nvmf_cli_conns[i].status = NVMF_CLI_INITIALIZED;
+            }
+            poller_rc = SPDK_POLLER_BUSY;
+        }
+
+    }
+    return poller_rc;
+
 }
 
 // READ THREAD
@@ -994,7 +1029,7 @@ rdma_cq_poller(void* ctx) {
                     }
 
 					if (wc_buf[j].status != IBV_WC_SUCCESS) {
-                        SPDK_ERRLOG("IO (%p, %p, %d, %d) RDMA op %d failed with status %d\n",
+                        SPDK_NOTICELOG("IO (%p, %p, %d, %d) RDMA op %d failed with status %d\n",
                             io_context,
                             io_context->io,
                             node_id,
