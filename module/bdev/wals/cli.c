@@ -859,24 +859,6 @@ nvmf_cli_connection_poller(void* ctx) {
             }
             poller_rc = SPDK_POLLER_BUSY;
         }
-        else if (g_nvmf_cli_conns[i].status == NVMF_CLI_DISCONNECTED) {
-            // nvmf already has poller to reset the ctrlr.
-            // assume that the transport id doesn't change
-            // rc = spdk_nvme_ctrlr_reset(g_nvmf_cli_conns[i].ctrlr);
-            // if (rc != 0) {
-            //     g_nvmf_cli_conns[i].reset_failed_cnt++;
-            //     if (g_nvmf_cli_conns[i].reset_failed_cnt % 1000000 == 0) {
-            //         SPDK_WARNLOG("Cannot reset nvmf ctrlr %d: %d\n", i, rc);
-            //     }
-            // }
-            // else {
-            //     SPDK_NOTICELOG("Nvmf ctrlr %d reset successfully\n", i);
-            //     g_nvmf_cli_conns[i].reset_failed_cnt = 0;
-            //     g_nvmf_cli_conns[i].status = NVMF_CLI_INITIALIZED;
-            // }
-            // poller_rc = SPDK_POLLER_BUSY;
-        }
-
     }
     return poller_rc;
 }
@@ -896,6 +878,12 @@ nvmf_cli_reconnection_poller(void* ctx) {
             }
             else {
                 SPDK_NOTICELOG("Nvmf ctrlr %d reset successfully\n", i);
+                int nsid = spdk_nvme_ctrlr_get_first_active_ns(g_nvmf_cli_conns[i].ctrlr);
+                g_nvmf_cli_conns[i].ns = spdk_nvme_ctrlr_get_ns(g_nvmf_cli_conns[i].ctrlr, nsid);
+                rc = spdk_nvme_ctrlr_reconnect_io_qpair(g_nvmf_cli_conns[i].qp);
+                if (rc != 0) {
+                    SPDK_ERRLOG("qp should not fail to reconnect when ctrlr is good: %d\n", rc);
+                }
                 g_nvmf_cli_conns[i].reset_failed_cnt = 0;
                 g_nvmf_cli_conns[i].status = NVMF_CLI_INITIALIZED;
             }
