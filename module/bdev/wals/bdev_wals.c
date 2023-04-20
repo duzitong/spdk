@@ -163,6 +163,10 @@ static struct wals_lp_firo_entry*
 wals_bdev_firo_insert(struct wals_lp_firo* firo, wals_log_position lp)
 {
 	struct wals_lp_firo_entry *entry = spdk_mempool_get(firo->entry_pool);
+	if (!entry) {
+		return NULL;
+	}
+
 	entry->pos = lp;
 	entry->removed = false;
 	TAILQ_INSERT_TAIL(&firo->head, entry, link);
@@ -595,6 +599,12 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 	valid_pos = wals_bdev_get_targets_log_head_min(slice);
 	SPDK_INFOLOG(bdev_wals, "valid pos: (%ld, %ld)\n", valid_pos.offset, valid_pos.round);
 	wals_io->firo_entry = wals_bdev_firo_insert(slice->read_firo, valid_pos);
+	if (!wals_io->firo_entry) {
+		SPDK_NOTICELOG("No read firo entry left\n");
+		dma_heap_put_page(wals_bdev->read_heap, wals_io->dma_page);
+		wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_NOMEM);
+		return;
+	}
 
 	read_begin = bdev_io->u.bdev.offset_blocks;
     read_end = bdev_io->u.bdev.offset_blocks + bdev_io->u.bdev.num_blocks - 1;
@@ -654,7 +664,7 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 
 			if (spdk_unlikely(ret != 0)) {
 				SPDK_ERRLOG("submit core read request failed to target %d in slice %ld\n", wals_io->read_target_id, wals_io->slice_index);
-				wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
+				wals_target_read_complete(wals_io, false);
 			}
 			read_cur = tmp + 1;
 			continue;
@@ -669,8 +679,8 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 
 			if (spdk_unlikely(bn->ele->failed)) {
 				SPDK_ERRLOG("read [%ld, %ld] hit failed blocks [%ld, %ld] in slice %ld\n", read_cur, tmp, bn->begin, bn->end, wals_io->slice_index);
-				wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
-				break;
+				wals_target_read_complete(wals_io, false);
+				goto end_pmem_read;
 			}
 
 			checksum_offset.block_offset = bn->ele->mdOffset;
@@ -703,9 +713,9 @@ wals_bdev_submit_read_request(struct wals_bdev_io *wals_io)
 
 			if (spdk_unlikely(ret != 0)) {
 				SPDK_ERRLOG("submit log read request failed to target %d in slice %ld\n", wals_io->read_target_id, wals_io->slice_index);
-				wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
-				break;
+				wals_target_read_complete(wals_io, false);
 			}
+end_pmem_read:
 			read_cur = tmp + 1;
 			bn = bn->level[0].forward;
 			continue;
@@ -1033,7 +1043,6 @@ _wals_bdev_submit_write_request(struct wals_bdev_io *wals_io, wals_log_position 
 	}
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_CALC_CRC, 0, 0, (uintptr_t)wals_io);
 
-	wals_io->firo_entry = wals_bdev_firo_insert(slice->write_firo, slice_tail);
 
 	// must happen before sending write IOs to avoid sync return.
 	for (i = 0; i < NUM_TARGETS; i++) {
@@ -1122,6 +1131,14 @@ wals_bdev_submit_write_request(void *arg)
 
 		spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_F_SUB_W, 0, 0, (uintptr_t)wals_io, 0, 1);
 
+		return;
+	}
+
+	wals_io->firo_entry = wals_bdev_firo_insert(slice->write_firo, slice_tail);
+	if (!wals_io->firo_entry) {
+		SPDK_NOTICELOG("queue io due to no firo entries left\n");
+		dma_heap_put_page(wals_bdev->write_heap, wals_io->dma_page);
+		spdk_thread_send_msg(spdk_get_thread(), wals_bdev_submit_write_request, wals_io);
 		return;
 	}
 

@@ -650,7 +650,7 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
     }
     if (offset != slice->prev_offset) {
         if (offset != 0) {
-            SPDK_ERRLOG("Offset jumped from %ld to %ld\n", slice->prev_offset, offset);
+            SPDK_NOTICELOG("Offset jumped from %ld to %ld.\n", slice->prev_offset, offset);
         }
     }
     slice->prev_seq = metadata->seq;
