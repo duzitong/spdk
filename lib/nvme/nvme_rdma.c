@@ -596,10 +596,11 @@ nvme_rdma_validate_cm_event(enum rdma_cm_event_type expected_evt_type,
 		break;
 	}
 
-	SPDK_ERRLOG("Expected %s but received %s (%d) from CM event channel (status = %d)\n",
-		    nvme_rdma_cm_event_str_get(expected_evt_type),
-		    nvme_rdma_cm_event_str_get(reaped_evt->event), reaped_evt->event,
-		    reaped_evt->status);
+	// LOG_DEMO
+	// SPDK_ERRLOG("Expected %s but received %s (%d) from CM event channel (status = %d)\n",
+	// 	    nvme_rdma_cm_event_str_get(expected_evt_type),
+	// 	    nvme_rdma_cm_event_str_get(reaped_evt->event), reaped_evt->event,
+	// 	    reaped_evt->status);
 	return rc;
 }
 
@@ -1199,7 +1200,8 @@ nvme_rdma_connect_established(struct nvme_rdma_qpair *rqpair, int ret)
 	if (ret == -ESTALE) {
 		return nvme_rdma_stale_conn_retry(rqpair);
 	} else if (ret) {
-		SPDK_ERRLOG("RDMA connect error %d\n", ret);
+		// LOG_DEMO
+		// SPDK_ERRLOG("RDMA connect error %d\n", ret);
 		return ret;
 	}
 
@@ -2663,7 +2665,8 @@ nvme_rdma_qpair_process_completions(struct spdk_nvme_qpair *qpair,
 			/* Once the connection is completed, we can submit queued requests */
 			nvme_qpair_resubmit_requests(qpair, rqpair->num_entries);
 		} else if (rc != -EAGAIN) {
-			SPDK_ERRLOG("Failed to connect rqpair=%p\n", rqpair);
+			// LOG_DEMO
+			// SPDK_ERRLOG("Failed to connect rqpair=%p\n", rqpair);
 			goto failed;
 		} else if (rqpair->state <= NVME_RDMA_QPAIR_STATE_INITIALIZING) {
 			return 0;

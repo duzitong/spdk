@@ -47,7 +47,7 @@ typedef struct bstat {
         void *memPointer;
     } l;  // data offset
     long unsigned int mdOffset;
-    int failed_target_id;
+    int write_failed_target_id;
 } bstat;
 
 typedef struct bskiplistNode {

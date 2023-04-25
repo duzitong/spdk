@@ -1353,6 +1353,20 @@ static bool has_overlap(int l1, int r1, int l2, int r2) {
 	return l1 <= r2 || l2 <= r1;
 }
 
+static bool validate_block_is_consistent(uint64_t* ptr) {
+	for (unsigned i = 1; i < DEFAULT_BLOCK_SIZE / sizeof(uint64_t); i++) {
+		if (ptr[i] != ptr[i - 1]) {
+			printf("Block inconsistent\n");
+			for (unsigned j = 0; j < DEFAULT_BLOCK_CNT / sizeof(uint64_t); j++) {
+				printf("%ld,", ptr[j]);
+			}
+			printf("\n");
+			return false;
+		}
+	}
+	return true;
+}
+
 static void 
 blockdev_test_long_running(void)
 {
@@ -1386,7 +1400,7 @@ blockdev_test_long_running(void)
 		return;
 	}
 
-	// One byte (char) for each block to save space
+	// One Int for each block to save space
 	// against 512B * (1024 * 1024 * 2)
 	bdev_block_cnt = DEFAULT_BLOCK_CNT;
 
@@ -1458,13 +1472,11 @@ blockdev_test_long_running(void)
 					for (int i = 0; i < io->block_cnt; i++) {
 						// 1. validate block integrity
 						uint64_t* cur_buf = io->buf + i * DEFAULT_BLOCK_SIZE;
-						for (unsigned j = 1; j < DEFAULT_BLOCK_SIZE / sizeof(uint64_t); j++) {
-							if (cur_buf[j] != cur_buf[j - 1]) {
-								ok = false;
-								failed_offset = io->offset + i;
-								failure_reason = IO_FAILURE_BLOCK_INCONSISTENT;
-								goto end;
-							}
+
+						if (!validate_block_is_consistent(cur_buf)) {
+							ok = false;
+							failure_reason = IO_FAILURE_BLOCK_INCONSISTENT;
+							goto end;
 						}
 
 						// 2. should not read outdated data
@@ -1517,6 +1529,7 @@ blockdev_test_long_running(void)
 					}
 				}
 				else {
+					printf("Read IO should not fail in test env\n");
 					// if failed, then the range must not be readable.
 					// it can happen if:
 					// 1. previous write fail. note that the write may be read by later
@@ -1593,30 +1606,31 @@ blockdev_test_long_running(void)
 end:
 	if (!ok) {
 		printf("Failure reason is %d\n", failure_reason);
-	}
-	printf("#IO: %ld, #Write IO: %ld, #Failed write IO: %ld, #Failed read IO: %ld\n", 
-		total_io_cnt,
-		total_write_io_cnt,
-		total_failed_write_io_cnt,
-		total_failed_read_io_cnt);
-	
-	printf("Entering diagnostic mode\n");
-	blockdev_flush();
+		printf("#IO: %ld, #Write IO: %ld, #Failed write IO: %ld, #Failed read IO: %ld\n", 
+			total_io_cnt,
+			total_write_io_cnt,
+			total_failed_write_io_cnt,
+			total_failed_read_io_cnt);
+		
+		printf("Entering diagnostic mode\n");
+		blockdev_flush();
 
-	for (int target = 0; target < 4; target++) {
-		read_md->force_read_from_disk = false;
-		read_md->target_id = target;
-		struct io_test_unit* io_unit = io_test_unit_alloc(NULL,
-			buf,
-			read_md,
-			false,
-			0,
-			1,
-			failed_offset);
-		g_remaining_io = 1;
-		blockdev_read_many(true, io_unit);
+		for (int target = 0; target < 4; target++) {
+			read_md->force_read_from_disk = false;
+			read_md->target_id = target;
+			struct io_test_unit* io_unit = io_test_unit_alloc(NULL,
+				buf,
+				read_md,
+				false,
+				0,
+				1,
+				failed_offset);
+			g_remaining_io = 1;
+			blockdev_read_many(true, io_unit);
 
-		printf("Result from target %d: %ld\n", target, ((uint64_t*)buf)[0]);
+			printf("Result from target %d: %ld\n", target, ((uint64_t*)buf)[0]);
+			validate_block_is_consistent(buf);
+		}
 	}
 
 	spdk_free(buf);
