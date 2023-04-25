@@ -450,7 +450,7 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     int rc;
     struct wals_cli_slice* slice = target->private_info;
     struct pending_io_queue* io_queue = &g_pending_read_io_queue[target->node_id];
-    pthread_rwlock_rdlock(&slice->rdma_conn->lock);
+    // pthread_rwlock_rdlock(&slice->rdma_conn->lock);
 
     if (!rdma_connection_is_connected(slice->rdma_conn)) {
         wals_target_read_complete(wals_io, false);
@@ -512,7 +512,7 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
     }
 
 end:
-    pthread_rwlock_unlock(&slice->rdma_conn->lock);
+    // pthread_rwlock_unlock(&slice->rdma_conn->lock);
     return 0;
 }
 
@@ -624,7 +624,7 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
     int rc;
     struct wals_cli_slice* slice = target->private_info;
     struct pending_io_queue* io_queue = &g_pending_write_io_queue[target->node_id];
-    pthread_rwlock_rdlock(&slice->rdma_conn->lock);
+    // pthread_rwlock_rdlock(&slice->rdma_conn->lock);
 
     if (!rdma_connection_is_connected(slice->rdma_conn)) {
         wals_target_write_complete(wals_io, false, target->target_id);
@@ -705,7 +705,7 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
 	}
 
 end:
-    pthread_rwlock_unlock(&slice->rdma_conn->lock);
+    // pthread_rwlock_unlock(&slice->rdma_conn->lock);
     return 0;
 }
 
@@ -918,7 +918,7 @@ static int slice_destage_info_poller(void* ctx) {
             read_wr.wr.rdma.remote_addr = (uint64_t)remote_handshake->base_addr + remote_handshake->block_cnt * remote_handshake->block_size;
             read_wr.wr.rdma.rkey = remote_handshake->rkey;
 
-            pthread_rwlock_rdlock(&cli_slice->rdma_conn->lock);
+            // pthread_rwlock_rdlock(&cli_slice->rdma_conn->lock);
             rdma_connection_construct_sge(cli_slice->rdma_conn,
                 &read_sge,
                 &g_destage_tail[cli_slice->id],
@@ -930,7 +930,7 @@ static int slice_destage_info_poller(void* ctx) {
                     cli_slice->id,
                     rc);
             }
-            pthread_rwlock_unlock(&cli_slice->rdma_conn->lock);
+            // pthread_rwlock_unlock(&cli_slice->rdma_conn->lock);
         } 
         else if (g_destage_tail[cli_slice->id].checksum == 0) {
             // RDMA read is successful
@@ -963,7 +963,7 @@ static int slice_destage_info_poller(void* ctx) {
             sizeof(struct destage_info);
         write_wr.wr.rdma.rkey = remote_handshake->rkey;
 
-        pthread_rwlock_rdlock(&cli_slice->rdma_conn->lock);
+        // pthread_rwlock_rdlock(&cli_slice->rdma_conn->lock);
         rdma_connection_construct_sge(cli_slice->rdma_conn,
             &write_sge,
             &g_commit_tail[cli_slice->id],
@@ -975,7 +975,7 @@ static int slice_destage_info_poller(void* ctx) {
                 cli_slice->id,
                 rc);
         }
-        pthread_rwlock_unlock(&cli_slice->rdma_conn->lock);
+        // pthread_rwlock_unlock(&cli_slice->rdma_conn->lock);
     }
     return SPDK_POLLER_BUSY;
 }
@@ -990,13 +990,13 @@ rdma_cq_poller(void* ctx) {
     for (int node_id = 0; node_id < NUM_NODES; node_id++) {
         struct cli_rdma_context* rdma_context = g_rdma_conns[node_id]->rdma_context;
         if (rdma_connection_is_connected(g_rdma_conns[node_id])) {
-            if (pthread_rwlock_rdlock(&g_rdma_conns[node_id]->lock) != 0) {
-                SPDK_ERRLOG("Failed to acquire read lock\n");
-            }
+            // if (pthread_rwlock_rdlock(&g_rdma_conns[node_id]->lock) != 0) {
+            //     SPDK_ERRLOG("Failed to acquire read lock\n");
+            // }
             int cnt = ibv_poll_cq(g_rdma_conns[node_id]->cq, WC_BATCH_SIZE, wc_buf);
-            if (pthread_rwlock_unlock(&g_rdma_conns[node_id]->lock) != 0) {
-                SPDK_ERRLOG("Failed to release read lock\n");
-            }
+            // if (pthread_rwlock_unlock(&g_rdma_conns[node_id]->lock) != 0) {
+            //     SPDK_ERRLOG("Failed to release read lock\n");
+            // }
             if (cnt < 0) {
                 // hopefully the reconnection poller will spot the error and try to reconnect
 				SPDK_ERRLOG("ibv_poll_cq failed\n");
