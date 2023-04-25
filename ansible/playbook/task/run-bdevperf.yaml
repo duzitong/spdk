@@ -1,11 +1,9 @@
 - name: run binary
   shell:
-    cmd: ./bdevperf -m 0x5 -q 1 -o 4096 -t 3600 -w randwrite -c conf-jinja.json -T Wals1 -C -S 30 2>&1
+    cmd: nohup ./bdevperf -m 0x5 -q 1 -o 4096 -t 1800 -w randwrite -c conf-jinja.json -T Wals1 -C -S 30 2>&1 > bdevperf.txt &
     chdir: spdk/test/bdev/bdevio
     executable: /bin/bash
-  register: result
+  # register: result
   ignore_errors: true
 
-- name: print output
-  debug:
-    var: result.stdout_lines
+- name: 

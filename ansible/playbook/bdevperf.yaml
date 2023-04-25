@@ -1,0 +1,34 @@
+- name: build binary on all nodes
+  hosts: all
+  tasks:
+  - name: build
+    include_tasks:
+      file: task/build.yaml
+
+- name: run backend
+  hosts: data_nodes
+  tasks:
+  - name: run backend
+    include_tasks:
+      file: task/run-backend.yaml
+
+- name: run bdevio
+  hosts: client
+  tasks:
+  - name: run bdevio
+    include_tasks:
+      file: task/run-bdevperf.yaml
+
+- name: kill nodes randomly
+  hosts: data_nodes
+  tasks:
+  - name: restart nvmf_tgt
+    include_tasks:
+      file: task/restart.yaml
+
+- name: cleanup previous processes
+  hosts: data_nodes
+  tasks:
+  - name: run kill script
+    include_tasks:
+      file: task/cleanup.yaml

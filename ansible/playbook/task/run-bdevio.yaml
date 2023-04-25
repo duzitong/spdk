@@ -1,11 +1,7 @@
 - name: run binary
   shell:
-    cmd: ./bdevio -c conf-jinja.json -r /var/tmp/spdk2.sock -t 10 2>&1
+    cmd: nohup ./bdevio -c conf-jinja.json -r /var/tmp/spdk2.sock -t 300 2>&1 > bdevio.txt &
     chdir: spdk/test/bdev/bdevio
     executable: /bin/bash
-  register: result
+  # register: result
   ignore_errors: true
-
-- name: print output
-  debug:
-    var: result.stdout_lines

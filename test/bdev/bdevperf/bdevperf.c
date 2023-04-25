@@ -254,6 +254,12 @@ performance_dump_job(struct bdevperf_aggregate_stats *stats, struct bdevperf_job
 	const double *cutoff = g_latency_cutoffs;
 	double average_latency, min_latency, max_latency;
 
+	char* cpuset = spdk_cpuset_fmt(spdk_thread_get_cpumask(job->thread));
+	if (strcmp(cpuset, "4") == 0) {
+		printf("Ignore 0x4 CPU\n");
+		return;
+	}
+
 	printf("\r Job: %s (Core Mask 0x%s)\n", spdk_thread_get_name(job->thread),
 	       spdk_cpuset_fmt(spdk_thread_get_cpumask(job->thread)));
 	if (job->verify) {

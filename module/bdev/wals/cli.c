@@ -89,7 +89,6 @@ struct pending_io_queue g_pending_write_io_queue[NUM_NODES];
 struct pending_io_queue g_pending_read_io_queue[NUM_NODES];
 struct pending_io_queue g_pending_nvmf_read_io_queue[NUM_NODES];
 
-struct spdk_poller* g_rdma_connection_poller;
 struct spdk_poller* g_nvmf_connection_poller;
 struct spdk_poller* g_nvmf_reconnection_poller;
 struct spdk_poller* g_rdma_cq_poller;
@@ -718,11 +717,6 @@ cli_register_write_pollers(struct wals_target *target, struct wals_bdev *wals_bd
         g_rdma_cq_poller = SPDK_POLLER_REGISTER(rdma_cq_poller, wals_bdev, 0);
     }
 
-    // only need one poller for connecting the qps
-    // if (g_rdma_connection_poller == NULL) {
-    //     g_rdma_connection_poller = SPDK_POLLER_REGISTER(rdma_cli_connection_poller, wals_bdev, 5 * 1000);
-    // }
-
     for (int node_id = 0; node_id < NUM_NODES; node_id++) {
         if (g_pending_write_io_queue[node_id].poller == NULL) {
             g_pending_write_io_queue[node_id].node_id = node_id;
@@ -744,14 +738,16 @@ cli_unregister_write_pollers(struct wals_target *target, struct wals_bdev *wals_
         spdk_poller_unregister(&g_rdma_cq_poller);
     }
 
-    if (g_rdma_connection_poller != NULL) {
-        spdk_poller_unregister(&g_rdma_connection_poller);
-    }
-
     for (int node_id = 0; node_id < NUM_NODES; node_id++) {
         if (g_pending_write_io_queue[node_id].poller != NULL) {
             spdk_poller_unregister(&g_pending_write_io_queue[node_id].poller);
         }
+    }
+
+    // TODO: make it in rdma_connection.c
+    for (int node_id = 0; node_id < NUM_NODES; node_id++) {
+        spdk_poller_unregister(&g_rdma_conns[node_id]->connect_poller);
+        spdk_poller_unregister(&g_rdma_conns[node_id]->reconnect_poller);
     }
     return 0;
 }

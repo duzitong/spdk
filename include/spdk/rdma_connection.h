@@ -101,9 +101,9 @@ struct rdma_connection {
 	int reject_cnt;
 	bool handshake_sent;
 	bool handshake_received;
-	// connect_poller polls events for disconnect
+	// connect_poller polls events for connect and disconnect
 	struct spdk_poller* connect_poller;
-	// reconnect_poller recycles 
+	// reconnect_poller free and retry rdma connection
 	struct spdk_poller* reconnect_poller;
 };
 

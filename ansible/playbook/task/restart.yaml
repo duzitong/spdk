@@ -1,0 +1,5 @@
+- name: run restart script
+  shell: 
+    cmd: ./scripts/restart.sh
+    chdir: spdk
+    executable: /bin/bash
