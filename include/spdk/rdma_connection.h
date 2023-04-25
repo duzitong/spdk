@@ -27,9 +27,9 @@ typedef void (*rdma_connection_connected_cb)(struct rdma_connection* rdma_conn);
 typedef void (*rdma_connection_disconnect_cb)(struct rdma_connection* rdma_conn);
 
 struct destage_info {
-	uint64_t offset;
-	uint64_t round;
-	uint32_t checksum;
+	volatile uint64_t offset;
+	volatile uint64_t round;
+	volatile uint32_t checksum;
 };
 
 struct rdma_handshake {
