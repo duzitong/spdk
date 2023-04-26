@@ -42,5 +42,6 @@ test/common/build_config.sh
 .coredump_path
 conf3.json
 rpc-jinja.txt
+rpc-client-jinja.txt
 conf-jinja.json
 log.txt

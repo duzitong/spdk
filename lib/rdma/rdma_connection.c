@@ -87,6 +87,7 @@ struct rdma_connection* rdma_connection_alloc(
     return rdma_conn;
 }
 
+// WRITE THREAD
 static int rdma_connection_reconnect(void* ctx) {
 	struct rdma_connection* rdma_conn = ctx;
 	switch (rdma_conn->status) {
@@ -109,6 +110,7 @@ static int rdma_connection_reconnect(void* ctx) {
 	}
 }
 
+// WRITE THREAD
 // Must not hold any lock when entering the function!
 static int rdma_connection_connect(void* ctx) {
 	int rc = 0;

@@ -1,8 +1,0 @@
-log_set_flag bdev_target
-log_set_flag bdev_malloc
-log_set_flag nvme
-log_set_flag nvmf
-log_set_level debug
-log_set_print_level debug
-bdev_target_create -b target0 512 512 -a 10.156.73.242 -p 4420
-bdev_malloc_create -b malloc0 512 512

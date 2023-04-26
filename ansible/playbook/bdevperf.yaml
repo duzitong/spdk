@@ -1,5 +1,6 @@
 - name: build binary on all nodes
   hosts: all
+  any_errors_fatal: true
   tasks:
   - name: build
     include_tasks:
@@ -7,6 +8,7 @@
 
 - name: run backend
   hosts: data_nodes
+  any_errors_fatal: true
   tasks:
   - name: run backend
     include_tasks:
@@ -14,6 +16,7 @@
 
 - name: run bdevio
   hosts: client
+  any_errors_fatal: true
   tasks:
   - name: run bdevio
     include_tasks:
@@ -21,6 +24,7 @@
 
 - name: kill nodes randomly
   hosts: data_nodes
+  any_errors_fatal: true
   tasks:
   - name: restart nvmf_tgt
     include_tasks:
@@ -28,6 +32,7 @@
 
 - name: cleanup previous processes
   hosts: data_nodes
+  any_errors_fatal: true
   tasks:
   - name: run kill script
     include_tasks:
