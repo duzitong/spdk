@@ -1,0 +1,17 @@
+all:
+  children:
+    client:
+      hosts:
+        10.0.2.110: 
+    data_nodes:
+      hosts:
+        10.0.2.111:
+        10.0.2.112:
+        10.0.2.113:
+        10.0.2.114:
+    mds:
+      hosts:
+    new_nodes:
+      hosts:
+  vars:
+    ansible_user: root
