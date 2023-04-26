@@ -26,3 +26,4 @@
   when: inventory_hostname in groups['client']
   vars:
     data_nodes: "{{ groups['data_nodes'] }}"
+    local_ip: "{{ inventory_hostname }}"
