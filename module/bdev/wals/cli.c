@@ -870,7 +870,7 @@ nvmf_cli_reconnection_poller(void* ctx) {
             rc = spdk_nvme_ctrlr_reset(g_nvmf_cli_conns[i].ctrlr);
             if (rc != 0) {
                 g_nvmf_cli_conns[i].reset_failed_cnt++;
-                SPDK_NOTICELOG("Cannot reset nvmf ctrlr %d: %d\n", i, rc);
+                // SPDK_NOTICELOG("Cannot reset nvmf ctrlr %d: %d\n", i, rc);
             }
             else {
                 SPDK_NOTICELOG("Nvmf ctrlr %d reset successfully\n", i);
