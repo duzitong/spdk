@@ -1683,8 +1683,8 @@ wals_bdev_create(struct wals_bdev_config *wals_cfg)
 	wals_bdev_gen->fn_table = &g_wals_bdev_fn_table;
 	wals_bdev_gen->module = &g_wals_if;
 	wals_bdev_gen->write_cache = 0;
-	wals_bdev_gen->md_interleave = false;
-	wals_bdev_gen->md_len = sizeof(struct diagnostic_read_md);
+	// wals_bdev_gen->md_interleave = false;
+	// wals_bdev_gen->md_len = sizeof(struct diagnostic_read_md);
 
 	TAILQ_INSERT_TAIL(&g_wals_bdev_configuring_list, wals_bdev, state_link);
 	TAILQ_INSERT_TAIL(&g_wals_bdev_list, wals_bdev, global_link);
