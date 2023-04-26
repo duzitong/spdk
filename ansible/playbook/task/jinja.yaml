@@ -22,7 +22,7 @@
 
 - template:
     src: ../templates/rpc-client.j2  # from ansible/playbook
-    dest: spdk/conf-client-jinja.json  # from /root/
+    dest: spdk/rpc-client-jinja.txt  # from /root/
   when: inventory_hostname in groups['client']
   vars:
     data_nodes: "{{ groups['data_nodes'] }}"
