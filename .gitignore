@@ -45,3 +45,4 @@ rpc-jinja.txt
 rpc-client-jinja.txt
 conf-jinja.json
 log.txt
+log-client.txt
