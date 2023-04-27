@@ -41,6 +41,7 @@ struct pending_io_context {
     int target_id;
     uint64_t timeout_ticks;
     struct pending_io_queue* io_queue;
+    bool completed;
 };
 
 struct pending_io_queue {
@@ -495,7 +496,8 @@ cli_submit_log_read_request(struct wals_target* target, void *data, uint64_t off
         .io = wals_io,
         .target_id = target->target_id,
         .timeout_ticks = calc_timeout_ticks(wals_io),
-        .io_queue = io_queue
+        .io_queue = io_queue,
+        .completed = false,
     };
 
     io_queue->tail = (io_queue->tail + 1) % PENDING_IO_MAX_CNT;
@@ -519,21 +521,24 @@ end:
 static void nvmf_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
 	struct pending_io_context *io_context = ref;
     struct pending_io_queue* io_queue = io_context->io_queue;
+    bool found = false;
 
-    if (io_context->io == io_queue->pending_ios[io_queue->head].io) {
-        // it is the latest one
-        if (spdk_nvme_cpl_is_success(cpl)) {
-            wals_target_read_complete(io_context->io, true);
+    for (int i = io_queue->head; i != io_queue->tail; i++) {
+        if (io_context->io == io_queue->pending_ios[i].io) {
+            found = true;
+            io_queue->pending_ios[i].completed = true;
+            if (spdk_nvme_cpl_is_success(cpl)) {
+                wals_target_read_complete(io_context->io, true);
+            }
+            else {
+                SPDK_ERRLOG("NVMf client failed to read from remote SSD\n");
+                wals_target_read_complete(io_context->io, false);
+            }
         }
-        else {
-            SPDK_ERRLOG("NVMf client failed to read from remote SSD\n");
-            wals_target_read_complete(io_context->io, false);
-        }
-        io_queue->head = (io_queue->head + 1) % PENDING_IO_MAX_CNT;
     }
-    else {
-        SPDK_NOTICELOG("Ignoring io (%p, %d, %d) due to already timeout\n",
-            io_context->io, io_queue->node_id, io_context->target_id);
+
+    while (io_queue->pending_ios[io_queue->head].completed) {
+        io_queue->head = (io_queue->head + 1) % PENDING_IO_MAX_CNT;
     }
 }
 
@@ -603,7 +608,8 @@ cli_submit_core_read_request(struct wals_target* target, void *data, uint64_t of
         .io = wals_io,
         .target_id = target->target_id,
         .timeout_ticks = calc_timeout_ticks(wals_io),
-        .io_queue = io_queue
+        .io_queue = io_queue,
+        .completed = false,
     };
 
     io_queue->tail = (io_queue->tail + 1) % PENDING_IO_MAX_CNT;
@@ -689,7 +695,8 @@ cli_submit_log_write_request(struct wals_target* target, void *data, uint64_t of
         .io = wals_io,
         .target_id = target->target_id,
         .timeout_ticks = calc_timeout_ticks(wals_io),
-        .io_queue = io_queue
+        .io_queue = io_queue,
+        .completed = false,
     };
 
     io_queue->tail = (io_queue->tail + 1) % PENDING_IO_MAX_CNT;
