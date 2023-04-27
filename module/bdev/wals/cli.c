@@ -589,6 +589,15 @@ cli_submit_core_read_request(struct wals_target* target, void *data, uint64_t of
         return 0;
     }
 
+    rc = spdk_nvme_ns_cmd_read(slice->nvmf_conn->ns,
+        slice->nvmf_conn->qp,
+        data,
+        slice->nvmf_block_offset + offset * multiplier,
+        cnt * multiplier,
+        nvmf_read_done,
+        &io_queue->pending_ios[io_queue->tail],
+        0);
+
     io_queue->pending_ios[io_queue->tail] =
     (struct pending_io_context) {
         .io = wals_io,
@@ -598,15 +607,6 @@ cli_submit_core_read_request(struct wals_target* target, void *data, uint64_t of
     };
 
     io_queue->tail = (io_queue->tail + 1) % PENDING_IO_MAX_CNT;
-
-    rc = spdk_nvme_ns_cmd_read(slice->nvmf_conn->ns,
-        slice->nvmf_conn->qp,
-        data,
-        slice->nvmf_block_offset + offset * multiplier,
-        cnt * multiplier,
-        nvmf_read_done,
-        &io_queue->pending_ios[io_queue->tail],
-        0);
 
     if (rc != 0) {
         SPDK_ERRLOG("NVMf read io failed with rc = %d\n", rc);
