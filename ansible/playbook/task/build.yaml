@@ -32,5 +32,5 @@
     chdir: spdk
 - name: apply setup.sh
   shell:
-    cmd: PCI_ALLOWED="none" HUGEMEM=32768 ./scripts/setup.sh
+    cmd: HUGEMEM=32768 ./scripts/setup.sh
     chdir: spdk
