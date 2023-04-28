@@ -95,9 +95,6 @@ struct spdk_poller* g_nvmf_reconnection_poller;
 struct spdk_poller* g_rdma_cq_poller;
 struct spdk_poller* g_nvmf_cq_poller;
 struct spdk_poller* g_destage_info_poller;
-// TODO: nvmf timeout? not sure whether nvmf returns in-order or not.
-struct spdk_poller* g_log_read_timeout_poller;
-struct spdk_poller* g_log_write_timeout_poller;
 
 static int g_num_slices = 0;
 
@@ -797,7 +794,7 @@ cli_register_read_pollers(struct wals_target *target, struct wals_bdev *wals_bde
             g_pending_nvmf_read_io_queue[node_id].poller = SPDK_POLLER_REGISTER(
                 pending_io_timeout_poller,
                 &g_pending_nvmf_read_io_queue[node_id],
-                1000);
+                1000000);
         }
     }
     return 0;
