@@ -767,7 +767,7 @@ static int
 cli_register_read_pollers(struct wals_target *target, struct wals_bdev *wals_bdev)
 {
     if (g_nvmf_cq_poller == NULL) {
-        g_nvmf_cq_poller = SPDK_POLLER_REGISTER(nvmf_cq_poller, wals_bdev, 0);
+        g_nvmf_cq_poller = SPDK_POLLER_REGISTER(nvmf_cq_poller, wals_bdev, 10);
     }
     if (g_destage_info_poller == NULL) {
         g_destage_info_poller = SPDK_POLLER_REGISTER(slice_destage_info_poller, NULL, 2000);
