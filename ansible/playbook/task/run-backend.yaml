@@ -6,6 +6,9 @@
     cmd: nohup ./build/bin/nvmf_tgt -m 0x10 &> log.txt &
     chdir: spdk
     executable: /bin/bash
+- name: wait for nvmf_tgt to launch
+  pause:
+    seconds: 2
 - name: run rpc script
   shell:
     cmd: ./scripts/rpc.py < rpc-jinja.txt
