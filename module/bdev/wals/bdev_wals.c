@@ -1875,9 +1875,9 @@ wals_bdev_start(struct wals_bdev *wals_bdev)
 
 	for (i = 0; i < wals_bdev->slicecnt; i++) {
 		snprintf(pool_name, sizeof(pool_name), "WALS_WRITE_FIRO_%ld", i);
-		wals_bdev->slices[i].write_firo = wals_bdev_firo_alloc(pool_name, 256);
+		wals_bdev->slices[i].write_firo = wals_bdev_firo_alloc(pool_name, 1024);
 		snprintf(pool_name, sizeof(pool_name), "WALS_READ_FIRO_%ld", i);
-		wals_bdev->slices[i].read_firo = wals_bdev_firo_alloc(pool_name, 256);
+		wals_bdev->slices[i].read_firo = wals_bdev_firo_alloc(pool_name, 1024);
 	}
 
 	wals_bdev->write_heap = dma_heap_alloc(wals_bdev->buffer_blockcnt * wals_bdev->blocklen, offsetof(struct wals_metadata, data_checksum), sizeof(wals_crc), wals_bdev->blocklen_shift);
