@@ -534,6 +534,7 @@ static void nvmf_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
                 SPDK_ERRLOG("NVMf client failed to read from remote SSD\n");
                 wals_target_read_complete(io_context->io, false);
             }
+            break;
         }
     }
 
