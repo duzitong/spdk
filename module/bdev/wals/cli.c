@@ -540,11 +540,8 @@ static void nvmf_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
             io_context->io, io_queue->node_id, io_context->target_id);
     }
 
-    while (io_queue->pending_ios[io_queue->head].completed) {
+    while (io_queue->head != io_queue->tail && io_queue->pending_ios[io_queue->head].completed) {
         io_queue->head = (io_queue->head + 1) % PENDING_IO_MAX_CNT;
-        if (io_queue->head == io_queue->tail) {
-            break;
-        }
     }
 }
 
@@ -1097,10 +1094,8 @@ pending_io_timeout_poller(void* ctx) {
     struct pending_io_queue* io_queue = ctx;
 
     uint64_t current_ticks = spdk_get_ticks();
-    int j;
-    for (j = io_queue->head;
-        j != io_queue->tail;
-        j = (j + 1) % PENDING_IO_MAX_CNT) {
+    int j = io_queue->head;
+    while (j != io_queue->tail) {
         struct pending_io_context* io_context = &io_queue->pending_ios[j];
         struct wals_bdev_io* io = io_context->io;
         uint64_t timeout_ticks = io_context->timeout_ticks;
@@ -1131,6 +1126,8 @@ pending_io_timeout_poller(void* ctx) {
         else {
             break;
         }
+
+        j = (j + 1) % PENDING_IO_MAX_CNT;
     }
     io_queue->head = j;
 
