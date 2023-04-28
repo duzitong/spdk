@@ -523,7 +523,7 @@ static void nvmf_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
     struct pending_io_queue* io_queue = io_context->io_queue;
     bool found = false;
 
-    for (int i = io_queue->head; i != io_queue->tail; i++) {
+    for (int i = io_queue->head; i != io_queue->tail; i = (i + 1) % PENDING_IO_MAX_CNT) {
         if (io_context->io == io_queue->pending_ios[i].io) {
             found = true;
             io_queue->pending_ios[i].completed = true;
