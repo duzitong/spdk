@@ -540,6 +540,9 @@ static void nvmf_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
 
     while (io_queue->pending_ios[io_queue->head].completed) {
         io_queue->head = (io_queue->head + 1) % PENDING_IO_MAX_CNT;
+        if (io_queue->head == io_queue->tail) {
+            break;
+        }
     }
 }
 
