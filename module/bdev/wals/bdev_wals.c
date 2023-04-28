@@ -1256,6 +1256,8 @@ wals_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 
 	spdk_trace_record_tsc(spdk_get_ticks(), TRACE_WALS_S_SUB_IO, 0, 0, (uintptr_t)wals_io, spdk_thread_get_id(spdk_get_thread()));
 
+	memset(wals_io, 0, sizeof(struct wals_bdev_io));
+
 	wals_io->wals_ch = spdk_io_channel_get_ctx(ch);
 	wals_io->wals_bdev = wals_io->wals_ch->wals_bdev;
 	wals_io->orig_io = bdev_io;
