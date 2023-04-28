@@ -1100,7 +1100,7 @@ pending_io_timeout_poller(void* ctx) {
         struct wals_bdev_io* io = io_context->io;
         uint64_t timeout_ticks = io_context->timeout_ticks;
 
-        if (timeout_ticks < current_ticks) {
+        if (timeout_ticks < current_ticks && !io_context->completed) {
             // timeout.
             poller_rc = SPDK_POLLER_BUSY;
             SPDK_NOTICELOG("IO (%p, %p, %p, %d, %d, %ld, %d, %d, %d) timeout\n",

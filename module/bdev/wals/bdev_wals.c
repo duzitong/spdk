@@ -547,7 +547,7 @@ wals_target_read_complete(struct wals_bdev_io *wals_io, bool success)
 				wals_io->status = SPDK_BDEV_IO_STATUS_SUCCESS;
 				wals_bdev_submit_read_request(wals_io);
 			} else {
-				SPDK_ERRLOG("read request failed on all targets.\n");
+				SPDK_ERRLOG("read request failed on all targets: %p\n", wals_io);
 				wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
 			}
 			// wals_bdev_io_complete(wals_io, SPDK_BDEV_IO_STATUS_FAILED);
