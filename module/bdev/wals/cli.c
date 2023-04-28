@@ -522,6 +522,9 @@ static void nvmf_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
 
     for (int i = io_queue->head; i != io_queue->tail; i = (i + 1) % PENDING_IO_MAX_CNT) {
         if (io_context->io == io_queue->pending_ios[i].io) {
+            if (found) {
+                SPDK_ERRLOG("Duplicate IO\n");
+            }
             found = true;
             io_queue->pending_ios[i].completed = true;
             if (spdk_nvme_cpl_is_success(cpl)) {
@@ -531,7 +534,7 @@ static void nvmf_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
                 SPDK_ERRLOG("NVMf client failed to read from remote SSD\n");
                 wals_target_read_complete(io_context->io, false);
             }
-            break;
+            // break;
         }
     }
 
