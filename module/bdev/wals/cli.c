@@ -19,7 +19,8 @@
 // currently a fake one, to make sure that it fully RDMA reads the struct
 #define DESTAGE_INFO_CHECKSUM 666
 // 10ms should be enough for 512-byte payload.
-#define TIMEOUT_MS_PER_BLOCK 10
+// TODO: need to take qd into consideration. 
+#define TIMEOUT_MS_PER_BLOCK 50
 
 // must be greater or equal to NUM_TARGETS
 #define NUM_NODES 4
