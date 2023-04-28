@@ -521,10 +521,10 @@ static void nvmf_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
     bool found = false;
 
     for (int i = io_queue->head; i != io_queue->tail; i = (i + 1) % PENDING_IO_MAX_CNT) {
-        if (io_context->io == io_queue->pending_ios[i].io) {
-            if (found) {
-                SPDK_ERRLOG("Duplicate IO\n");
-            }
+        if (io_context->io == io_queue->pending_ios[i].io && !io_queue->pending_ios[i].completed) {
+            // if (found) {
+            //     SPDK_ERRLOG("Duplicate IO\n");
+            // }
             found = true;
             io_queue->pending_ios[i].completed = true;
             if (spdk_nvme_cpl_is_success(cpl)) {
@@ -534,7 +534,7 @@ static void nvmf_read_done(void *ref, const struct spdk_nvme_cpl *cpl) {
                 SPDK_ERRLOG("NVMf client failed to read from remote SSD\n");
                 wals_target_read_complete(io_context->io, false);
             }
-            // break;
+            break;
         }
     }
 
@@ -553,6 +553,10 @@ static void rdma_operation_done(void* arg, bool success) {
     struct pending_io_queue* io_queue = io_context->io_queue;
 
     if (io_context->io == io_queue->pending_ios[io_queue->head].io) {
+        if (io_queue->pending_ios[io_queue->head].completed) {
+            SPDK_ERRLOG("IO %p is completed twice\n", io_context->io);
+        }
+        io_queue->pending_ios[io_queue->head].completed = true;
         switch (io_queue->io_type) {
             case WALS_RDMA_READ:
                 wals_target_read_complete(io_context->io, success);
@@ -1097,8 +1101,10 @@ pending_io_timeout_poller(void* ctx) {
     struct pending_io_queue* io_queue = ctx;
 
     uint64_t current_ticks = spdk_get_ticks();
-    int j = io_queue->head;
-    while (j != io_queue->tail) {
+    int j;
+    for (j = io_queue->head;
+        j != io_queue->tail;
+        j = (j + 1) % PENDING_IO_MAX_CNT) {
         struct pending_io_context* io_context = &io_queue->pending_ios[j];
         struct wals_bdev_io* io = io_context->io;
         uint64_t timeout_ticks = io_context->timeout_ticks;
@@ -1129,8 +1135,6 @@ pending_io_timeout_poller(void* ctx) {
         else {
             break;
         }
-
-        j = (j + 1) % PENDING_IO_MAX_CNT;
     }
     io_queue->head = j;
 
