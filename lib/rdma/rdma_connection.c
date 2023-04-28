@@ -344,15 +344,15 @@ static int rdma_connection_connect(void* ctx) {
 			if (wc.wr_id == 1) {
 				// recv complete
 				struct rdma_handshake* remote_handshake = rdma_conn->handshake_buf + 1;
-				SPDK_NOTICELOG("RDMA conn %p received remote addr %p rkey %d\n",
-					rdma_conn,
-					remote_handshake->base_addr,
-					remote_handshake->rkey);
+				// SPDK_NOTICELOG("RDMA conn %p received remote addr %p rkey %d\n",
+				// 	rdma_conn,
+				// 	remote_handshake->base_addr,
+				// 	remote_handshake->rkey);
 
 				rdma_conn->handshake_received = true;
 			}
 			else if (wc.wr_id == 2) {
-				SPDK_NOTICELOG("send req complete\n");
+				// SPDK_NOTICELOG("send req complete\n");
 				rdma_conn->handshake_sent = true;
 			}
 			else {
@@ -597,12 +597,12 @@ static int rdma_connection_connect(void* ctx) {
 				goto end;
 			}
 
-			SPDK_NOTICELOG("connected. posting send...\n");
-			SPDK_NOTICELOG("sending local addr %p rkey %d block_cnt %ld block_size %ld\n",
-				rdma_conn->handshake_buf->base_addr,
-				rdma_conn->handshake_buf->rkey,
-				rdma_conn->handshake_buf->block_cnt,
-				rdma_conn->handshake_buf->block_size);
+			// SPDK_NOTICELOG("connected. posting send...\n");
+			// SPDK_NOTICELOG("sending local addr %p rkey %d block_cnt %ld block_size %ld\n",
+			// 	rdma_conn->handshake_buf->base_addr,
+			// 	rdma_conn->handshake_buf->rkey,
+			// 	rdma_conn->handshake_buf->block_cnt,
+			// 	rdma_conn->handshake_buf->block_size);
 
 			struct ibv_send_wr send_wr, *bad_send_wr = NULL;
 			struct ibv_sge send_sge;
@@ -644,17 +644,17 @@ static int rdma_connection_connect(void* ctx) {
 
 			if (wc.wr_id == 2) {
 				// recv complete
-				SPDK_NOTICELOG("received remote addr %p rkey %d block_cnt %ld block_size %ld\n",
-					remote_handshake->base_addr,
-					remote_handshake->rkey,
-					remote_handshake->block_cnt,
-					remote_handshake->block_size);
+				// SPDK_NOTICELOG("received remote addr %p rkey %d block_cnt %ld block_size %ld\n",
+				// 	remote_handshake->base_addr,
+				// 	remote_handshake->rkey,
+				// 	remote_handshake->block_cnt,
+				// 	remote_handshake->block_size);
 
 				rdma_conn->handshake_received = true;
 			}
 			else if (wc.wr_id == 1) {
 				// send cpl
-				SPDK_NOTICELOG("send req complete\n");
+				// SPDK_NOTICELOG("send req complete\n");
 				rdma_conn->handshake_sent = true;
 			}
 			else {

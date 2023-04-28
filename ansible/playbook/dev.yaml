@@ -1,5 +1,6 @@
 - name: make
   hosts: all
+  gather_facts: no
   any_errors_fatal: true
   tasks:
   - name: build
@@ -8,6 +9,7 @@
   
 - name: gen
   hosts: all
+  gather_facts: no
   any_errors_fatal: true
   tasks:
   - name: gen
@@ -16,6 +18,7 @@
 
 - name: run backend
   hosts: data_nodes
+  gather_facts: no
   any_errors_fatal: true
   tasks:
   - name: run backend

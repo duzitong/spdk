@@ -106,6 +106,7 @@ struct persist_disk {
 	
 	// if false, then all nvme-related fields are null.
 	bool attach_disk;
+	bool has_disk;
 	void* disk_buf;
 	// uint32_t io_queue_head;
 	// uint32_t io_queue_size;
@@ -426,7 +427,13 @@ static bool
 probe_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
 	 struct spdk_nvme_ctrlr_opts *opts)
 {
-	SPDK_DEBUGLOG(bdev_persist, "Probing %s\n", trid->traddr);
+	struct persist_disk* pdisk = cb_ctx;
+	if (pdisk->has_disk) {
+		SPDK_NOTICELOG("Ignoring %s\n", trid->traddr);
+		return false;
+	}
+	pdisk->has_disk = true;
+	SPDK_NOTICELOG("Probing %s\n", trid->traddr);
 
 	return true;
 }
@@ -849,6 +856,7 @@ create_persist_disk(struct spdk_bdev **bdev, const char *name, const char* ip, c
 
 	pdisk = calloc(1, sizeof(*pdisk));
 	pdisk->attach_disk = attach_disk;
+	pdisk->has_disk = false;
 	if (!pdisk) {
 		SPDK_ERRLOG("pdisk calloc() failed\n");
 		return -ENOMEM;
