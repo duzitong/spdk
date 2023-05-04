@@ -1,5 +1,5 @@
 {% set local_idx = data_nodes.index(local_ip) %}
-bdev_persist_create -b Malloc0 -a {{ local_ip }}{% if attach_disk %} -d{% endif %} -p 8000 --peers '[
+bdev_persist_create -b Malloc0 -a {{ local_ip }}{% if should_attach_disk %} -d{% endif %} -p 8000 --peers '[
 {%- for remote_ip in data_nodes if remote_ip != local_ip -%}
     {# Cannot use loop.index0, as the local_ip is skipped. However, loop.last turns out to be safe. #} 
     {%- set remote_idx = data_nodes.index(remote_ip) -%}

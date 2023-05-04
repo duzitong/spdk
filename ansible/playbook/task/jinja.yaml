@@ -5,7 +5,7 @@
   vars:
     local_ip: "{{ inventory_hostname }}"
     data_nodes: "{{ groups['data_nodes'] }}"
-    attach_disk: "{{ attach_disk }}"
+    should_attach_disk: "{{ attach_disk }}"
 
 - template:
     src: ../templates/test.j2  # from ansible/playbook
