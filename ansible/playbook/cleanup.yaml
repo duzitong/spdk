@@ -1,0 +1,8 @@
+- name: cleanup
+  hosts: all
+  gather_facts: no
+  any_errors_fatal: true
+  tasks:
+  - name: cleanup
+    include_tasks:
+      file: task/cleanup.yaml

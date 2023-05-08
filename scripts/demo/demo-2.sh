@@ -2,4 +2,4 @@ echo "=================================="
 echo "Issue IO payload:"
 echo "=================================="
 
-fio --filename=/dev/nvme0n1 --direct=1 --rw=randwrite --bs=4k --ioengine=libaio --iodepth=1 --runtime=600 --numjobs=1 --time_based
+./build/examples/perf -q 1 -o 4096 -w randwrite -r 'trtype:RDMA adrfam:IPv4 traddr:10.0.2.100 trsvcid:4421' -t 300 -c 0x10
