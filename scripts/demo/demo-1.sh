@@ -14,9 +14,9 @@ sleep 2
 ./scripts/rpc.py -s /var/tmp/spdk2.sock < rpc-client-jinja.txt
 
 echo "=================================="
-echo "Connecting to the disk:"
+echo "The disk can be discovered:"
 echo "=================================="
-nvme connect -t rdma -a 10.0.2.100 -s 4421 -n nqn.2016-06.io.spdk:cnode1
+nvme discover -t rdma -a 10.0.2.100 -s 4421
 
 echo "=================================="
 echo "Finish launching POC"
