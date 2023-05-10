@@ -660,14 +660,14 @@ persist_destage_poller(void *ctx)
 				break;
 			}
 		}
-		// SPDK_NOTICELOG("Getting md %ld %ld %ld %ld %ld %ld %ld\n",
-		// 	metadata->version,
-		// 	metadata->seq,
-		// 	metadata->next_offset,
-		// 	metadata->round,
-		// 	metadata->length,
-		// 	metadata->core_offset,
-		// 	metadata->md_blocknum);
+		SPDK_NOTICELOG("Getting md %ld %ld %ld %ld %ld %ld %ld\n",
+			metadata->version,
+			metadata->seq,
+			metadata->next_offset,
+			metadata->round,
+			metadata->length,
+			metadata->core_offset,
+			metadata->md_blocknum);
 
 		void* payload = (void*)(metadata) + metadata->md_blocknum * pdisk->disk.blocklen;
 
@@ -693,6 +693,11 @@ persist_destage_poller(void *ctx)
 		}
 
 		// TODO: CRC check
+		size_t md_size = offsetof(struct wals_metadata, md_checksum);
+		SPDK_NOTICELOG("client checksum: %ld \n, server checksum: %ld", metadata->md_checksum, wals_bdev_calc_crc(metadata, md_size));
+		if (wals_bdev_calc_crc(metadata, md_size) != metadata->md_checksum) {
+			SPDK_ERRLOG("ERROR: CRC check failed");
+		}
 
 		if (pdisk->attach_disk) {
 			rc = spdk_nvme_ns_cmd_write(pdisk->ns,
